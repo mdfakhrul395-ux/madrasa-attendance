@@ -221,13 +221,13 @@ function updateAttField(studentId, date, field, value) {
 // ---- Student's own attendance view ----
 function renderMyAttendance() {
   setScreen(`<div class="card"><h2>আমার সাম্প্রতিক উপস্থিতি</h2><div id="myAttWrap">লোড হচ্ছে...</div></div>`);
-  db.collection('attendance').where('studentId', '==', myStudentId).orderBy('date', 'desc').limit(30)
+  db.collection('attendance').where('studentId', '==', myStudentId)
     .onSnapshot(snap => {
       const wrap = document.getElementById('myAttWrap');
       if (!wrap) return;
       if (snap.empty) { wrap.innerHTML = '<p class="muted">কোনো তথ্য নেই</p>'; return; }
-      wrap.innerHTML = snap.docs.map(d => {
-        const r = d.data();
+      const rows = snap.docs.map(d => d.data()).sort((a,b) => (b.date||'').localeCompare(a.date||'')).slice(0,30);
+      wrap.innerHTML = rows.map(r => {
         return `<div class="student-row">
           <span>${r.date}</span>
           <span class="badge ${r.status}">${r.status==='present'?'উপস্থিত':'অনুপস্থিত'}</span>
@@ -235,6 +235,9 @@ function renderMyAttendance() {
         ${r.timeLeftHome ? `<div class="muted">বের হওয়ার সময়: ${r.timeLeftHome}</div>` : ''}
         ${r.reason ? `<div class="muted">কারণ: ${r.reason}</div>` : ''}`;
       }).join('<hr style="border:none;border-top:1px solid #eee;margin:6px 0;">');
+    }, err => {
+      const wrap = document.getElementById('myAttWrap');
+      if (wrap) wrap.innerHTML = '<p class="muted">লোড করতে সমস্যা হয়েছে: ' + err.message + '</p>';
     });
 }
 
@@ -254,14 +257,17 @@ function renderLeavesScreen(isTeacher) {
   html += `<div class="card"><h2>${isTeacher ? 'সকল ছুটির আবেদন' : 'আমার আবেদনসমূহ'}</h2><div id="leavesWrap">লোড হচ্ছে...</div></div>`;
   setScreen(html);
 
-  let q = db.collection('leaves').orderBy('createdAt', 'desc');
-  if (!isTeacher) q = db.collection('leaves').where('studentId', '==', myStudentId).orderBy('createdAt', 'desc');
+  let q = db.collection('leaves');
+  if (isTeacher) q = q.orderBy('createdAt', 'desc');
+  else q = q.where('studentId', '==', myStudentId);
 
   q.onSnapshot(snap => {
     const wrap = document.getElementById('leavesWrap');
     if (!wrap) return;
     if (snap.empty) { wrap.innerHTML = '<p class="muted">কোনো আবেদন নেই</p>'; return; }
-    wrap.innerHTML = snap.docs.map(d => {
+    let docs = snap.docs;
+    if (!isTeacher) docs = [...docs].sort((a,b) => (b.data().createdAt||0) - (a.data().createdAt||0));
+    wrap.innerHTML = docs.map(d => {
       const r = d.data();
       const student = studentsCache.find(s => s.id === r.studentId);
       const statusText = { pending: 'অপেক্ষমাণ', approved: 'অনুমোদিত', rejected: 'প্রত্যাখ্যাত' }[r.status] || 'অপেক্ষমাণ';
@@ -278,6 +284,9 @@ function renderLeavesScreen(isTeacher) {
         ` : ''}
       </div>`;
     }).join('');
+  }, err => {
+    const wrap = document.getElementById('leavesWrap');
+    if (wrap) wrap.innerHTML = '<p class="muted">লোড করতে সমস্যা হয়েছে: ' + err.message + '</p>';
   });
 }
 
@@ -310,14 +319,17 @@ function renderResultsScreen(isTeacher) {
   html += `<div class="card"><h2>${isTeacher ? 'সকল রেজাল্ট' : 'আমার রেজাল্ট'}</h2><div id="resultsWrap">লোড হচ্ছে...</div></div>`;
   setScreen(html);
 
-  let q = db.collection('results').orderBy('date', 'desc');
-  if (!isTeacher) q = db.collection('results').where('studentId', '==', myStudentId).orderBy('date', 'desc');
+  let q = db.collection('results');
+  if (isTeacher) q = q.orderBy('date', 'desc');
+  else q = q.where('studentId', '==', myStudentId);
 
   q.onSnapshot(snap => {
     const wrap = document.getElementById('resultsWrap');
     if (!wrap) return;
     if (snap.empty) { wrap.innerHTML = '<p class="muted">কোনো রেজাল্ট নেই</p>'; return; }
-    wrap.innerHTML = snap.docs.map(d => {
+    let docs = snap.docs;
+    if (!isTeacher) docs = [...docs].sort((a,b) => (b.data().date||'').localeCompare(a.data().date||''));
+    wrap.innerHTML = docs.map(d => {
       const r = d.data();
       const student = studentsCache.find(s => s.id === r.studentId);
       return `<div class="student-row">
@@ -325,6 +337,9 @@ function renderResultsScreen(isTeacher) {
         <b>${r.marks}</b>
       </div>`;
     }).join('');
+  }, err => {
+    const wrap = document.getElementById('resultsWrap');
+    if (wrap) wrap.innerHTML = '<p class="muted">লোড করতে সমস্যা হয়েছে: ' + err.message + '</p>';
   });
 }
 
