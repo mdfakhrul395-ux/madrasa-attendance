@@ -220,7 +220,22 @@ function updateAttField(studentId, date, field, value) {
 
 // ---- Student's own attendance view ----
 function renderMyAttendance() {
-  setScreen(`<div class="card"><h2>আমার সাম্প্রতিক উপস্থিতি</h2><div id="myAttWrap">লোড হচ্ছে...</div></div>`);
+  const today = new Date().toISOString().slice(0,10);
+  setScreen(`
+    <div class="card">
+      <h2>আজ বাসা থেকে বের হওয়ার সময়</h2>
+      <input type="time" id="myTimeLeft" onchange="submitMyTimeLeft()">
+      <p class="muted" style="margin-top:6px;">তারিখ: ${today}</p>
+    </div>
+    <div class="card"><h2>আমার সাম্প্রতিক উপস্থিতি</h2><div id="myAttWrap">লোড হচ্ছে...</div></div>
+  `);
+
+  // pre-fill today's time if already set
+  db.collection('attendance').doc(myStudentId + '_' + today).get().then(doc => {
+    const el = document.getElementById('myTimeLeft');
+    if (el && doc.exists && doc.data().timeLeftHome) el.value = doc.data().timeLeftHome;
+  });
+
   db.collection('attendance').where('studentId', '==', myStudentId)
     .onSnapshot(snap => {
       const wrap = document.getElementById('myAttWrap');
@@ -239,6 +254,15 @@ function renderMyAttendance() {
       const wrap = document.getElementById('myAttWrap');
       if (wrap) wrap.innerHTML = '<p class="muted">লোড করতে সমস্যা হয়েছে: ' + err.message + '</p>';
     });
+}
+
+function submitMyTimeLeft() {
+  const today = new Date().toISOString().slice(0,10);
+  const value = document.getElementById('myTimeLeft').value;
+  if (!value) return;
+  db.collection('attendance').doc(myStudentId + '_' + today).set({
+    studentId: myStudentId, date: today, timeLeftHome: value
+  }, { merge: true });
 }
 
 // ---- Leaves ----
