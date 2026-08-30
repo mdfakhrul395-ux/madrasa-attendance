@@ -1,32 +1,30 @@
-const CACHE_NAME = 'madrasa-hajira-v1';
-const FILES_TO_CACHE = [
-  './',
+const CACHE_NAME = 'madrasa-attendance-v2';
+const ASSETS = [
   './index.html',
+  './style.css',
+  './app.js',
+  './firebase-config.js',
   './manifest.json',
   './icon-192.png',
   './icon-512.png'
 ];
 
-self.addEventListener('install', (evt) => {
-  evt.waitUntil(
-    caches.open(CACHE_NAME).then((cache) => cache.addAll(FILES_TO_CACHE))
-  );
+self.addEventListener('install', e => {
+  e.waitUntil(caches.open(CACHE_NAME).then(c => c.addAll(ASSETS)));
   self.skipWaiting();
 });
 
-self.addEventListener('activate', (evt) => {
-  evt.waitUntil(
-    caches.keys().then((keys) =>
-      Promise.all(
-        keys.filter((key) => key !== CACHE_NAME).map((key) => caches.delete(key))
-      )
-    )
+self.addEventListener('activate', e => {
+  e.waitUntil(
+    caches.keys().then(keys => Promise.all(keys.filter(k => k !== CACHE_NAME).map(k => caches.delete(k))))
   );
   self.clients.claim();
 });
 
-self.addEventListener('fetch', (evt) => {
-  evt.respondWith(
-    caches.match(evt.request).then((res) => res || fetch(evt.request))
+self.addEventListener('fetch', e => {
+  // Network-first for everything so Firestore data & app updates stay fresh;
+  // falls back to cache when offline.
+  e.respondWith(
+    fetch(e.request).catch(() => caches.match(e.request))
   );
 });
