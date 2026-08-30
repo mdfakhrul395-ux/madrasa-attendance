@@ -1,0 +1,384 @@
+<!DOCTYPE html>
+<html lang="bn" dir="ltr">
+<head>
+<meta charset="UTF-8" />
+<meta name="viewport" content="width=device-width, initial-scale=1, viewport-fit=cover" />
+<title>মাদরাসা এটেন্ডেন্স</title>
+
+<!-- PWA installability -->
+<link rel="manifest" href="manifest.json" />
+<meta name="theme-color" content="#1b4332" />
+<meta name="mobile-web-app-capable" content="yes" />
+<meta name="apple-mobile-web-app-capable" content="yes" />
+<meta name="apple-mobile-web-app-status-bar-style" content="black-translucent" />
+<meta name="apple-mobile-web-app-title" content="এটেন্ডেন্স" />
+<link rel="apple-touch-icon" href="icons/icon-192.png" />
+<link rel="icon" href="icons/icon-192.png" />
+
+<style>
+  :root {
+    --green: #1b4332;
+    --green-light: #e6f2ec;
+    --green-text: #2d6a4f;
+    --red: #9d2b2b;
+    --red-light: #fbe9e9;
+    --amber: #a9720a;
+    --amber-light: #fbf1de;
+    --bg: #FAF7F0;
+    --muted: #6b6b6b;
+    --border: rgba(0,0,0,0.08);
+  }
+  * { box-sizing: border-box; }
+  body {
+    margin: 0; background: var(--bg); color: #222;
+    font-family: "Noto Sans Bengali", system-ui, -apple-system, sans-serif;
+    -webkit-tap-highlight-color: transparent;
+  }
+  .wrap { max-width: 460px; margin: 0 auto; padding: 20px 16px 40px; min-height: 100vh; }
+  .center-emoji { font-size: 46px; text-align: center; margin-bottom: 8px; }
+  h1 { font-size: 21px; color: var(--green); margin: 0; }
+  .subtitle { color: var(--muted); font-size: 13px; margin-top: 2px; }
+  .head-row { display: flex; align-items: center; justify-content: space-between; margin-bottom: 18px; }
+  .btn { border: none; border-radius: 10px; font-weight: 600; cursor: pointer; font-family: inherit; }
+  .btn-primary { background: var(--green); color: #fff; padding: 14px; font-size: 15px; width: 100%; }
+  .btn-outline { background: #fff; border: 2px solid var(--green); color: var(--green); padding: 14px; font-size: 15px; width: 100%; }
+  .btn-small { padding: 6px 12px; font-size: 12px; }
+  .btn:active { transform: scale(0.98); }
+  .btn:disabled { opacity: 0.5; }
+  .card { background: #fff; border: 1px solid var(--border); border-radius: 14px; padding: 16px; margin-bottom: 12px; }
+  .row { display: flex; gap: 8px; }
+  input, textarea { border: 1px solid rgba(0,0,0,0.12); border-radius: 10px; padding: 9px 12px; font-size: 14px; font-family: inherit; width: 100%; }
+  textarea { height: 70px; resize: vertical; }
+  .tabs { display: flex; gap: 8px; margin-bottom: 16px; }
+  .tab { flex: 1; padding: 9px; border-radius: 10px; font-size: 14px; font-weight: 600; text-align: center; cursor: pointer; position: relative; background: #fff; color: var(--green); border: 1px solid rgba(27,67,50,0.2); }
+  .tab.active { background: var(--green); color: #fff; border: none; }
+  .badge { position: absolute; top: -6px; right: -6px; background: var(--amber); color: #fff; font-size: 10px; border-radius: 999px; width: 20px; height: 20px; display: flex; align-items: center; justify-content: center; }
+  .pill { padding: 4px 10px; border-radius: 999px; font-size: 11px; font-weight: 700; }
+  .pill.present { color: var(--green-text); background: var(--green-light); }
+  .pill.absent { color: var(--red); background: var(--red-light); }
+  .pill.leave { color: var(--amber); background: var(--amber-light); }
+  .pill.unmarked { color: var(--muted); background: #f1f0ec; }
+  .student-name { font-weight: 600; }
+  .muted { color: var(--muted); font-size: 12px; }
+  .empty { text-align: center; color: var(--muted); font-size: 14px; padding: 32px 8px; }
+  .err { color: var(--red); font-size: 13px; margin-bottom: 8px; }
+  .list-item { width: 100%; text-align: left; background: #fff; border: 1px solid rgba(0,0,0,0.1); border-radius: 12px; padding: 12px 14px; font-size: 14px; font-weight: 500; margin-bottom: 8px; cursor: pointer; }
+  .flex-between { display: flex; align-items: center; justify-content: space-between; }
+  .mt2 { margin-top: 8px; } .mb2 { margin-bottom: 8px; }
+  #install-banner { display: none; background: var(--green-light); border: 1px solid var(--green-text); border-radius: 12px; padding: 10px 14px; font-size: 13px; color: var(--green-text); margin-bottom: 14px; align-items: center; justify-content: space-between; gap: 8px; }
+  #install-banner button { background: var(--green); color: #fff; border: none; border-radius: 8px; padding: 6px 12px; font-size: 12px; font-weight: 700; }
+</style>
+</head>
+<body>
+<div class="wrap" id="app"></div>
+
+<script>
+// ---------- হেল্পার ----------
+const banglaDigits = (s) => String(s).replace(/[0-9]/g, d => "০১২৩৪৫৬৭৮৯"[d]);
+const todayStr = () => new Date().toISOString().slice(0,10);
+const MONTHS = ["জানুয়ারি","ফেব্রুয়ারি","মার্চ","এপ্রিল","মে","জুন","জুলাই","আগস্ট","সেপ্টেম্বর","অক্টোবর","নভেম্বর","ডিসেম্বর"];
+function formatDateBn(dateStr) {
+  const d = new Date(dateStr + "T00:00:00");
+  return `${banglaDigits(d.getDate())} ${MONTHS[d.getMonth()]}, ${banglaDigits(d.getFullYear())}`;
+}
+const STATUS = {
+  present: { label: "উপস্থিত", cls: "present" },
+  absent: { label: "অনুপস্থিত", cls: "absent" },
+  leave: { label: "ছুটিতে", cls: "leave" },
+  unmarked: { label: "চিহ্নিত হয়নি", cls: "unmarked" },
+};
+function pillHtml(status) {
+  const s = STATUS[status] || STATUS.unmarked;
+  return `<span class="pill ${s.cls}">${s.label}</span>`;
+}
+
+// ---------- localStorage-based ডেটা স্তর (এই ফোনের মধ্যেই সীমাবদ্ধ, সিঙ্ক হয় না) ----------
+const store = {
+  get(key, fallback) {
+    try { const v = localStorage.getItem(key); return v ? JSON.parse(v) : fallback; }
+    catch { return fallback; }
+  },
+  set(key, val) {
+    try { localStorage.setItem(key, JSON.stringify(val)); return true; }
+    catch { return false; }
+  },
+  remove(key) { try { localStorage.removeItem(key); } catch {} },
+};
+
+// ---------- রেন্ডারিং ----------
+const app = document.getElementById("app");
+
+function render() {
+  const role = store.get("my-role", null);
+  if (!role) return renderRoleSelect();
+  if (role === "teacher") return renderTeacher();
+  return renderStudent();
+}
+
+function shellHeader(showChange) {
+  return `
+    <div class="head-row">
+      <div>
+        <h1>মাদরাসা এটেন্ডেন্স</h1>
+        <div class="subtitle">${formatDateBn(todayStr())}</div>
+      </div>
+      ${showChange ? `<button class="btn btn-small" style="background:none;border:1px solid var(--red);color:var(--red);" onclick="changeRole()">পরিবর্তন করুন</button>` : ""}
+    </div>`;
+}
+
+function renderRoleSelect() {
+  app.innerHTML = `
+    <div id="install-banner"></div>
+    <div class="center-emoji">🕌</div>
+    <h1 style="text-align:center;">মাদরাসা এটেন্ডেন্স</h1>
+    <p class="subtitle" style="text-align:center;margin-bottom:28px;">আপনি কে হিসেবে ব্যবহার করবেন?</p>
+    <div style="max-width:340px;margin:0 auto;display:flex;flex-direction:column;gap:12px;">
+      <button class="btn btn-primary" onclick="chooseRole('teacher')">শিক্ষক হিসেবে ঢুকি</button>
+      <button class="btn btn-outline" onclick="chooseRole('student')">ছাত্র হিসেবে ঢুকি</button>
+    </div>
+    <p class="muted" style="text-align:center;margin-top:16px;">এই ফোনের তথ্য শুধু এই ফোনেই থাকবে — অন্য ফোনের সাথে সয়ংক্রিয়ভাবে শেয়ার হয় না।</p>
+  `;
+  renderInstallBanner();
+}
+
+function chooseRole(role) { store.set("my-role", role); render(); }
+function changeRole() { store.remove("my-role"); render(); }
+
+// ============ শিক্ষক ============
+let teacherTab = "list";
+function renderTeacher() {
+  const date = todayStr();
+  const students = store.get("students-list", []);
+  const attendance = store.get(`attendance-${date}`, {});
+  const requests = store.get("leave-requests", []);
+  const pendingCount = requests.filter(r => r.status === "pending").length;
+
+  let body = "";
+  if (teacherTab === "list") {
+    body += `
+      <div class="card">
+        <p style="font-size:14px;font-weight:700;color:var(--green);margin:0 0 8px;">নতুন ছাত্র যোগ করুন</p>
+        <div class="row">
+          <input id="new-name" placeholder="নাম" />
+          <input id="new-class" placeholder="শ্রেণি" style="width:80px;" />
+          <button class="btn btn-primary" style="width:auto;padding:9px 16px;" onclick="addStudent()">যোগ</button>
+        </div>
+      </div>`;
+    if (students.length === 0) {
+      body += `<div class="empty">এখনো কোনো ছাত্র যোগ করা হয়নি।</div>`;
+    } else {
+      body += students.map(s => {
+        const rec = attendance[s.id] || {};
+        return `
+          <div class="card">
+            <div class="flex-between mb2">
+              <div>
+                <div class="student-name">${s.name}</div>
+                ${s.className ? `<div class="muted">শ্রেণি: ${s.className}</div>` : ""}
+              </div>
+              ${pillHtml(rec.status || "unmarked")}
+            </div>
+            <div class="row mb2">
+              <button class="btn btn-small" style="flex:1;background:var(--green-light);color:var(--green-text);" onclick="markAttendance('${s.id}','present')">উপস্থিত</button>
+              <button class="btn btn-small" style="flex:1;background:var(--red-light);color:var(--red);" onclick="markAttendance('${s.id}','absent')">অনুপস্থিত</button>
+            </div>
+            <input placeholder="বাসা থেকে বের হওয়ার সময়" value="${rec.leftHome || ""}" onchange="setField('${s.id}','leftHome',this.value)" class="mb2" />
+            ${rec.status === "absent" ? `<input placeholder="অনুপস্থিতির কারণ" value="${rec.reason || ""}" onchange="setField('${s.id}','reason',this.value)" />` : ""}
+          </div>`;
+      }).join("");
+    }
+  } else {
+    if (requests.length === 0) {
+      body += `<div class="empty">কোনো ছুটির আবেদন নেই।</div>`;
+    } else {
+      body += requests.slice().reverse().map(r => `
+        <div class="card">
+          <div class="flex-between mb2">
+            <div class="student-name">${r.studentName}</div>
+            ${pillHtml(r.status === "pending" ? "unmarked" : r.status === "approved" ? "present" : "absent")}
+          </div>
+          <div class="muted mb2">তারিখ: ${formatDateBn(r.date)}</div>
+          <div style="font-size:14px;margin-bottom:10px;">${r.reason}</div>
+          ${r.status === "pending" ? `
+            <div class="row">
+              <button class="btn btn-small" style="flex:1;background:var(--green-light);color:var(--green-text);" onclick="decideRequest('${r.id}','approved')">অনুমোদন</button>
+              <button class="btn btn-small" style="flex:1;background:var(--red-light);color:var(--red);" onclick="decideRequest('${r.id}','rejected')">বাতিল</button>
+            </div>` : ""}
+        </div>`).join("");
+    }
+  }
+
+  app.innerHTML = `
+    <div id="install-banner"></div>
+    ${shellHeader(true)}
+    <div class="tabs">
+      <div class="tab ${teacherTab === 'list' ? 'active' : ''}" onclick="setTeacherTab('list')">ছাত্র তালিকা</div>
+      <div class="tab ${teacherTab === 'requests' ? 'active' : ''}" onclick="setTeacherTab('requests')">
+        ছুটির আবেদন
+        ${pendingCount > 0 ? `<span class="badge">${banglaDigits(pendingCount)}</span>` : ""}
+      </div>
+    </div>
+    ${body}
+  `;
+  renderInstallBanner();
+}
+
+function setTeacherTab(t) { teacherTab = t; renderTeacher(); }
+
+function addStudent() {
+  const name = document.getElementById("new-name").value.trim();
+  const cls = document.getElementById("new-class").value.trim();
+  if (!name) return;
+  const students = store.get("students-list", []);
+  students.push({ id: "s_" + Date.now(), name, className: cls });
+  store.set("students-list", students);
+  renderTeacher();
+}
+
+function markAttendance(id, status) {
+  const date = todayStr();
+  const attendance = store.get(`attendance-${date}`, {});
+  attendance[id] = { ...(attendance[id] || {}), status };
+  store.set(`attendance-${date}`, attendance);
+  renderTeacher();
+}
+function setField(id, field, value) {
+  const date = todayStr();
+  const attendance = store.get(`attendance-${date}`, {});
+  attendance[id] = { ...(attendance[id] || {}), [field]: value };
+  store.set(`attendance-${date}`, attendance);
+}
+function decideRequest(id, decision) {
+  const requests = store.get("leave-requests", []);
+  const updated = requests.map(r => r.id === id ? { ...r, status: decision } : r);
+  store.set("leave-requests", updated);
+  renderTeacher();
+}
+
+// ============ ছাত্র ============
+function renderStudent() {
+  const students = store.get("students-list", []);
+  const myId = store.get("my-student-id", null);
+  const me = students.find(s => s.id === myId);
+
+  if (!me) {
+    app.innerHTML = `
+      <div id="install-banner"></div>
+      ${shellHeader(true)}
+      <p class="muted mb2">তালিকা থেকে নিজের নাম বেছে নিন:</p>
+      ${students.length === 0
+        ? `<div class="empty">এই ফোনে এখনো ছাত্র তালিকা নেই। শিক্ষকের ফোনে যোগ করা তালিকা এখানে সরাসরি আসবে না — তাই এখানে অন্তত একজন ছাত্র যোগ করা দরকার।<br><br>
+           <div class="row" style="margin-top:12px;">
+             <input id="new-name" placeholder="নাম" />
+             <input id="new-class" placeholder="শ্রেণি" style="width:80px;" />
+           </div>
+           <button class="btn btn-primary mt2" onclick="addStudentAsStudent()">যোগ করে নির্বাচন করুন</button>
+           </div>`
+        : students.map(s => `<button class="list-item" onclick="pickMe('${s.id}')">${s.name}${s.className ? ` <span class="muted">— শ্রেণি ${s.className}</span>` : ""}</button>`).join("")
+      }
+    `;
+    renderInstallBanner();
+    return;
+  }
+
+  const date = todayStr();
+  const attendance = store.get(`attendance-${date}`, {});
+  const myAttendance = attendance[myId] || {};
+  const requests = store.get("leave-requests", []).filter(r => r.studentId === myId).slice().reverse();
+
+  app.innerHTML = `
+    <div id="install-banner"></div>
+    ${shellHeader(true)}
+    <div class="card">
+      <div class="flex-between mb2">
+        <div class="student-name">${me.name}</div>
+        ${pillHtml(myAttendance.status || "unmarked")}
+      </div>
+      <div class="muted">আজকের এটেন্ডেন্স স্ট্যাটাস</div>
+      ${myAttendance.leftHome ? `<div style="font-size:13px;margin-top:6px;">বাসা থেকে বের হয়েছে: ${myAttendance.leftHome}</div>` : ""}
+    </div>
+
+    <div class="card">
+      <p style="font-size:14px;font-weight:700;color:var(--green);margin:0 0 8px;">ছুটির আবেদন করুন</p>
+      <label class="muted">তারিখ</label>
+      <input type="date" id="leave-date" value="${todayStr()}" class="mb2 mt2" />
+      <label class="muted">কারণ</label>
+      <textarea id="leave-reason" placeholder="ছুটির কারণ লিখুন" class="mt2 mb2"></textarea>
+      <button class="btn btn-primary" onclick="submitLeave()">আবেদন জমা দিন</button>
+    </div>
+
+    <p style="font-size:14px;font-weight:700;color:var(--green);">আমার ছুটির আবেদনসমূহ</p>
+    ${requests.length === 0 ? `<div class="empty">এখনো কোনো আবেদন করা হয়নি।</div>` :
+      requests.map(r => `
+        <div class="card flex-between">
+          <div>
+            <div style="font-size:14px;">${formatDateBn(r.date)}</div>
+            <div class="muted">${r.reason}</div>
+          </div>
+          ${pillHtml(r.status === "pending" ? "unmarked" : r.status === "approved" ? "present" : "absent")}
+        </div>`).join("")}
+  `;
+  renderInstallBanner();
+}
+
+function addStudentAsStudent() {
+  const name = document.getElementById("new-name").value.trim();
+  const cls = document.getElementById("new-class").value.trim();
+  if (!name) return;
+  const students = store.get("students-list", []);
+  const id = "s_" + Date.now();
+  students.push({ id, name, className: cls });
+  store.set("students-list", students);
+  store.set("my-student-id", id);
+  renderStudent();
+}
+
+function pickMe(id) { store.set("my-student-id", id); renderStudent(); }
+
+function submitLeave() {
+  const myId = store.get("my-student-id", null);
+  const students = store.get("students-list", []);
+  const me = students.find(s => s.id === myId);
+  const date = document.getElementById("leave-date").value;
+  const reason = document.getElementById("leave-reason").value.trim();
+  if (!reason) return;
+  const requests = store.get("leave-requests", []);
+  requests.push({ id: "r_" + Date.now(), studentId: myId, studentName: me ? me.name : "অজানা", date, reason, status: "pending" });
+  store.set("leave-requests", requests);
+  renderStudent();
+}
+
+// ---------- ইনস্টল প্রম্পট ----------
+let deferredPrompt = null;
+window.addEventListener("beforeinstallprompt", (e) => {
+  e.preventDefault();
+  deferredPrompt = e;
+  renderInstallBanner();
+});
+function renderInstallBanner() {
+  const el = document.getElementById("install-banner");
+  if (!el) return;
+  if (deferredPrompt) {
+    el.style.display = "flex";
+    el.innerHTML = `<span>অ্যাপ আকারে ইনস্টল করতে চান?</span><button onclick="doInstall()">ইনস্টল করুন</button>`;
+  } else {
+    el.style.display = "none";
+  }
+}
+function doInstall() {
+  if (!deferredPrompt) return;
+  deferredPrompt.prompt();
+  deferredPrompt.userChoice.finally(() => { deferredPrompt = null; renderInstallBanner(); });
+}
+
+// ---------- সার্ভিস ওয়ার্কার রেজিস্ট্রেশন ----------
+if ("serviceWorker" in navigator) {
+  window.addEventListener("load", () => {
+    navigator.serviceWorker.register("service-worker.js").catch(() => {});
+  });
+}
+
+render();
+</script>
+</body>
+</html>
