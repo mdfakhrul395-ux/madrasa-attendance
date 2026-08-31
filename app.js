@@ -81,6 +81,7 @@ function showTeacherApp() {
     <button class="tab-btn" onclick="teacherTab('leaves', this)">ছুটি</button>
     <button class="tab-btn" onclick="teacherTab('results', this)">রেজাল্ট</button>
     <button class="tab-btn" onclick="teacherTab('timeleft', this)">বের হওয়ার সময়</button>
+    <button class="tab-btn" onclick="teacherTab('notices', this)">নোটিশ</button>
   `;
   teacherTab('students');
 }
@@ -91,6 +92,7 @@ function showStudentApp() {
     <button class="tab-btn active" onclick="studentTab('attendance', this)">উপস্থিতি</button>
     <button class="tab-btn" onclick="studentTab('leaves', this)">ছুটির আবেদন</button>
     <button class="tab-btn" onclick="studentTab('results', this)">রেজাল্ট</button>
+    <button class="tab-btn" onclick="studentTab('notices', this)">নোটিশ</button>
   `;
   studentTab('attendance');
 }
@@ -118,6 +120,7 @@ function teacherTab(tab, el) {
   if (tab === 'leaves') renderLeavesScreen(true);
   if (tab === 'results') renderResultsScreen(true);
   if (tab === 'timeleft') renderTimeLeftScreen();
+  if (tab === 'notices') renderNoticesScreen(true);
 }
 
 function studentTab(tab, el) {
@@ -125,6 +128,7 @@ function studentTab(tab, el) {
   if (tab === 'attendance') renderMyAttendance();
   if (tab === 'leaves') renderLeavesScreen(false);
   if (tab === 'results') renderResultsScreen(false);
+  if (tab === 'notices') renderNoticesScreen(false);
 }
 
 // ---- Students list (teacher) ----
@@ -212,7 +216,7 @@ function loadAttendanceForDate() {
 function setAttendance(studentId, date, status) {
   db.collection('attendance').doc(studentId + '_' + date).set({ studentId, date, status }, { merge: true })
     .then(() => loadAttendanceForDate());
-} যেমন
+}
 
 function updateAttField(studentId, date, field, value) {
   db.collection('attendance').doc(studentId + '_' + date).set({ studentId, date, [field]: value }, { merge: true });
@@ -402,4 +406,55 @@ function loadTimeLeftReport() {
       return `<div class="student-row"><span>${s.name}</span><span>${r.timeLeftHome || '—'}</span></div>`;
     }).join('');
   });
-}github.dev/mdfakhrul395-ux/madrasa-attendance
+}
+
+// ---- Notices (shared, realtime) ----
+function renderNoticesScreen(isTeacher) {
+  let html = '';
+  if (isTeacher) {
+    html += `
+      <div class="card">
+        <h2>নতুন নোটিশ</h2>
+        <label>শিরোনাম</label><input id="noticeTitle" placeholder="শিরোনাম">
+        <label>বিস্তারিত</label><textarea id="noticeBody" rows="3"></textarea>
+        <button onclick="addNotice()">পোস্ট করুন</button>
+      </div>`;
+  }
+  html += `<div class="card"><h2>নোটিশ বোর্ড</h2><div id="noticesWrap">লোড হচ্ছে...</div></div>`;
+  setScreen(html);
+
+  db.collection('notices').orderBy('createdAt', 'desc').onSnapshot(snap => {
+    const wrap = document.getElementById('noticesWrap');
+    if (!wrap) return;
+    if (snap.empty) { wrap.innerHTML = '<p class="muted">কোনো নোটিশ নেই</p>'; return; }
+    wrap.innerHTML = snap.docs.map(d => {
+      const n = d.data();
+      const date = n.createdAt ? new Date(n.createdAt).toLocaleDateString('bn-BD') : '';
+      return `<div class="student-row" style="display:block;">
+        <div style="display:flex;justify-content:space-between;">
+          <b>${n.title}</b>
+          <span class="muted">${date}</span>
+        </div>
+        <div>${n.body}</div>
+        ${isTeacher ? `<button class="small danger" onclick="deleteNotice('${d.id}')">মুছুন</button>` : ''}
+      </div>`;
+    }).join('');
+  }, err => {
+    const wrap = document.getElementById('noticesWrap');
+    if (wrap) wrap.innerHTML = '<p class="muted">লোড করতে সমস্যা হয়েছে: ' + err.message + '</p>';
+  });
+}
+
+function addNotice() {
+  const title = document.getElementById('noticeTitle').value.trim();
+  const body = document.getElementById('noticeBody').value.trim();
+  if (!title || !body) return alert('শিরোনাম ও বিস্তারিত লিখুন');
+  db.collection('notices').add({ title, body, createdAt: Date.now() })
+    .then(() => { document.getElementById('noticeTitle').value=''; document.getElementById('noticeBody').value=''; })
+    .catch(e => alert('সংরক্ষণ ব্যর্থ: ' + e.message));
+}
+
+function deleteNotice(id) {
+  if (!confirm('এই নোটিশ মুছতে চান?')) return;
+  db.collection('notices').doc(id).delete();
+}
