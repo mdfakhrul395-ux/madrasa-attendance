@@ -212,7 +212,7 @@ function loadAttendanceForDate() {
 function setAttendance(studentId, date, status) {
   db.collection('attendance').doc(studentId + '_' + date).set({ studentId, date, status }, { merge: true })
     .then(() => loadAttendanceForDate());
-}
+} যেমন
 
 function updateAttField(studentId, date, field, value) {
   db.collection('attendance').doc(studentId + '_' + date).set({ studentId, date, [field]: value }, { merge: true });
@@ -402,4 +402,4 @@ function loadTimeLeftReport() {
       return `<div class="student-row"><span>${s.name}</span><span>${r.timeLeftHome || '—'}</span></div>`;
     }).join('');
   });
-}
+}github.dev/mdfakhrul395-ux/madrasa-attendance
