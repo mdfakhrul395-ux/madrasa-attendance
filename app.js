@@ -4,6 +4,13 @@ let myStudentId = localStorage.getItem('myStudentId') || null;
 let studentsCache = [];
 const auth = firebase.auth();
 
+// class filter state per screen (teacher side)
+let studentsClassFilter = 'all';
+let attClassFilter = 'all';
+let resultsClassFilter = 'all';
+let leavesClassFilter = 'all';
+let tlClassFilter = 'all';
+
 // ================= INIT =================
 window.addEventListener('DOMContentLoaded', () => {
   db.collection('_ping').doc('x').get()
@@ -27,6 +34,29 @@ window.addEventListener('DOMContentLoaded', () => {
 function setSync(ok) {
   const dot = document.getElementById('syncDot');
   if (dot) dot.className = 'sync-dot' + (ok ? '' : ' offline');
+}
+
+// ================= CLASS FILTER HELPERS =================
+function getClassList() {
+  const set = new Set(studentsCache.map(s => s.className).filter(Boolean));
+  return Array.from(set).sort();
+}
+
+function classFilterDropdownHtml(currentValue, onchangeFn) {
+  const classes = getClassList();
+  const opts = classes.map(c => `<option value="${c}" ${currentValue === c ? 'selected' : ''}>${c}</option>`).join('');
+  return `
+    <label>শ্রেণি বাছাই করুন</label>
+    <select onchange="${onchangeFn}(this.value)">
+      <option value="all" ${currentValue === 'all' ? 'selected' : ''}>সকল শ্রেণি</option>
+      ${opts}
+    </select>
+  `;
+}
+
+function studentsByClass(filterValue) {
+  if (!filterValue || filterValue === 'all') return studentsCache;
+  return studentsCache.filter(s => s.className === filterValue);
 }
 
 // ================= ROLE SELECT =================
@@ -152,7 +182,7 @@ function listenStudents() {
     setSync(true);
     // refresh currently visible screen if it depends on student list
     if (role === 'teacher' && document.getElementById('studentsScreen')) renderStudentsList();
-    if (role === 'teacher' && document.getElementById('attendanceScreen')) renderAttendanceScreen();
+    if (role === 'teacher' && document.getElementById('attendanceScreen')) renderAttendanceList();
   }, () => setSync(false));
 }
 
@@ -185,17 +215,30 @@ function renderStudentsScreen() {
         <label>শ্রেণি</label><input id="newClass" placeholder="শ্রেণি">
         <button onclick="addStudent()">যোগ করুন</button>
       </div>
-      <div class="card"><h2>শিক্ষার্থী তালিকা</h2><div id="studentsListWrap"></div></div>
+      <div class="card">
+        <h2>শিক্ষার্থী তালিকা</h2>
+        <div id="studentsFilterWrap"></div>
+        <div id="studentsListWrap"></div>
+      </div>
     </div>
   `);
   renderStudentsList();
 }
 
+function onStudentsClassFilterChange(value) {
+  studentsClassFilter = value;
+  renderStudentsList();
+}
+
 function renderStudentsList() {
+  const filterWrap = document.getElementById('studentsFilterWrap');
+  if (filterWrap) filterWrap.innerHTML = classFilterDropdownHtml(studentsClassFilter, 'onStudentsClassFilterChange');
+
   const wrap = document.getElementById('studentsListWrap');
   if (!wrap) return;
-  if (studentsCache.length === 0) { wrap.innerHTML = '<p class="muted">কোনো শিক্ষার্থী নেই</p>'; return; }
-  wrap.innerHTML = studentsCache.map(s => `
+  const list = studentsByClass(studentsClassFilter);
+  if (list.length === 0) { wrap.innerHTML = '<p class="muted">কোনো শিক্ষার্থী নেই</p>'; return; }
+  wrap.innerHTML = list.map(s => `
     <div class="student-row">
       <span>${s.name} <span class="muted">(রোল ${s.roll || '-'}, ${s.className || '-'})</span></span>
       <button class="small danger" onclick="deleteStudent('${s.id}')">মুছুন</button>
@@ -226,6 +269,7 @@ function renderAttendanceScreen() {
       <div class="card">
         <h2>উপস্থিতি নেওয়ার তারিখ</h2>
         <input type="date" id="attDate" value="${today}" onchange="loadAttendanceForDate()">
+        <div id="attFilterWrap"></div>
       </div>
       <div id="attList"></div>
     </div>
@@ -233,16 +277,33 @@ function renderAttendanceScreen() {
   loadAttendanceForDate();
 }
 
+function onAttClassFilterChange(value) {
+  attClassFilter = value;
+  renderAttendanceList();
+}
+
 function loadAttendanceForDate() {
-  const date = document.getElementById('attDate').value;
+  renderAttendanceList();
+}
+
+function renderAttendanceList() {
+  const filterWrap = document.getElementById('attFilterWrap');
+  if (filterWrap) filterWrap.innerHTML = classFilterDropdownHtml(attClassFilter, 'onAttClassFilterChange');
+
+  const dateEl = document.getElementById('attDate');
   const list = document.getElementById('attList');
-  if (studentsCache.length === 0) { list.innerHTML = '<p class="muted">শিক্ষার্থী তালিকা খালি</p>'; return; }
-  list.innerHTML = studentsCache.map(s => `<div class="card" id="att_${s.id}">লোড হচ্ছে...</div>`).join('');
-  studentsCache.forEach(s => {
+  if (!dateEl || !list) return;
+  const date = dateEl.value;
+  const students = studentsByClass(attClassFilter);
+  if (students.length === 0) { list.innerHTML = '<p class="muted">শিক্ষার্থী তালিকা খালি</p>'; return; }
+  list.innerHTML = students.map(s => `<div class="card" id="att_${s.id}">লোড হচ্ছে...</div>`).join('');
+  students.forEach(s => {
     db.collection('attendance').doc(s.id + '_' + date).get().then(doc => {
       const d = doc.exists ? doc.data() : {};
-      document.getElementById('att_' + s.id).innerHTML = `
-        <b>${s.name}</b>
+      const cell = document.getElementById('att_' + s.id);
+      if (!cell) return;
+      cell.innerHTML = `
+        <b>${s.name}</b> <span class="muted">(${s.className || '-'})</span>
         <div class="row" style="margin-top:6px;">
           <button class="small ${d.status==='present'?'':'secondary'}" onclick="setAttendance('${s.id}','${date}','present')">উপস্থিত</button>
           <button class="small ${d.status==='absent'?'danger':'secondary'}" onclick="setAttendance('${s.id}','${date}','absent')">অনুপস্থিত</button>
@@ -258,7 +319,7 @@ function loadAttendanceForDate() {
 
 function setAttendance(studentId, date, status) {
   db.collection('attendance').doc(studentId + '_' + date).set({ studentId, date, status }, { merge: true })
-    .then(() => loadAttendanceForDate());
+    .then(() => renderAttendanceList());
 }
 
 function updateAttField(studentId, date, field, value) {
@@ -325,8 +386,17 @@ function renderLeavesScreen(isTeacher) {
         <button onclick="submitLeave()">আবেদন জমা দিন</button>
       </div>`;
   }
-  html += `<div class="card"><h2>${isTeacher ? 'সকল ছুটির আবেদন' : 'আমার আবেদনসমূহ'}</h2><div id="leavesWrap">লোড হচ্ছে...</div></div>`;
+  html += `<div class="card">
+    <h2>${isTeacher ? 'সকল ছুটির আবেদন' : 'আমার আবেদনসমূহ'}</h2>
+    ${isTeacher ? '<div id="leavesFilterWrap"></div>' : ''}
+    <div id="leavesWrap">লোড হচ্ছে...</div>
+  </div>`;
   setScreen(html);
+
+  if (isTeacher) {
+    const filterWrap = document.getElementById('leavesFilterWrap');
+    if (filterWrap) filterWrap.innerHTML = classFilterDropdownHtml(leavesClassFilter, 'onLeavesClassFilterChange');
+  }
 
   let q = db.collection('leaves');
   if (isTeacher) q = q.orderBy('createdAt', 'desc');
@@ -338,13 +408,23 @@ function renderLeavesScreen(isTeacher) {
     if (snap.empty) { wrap.innerHTML = '<p class="muted">কোনো আবেদন নেই</p>'; return; }
     let docs = snap.docs;
     if (!isTeacher) docs = [...docs].sort((a,b) => (b.data().createdAt||0) - (a.data().createdAt||0));
+
+    if (isTeacher && leavesClassFilter !== 'all') {
+      docs = docs.filter(d => {
+        const student = studentsCache.find(s => s.id === d.data().studentId);
+        return student && student.className === leavesClassFilter;
+      });
+    }
+
+    if (docs.length === 0) { wrap.innerHTML = '<p class="muted">এই শ্রেণিতে কোনো আবেদন নেই</p>'; return; }
+
     wrap.innerHTML = docs.map(d => {
       const r = d.data();
       const student = studentsCache.find(s => s.id === r.studentId);
       const statusText = { pending: 'অপেক্ষমাণ', approved: 'অনুমোদিত', rejected: 'প্রত্যাখ্যাত' }[r.status] || 'অপেক্ষমাণ';
       return `<div class="student-row" style="display:block;">
         <div style="display:flex;justify-content:space-between;">
-          <b>${isTeacher ? (student ? student.name : 'অজানা') : r.date}</b>
+          <b>${isTeacher ? (student ? student.name + (student.className ? ' (' + student.className + ')' : '') : 'অজানা') : r.date}</b>
           <span class="badge ${r.status||'pending'}">${statusText}</span>
         </div>
         <div class="muted">${isTeacher ? 'তারিখ: ' + r.date : ''}</div>
@@ -359,6 +439,11 @@ function renderLeavesScreen(isTeacher) {
     const wrap = document.getElementById('leavesWrap');
     if (wrap) wrap.innerHTML = '<p class="muted">লোড করতে সমস্যা হয়েছে: ' + err.message + '</p>';
   });
+}
+
+function onLeavesClassFilterChange(value) {
+  leavesClassFilter = value;
+  renderLeavesScreen(true);
 }
 
 function submitLeave() {
@@ -377,10 +462,12 @@ function setLeaveStatus(id, status) {
 function renderResultsScreen(isTeacher) {
   let html = '';
   if (isTeacher) {
-    const opts = studentsCache.map(s => `<option value="${s.id}">${s.name}</option>`).join('');
+    const students = studentsByClass(resultsClassFilter);
+    const opts = students.map(s => `<option value="${s.id}">${s.name}</option>`).join('');
     html += `
       <div class="card">
         <h2>রেজাল্ট এন্ট্রি</h2>
+        <div id="resultsFilterWrap"></div>
         <label>শিক্ষার্থী</label><select id="resStudent">${opts}</select>
         <label>পরীক্ষার নাম</label><input id="resExam" placeholder="যেমন: অর্ধবার্ষিক">
         <label>প্রাপ্ত নম্বর</label><input id="resMarks" type="number">
@@ -389,6 +476,11 @@ function renderResultsScreen(isTeacher) {
   }
   html += `<div class="card"><h2>${isTeacher ? 'সকল রেজাল্ট' : 'আমার রেজাল্ট'}</h2><div id="resultsWrap">লোড হচ্ছে...</div></div>`;
   setScreen(html);
+
+  if (isTeacher) {
+    const filterWrap = document.getElementById('resultsFilterWrap');
+    if (filterWrap) filterWrap.innerHTML = classFilterDropdownHtml(resultsClassFilter, 'onResultsClassFilterChange');
+  }
 
   let q = db.collection('results');
   if (isTeacher) q = q.orderBy('date', 'desc');
@@ -400,11 +492,21 @@ function renderResultsScreen(isTeacher) {
     if (snap.empty) { wrap.innerHTML = '<p class="muted">কোনো রেজাল্ট নেই</p>'; return; }
     let docs = snap.docs;
     if (!isTeacher) docs = [...docs].sort((a,b) => (b.data().date||'').localeCompare(a.data().date||''));
+
+    if (isTeacher && resultsClassFilter !== 'all') {
+      docs = docs.filter(d => {
+        const student = studentsCache.find(s => s.id === d.data().studentId);
+        return student && student.className === resultsClassFilter;
+      });
+    }
+
+    if (docs.length === 0) { wrap.innerHTML = '<p class="muted">এই শ্রেণিতে কোনো রেজাল্ট নেই</p>'; return; }
+
     wrap.innerHTML = docs.map(d => {
       const r = d.data();
       const student = studentsCache.find(s => s.id === r.studentId);
       return `<div class="student-row">
-        <span>${isTeacher ? (student ? student.name : 'অজানা') + ' - ' : ''}${r.examName}</span>
+        <span>${isTeacher ? (student ? student.name + (student.className ? ' (' + student.className + ')' : '') : 'অজানা') + ' - ' : ''}${r.examName}</span>
         <b>${r.marks}</b>
       </div>`;
     }).join('');
@@ -412,6 +514,11 @@ function renderResultsScreen(isTeacher) {
     const wrap = document.getElementById('resultsWrap');
     if (wrap) wrap.innerHTML = '<p class="muted">লোড করতে সমস্যা হয়েছে: ' + err.message + '</p>';
   });
+}
+
+function onResultsClassFilterChange(value) {
+  resultsClassFilter = value;
+  renderResultsScreen(true);
 }
 
 function submitResult() {
@@ -431,22 +538,32 @@ function renderTimeLeftScreen() {
     <div class="card">
       <h2>বের হওয়ার সময় রিপোর্ট</h2>
       <input type="date" id="tlDate" value="${today}" onchange="loadTimeLeftReport()">
+      <div id="tlFilterWrap"></div>
     </div>
     <div class="card"><div id="tlWrap">লোড হচ্ছে...</div></div>
   `);
   loadTimeLeftReport();
 }
 
+function onTlClassFilterChange(value) {
+  tlClassFilter = value;
+  loadTimeLeftReport();
+}
+
 function loadTimeLeftReport() {
+  const filterWrap = document.getElementById('tlFilterWrap');
+  if (filterWrap) filterWrap.innerHTML = classFilterDropdownHtml(tlClassFilter, 'onTlClassFilterChange');
+
   const date = document.getElementById('tlDate').value;
   db.collection('attendance').where('date', '==', date).get().then(snap => {
     const wrap = document.getElementById('tlWrap');
     const rows = {};
     snap.docs.forEach(d => rows[d.data().studentId] = d.data());
-    if (studentsCache.length === 0) { wrap.innerHTML = '<p class="muted">শিক্ষার্থী নেই</p>'; return; }
-    wrap.innerHTML = studentsCache.map(s => {
+    const students = studentsByClass(tlClassFilter);
+    if (students.length === 0) { wrap.innerHTML = '<p class="muted">এই শ্রেণিতে শিক্ষার্থী নেই</p>'; return; }
+    wrap.innerHTML = students.map(s => {
       const r = rows[s.id] || {};
-      return `<div class="student-row"><span>${s.name}</span><span>${r.timeLeftHome || '—'}</span></div>`;
+      return `<div class="student-row"><span>${s.name} <span class="muted">(${s.className || '-'})</span></span><span>${r.timeLeftHome || '—'}</span></div>`;
     }).join('');
   });
 }
