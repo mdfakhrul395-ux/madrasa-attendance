@@ -2,6 +2,7 @@
 let role = localStorage.getItem('role') || null; // 'teacher' | 'student'
 let myStudentId = localStorage.getItem('myStudentId') || null;
 let studentsCache = [];
+const auth = firebase.auth();
 
 // ================= INIT =================
 window.addEventListener('DOMContentLoaded', () => {
@@ -9,9 +10,16 @@ window.addEventListener('DOMContentLoaded', () => {
     .then(() => setSync(true))
     .catch(() => setSync(false));
 
-  if (role === 'teacher') showTeacherApp();
-  else if (role === 'student' && myStudentId) showStudentApp();
-  else showRoleSelect();
+  auth.onAuthStateChanged(user => {
+    if (role === 'teacher') {
+      if (user) showTeacherApp();
+      else showTeacherLogin();
+    } else if (role === 'student' && myStudentId) {
+      showStudentApp();
+    } else {
+      showRoleSelect();
+    }
+  });
 
   listenStudents();
 });
@@ -37,8 +45,42 @@ function showRoleSelect() {
 function pickRole(r) {
   role = r;
   localStorage.setItem('role', r);
-  if (r === 'teacher') showTeacherApp();
-  else showStudentPicker();
+  if (r === 'teacher') {
+    if (auth.currentUser) showTeacherApp();
+    else showTeacherLogin();
+  } else {
+    showStudentPicker();
+  }
+}
+
+// ================= TEACHER LOGIN =================
+function showTeacherLogin() {
+  setScreen(`
+    <div class="card" style="margin-top:40px;">
+      <h2>শিক্ষক লগইন</h2>
+      <label>ইমেইল</label><input id="loginEmail" type="email" placeholder="আপনার ইমেইল">
+      <label>পাসওয়ার্ড</label><input id="loginPassword" type="password" placeholder="পাসওয়ার্ড">
+      <p id="loginError" class="muted" style="color:#dc2626;"></p>
+      <button onclick="teacherLogin()">লগইন করুন</button>
+      <button class="secondary" onclick="logout()" style="margin-top:8px;">ফিরে যান</button>
+    </div>
+  `);
+  hideNav();
+}
+
+function teacherLogin() {
+  const email = document.getElementById('loginEmail').value.trim();
+  const password = document.getElementById('loginPassword').value;
+  const errEl = document.getElementById('loginError');
+  errEl.textContent = '';
+  if (!email || !password) { errEl.textContent = 'ইমেইল ও পাসওয়ার্ড দিন'; return; }
+  auth.signInWithEmailAndPassword(email, password)
+    .then(() => showTeacherApp())
+    .catch(err => {
+      errEl.textContent = err.code === 'auth/invalid-credential' || err.code === 'auth/wrong-password' || err.code === 'auth/user-not-found'
+        ? 'ইমেইল বা পাসওয়ার্ড সঠিক নয়'
+        : 'লগইন ব্যর্থ: ' + err.message;
+    });
 }
 
 function showStudentPicker() {
@@ -63,6 +105,7 @@ function confirmStudentPick() {
 }
 
 function logout() {
+  if (role === 'teacher' && auth.currentUser) auth.signOut();
   localStorage.removeItem('role');
   localStorage.removeItem('myStudentId');
   role = null; myStudentId = null;
