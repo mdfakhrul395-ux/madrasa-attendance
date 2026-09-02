@@ -8,6 +8,8 @@
 <meta name="theme-color" content="#0f766e">
 <link rel="icon" href="icon-192.png">
 <link rel="apple-touch-icon" href="icon-192.png">
+<link rel="preconnect" href="https://www.gstatic.com">
+<link rel="preconnect" href="https://firestore.googleapis.com">
 <link rel="stylesheet" href="style.css">
 </head>
 <body>
@@ -15,15 +17,19 @@
   <span onclick="logout()" style="position:absolute;left:16px;cursor:pointer;font-size:20px;" title="হোমে ফিরুন">🏠</span>
   মাদরাসা হাজিরা <span id="syncDot" class="sync-dot offline" title="সিংক অবস্থা"></span>
 </header>
-<div id="app" class="screen active" style="display:block;"></div>
+<div id="app" class="screen active" style="display:block;">
+  <div style="text-align:center;padding:60px 20px;color:#555;">
+    <div style="font-size:15px;">লোড হচ্ছে...</div>
+  </div>
+</div>
 <nav id="bottomNav" class="tabs" style="display:none;"></nav>
 
 <!-- Firebase SDK (compat, no build step needed) -->
-<script src="https://www.gstatic.com/firebasejs/10.12.2/firebase-app-compat.js"></script>
-<script src="https://www.gstatic.com/firebasejs/10.12.2/firebase-firestore-compat.js"></script>
-<script src="https://www.gstatic.com/firebasejs/10.12.2/firebase-auth-compat.js"></script>
-<script src="firebase-config.js"></script>
-<script src="app.js"></script>
+<script defer src="https://www.gstatic.com/firebasejs/10.12.2/firebase-app-compat.js"></script>
+<script defer src="https://www.gstatic.com/firebasejs/10.12.2/firebase-firestore-compat.js"></script>
+<script defer src="https://www.gstatic.com/firebasejs/10.12.2/firebase-auth-compat.js"></script>
+<script defer src="firebase-config.js"></script>
+<script defer src="app.js"></script>
 <script>
 if ('serviceWorker' in navigator) {
   window.addEventListener('load', () => {
