@@ -598,13 +598,16 @@ function renderResultsScreen(isTeacher) {
   }
 
   let q = db.collection('results');
-  if (isTeacher) q = q.orderBy('date', 'desc');
-  else q = q.where('studentId', '==', myStudentId);
+  if (isTeacher) {
+    q = q.orderBy('date', 'desc');
+  } else {
+    q = q.where('studentId', '==', myStudentId).where('published', '==', true);
+  }
 
   q.onSnapshot(snap => {
     const wrap = document.getElementById('resultsWrap');
     if (!wrap) return;
-    if (snap.empty) { wrap.innerHTML = '<p class="muted">কোনো রেজাল্ট নেই</p>'; return; }
+    if (snap.empty) { wrap.innerHTML = `<p class="muted">${isTeacher ? 'কোনো রেজাল্ট নেই' : 'এখনো কোনো রেজাল্ট প্রকাশ করা হয়নি'}</p>`; return; }
     let docs = snap.docs;
     if (!isTeacher) docs = [...docs].sort((a,b) => (b.data().date||'').localeCompare(a.data().date||''));
 
@@ -625,13 +628,16 @@ function renderResultsScreen(isTeacher) {
       const summary = hasMarksheet
         ? `${r.totalObtained}/${r.totalFull} &nbsp; <span class="badge">${r.grade}</span>`
         : (r.marks !== undefined ? `${r.marks}` : '');
+      const isPublished = r.published === true;
       return `<div class="student-row" style="display:block;">
         <div style="display:flex;justify-content:space-between;align-items:center;">
           <span>${nameLine ? nameLine + ' - ' : ''}${r.examName}</span>
           <span>${summary}</span>
         </div>
+        ${isTeacher ? `<div class="muted" style="margin-top:2px;">${isPublished ? '✅ প্রকাশিত (শিক্ষার্থী দেখতে পারবে)' : '🔒 অপ্রকাশিত (শুধু শিক্ষক দেখতে পারবে)'}</div>` : ''}
         <div style="margin-top:6px;">
           <button class="small secondary" onclick="viewMarksheet('${r.studentId}','${d.id}')">মার্কশিট দেখুন</button>
+          ${isTeacher ? `<button class="small ${isPublished ? 'secondary' : ''}" onclick="togglePublish('${d.id}', ${isPublished})">${isPublished ? 'স্থগিত করুন' : 'প্রকাশ করুন'}</button>` : ''}
           ${isTeacher ? `<button class="small danger" onclick="deleteMarksheet('${d.id}')">মুছুন</button>` : ''}
         </div>
       </div>`;
@@ -703,13 +709,19 @@ function saveMarksheet() {
     percentage: Math.round(percentage * 100) / 100,
     grade,
     gpa,
+    published: false,
     date: new Date().toISOString().slice(0,10)
   }).then(() => {
     currentMarksheetSubjects = [];
     document.getElementById('resExam').value = '';
     renderSubjectRows();
-    alert('মার্কশিট সংরক্ষণ করা হয়েছে');
+    alert('মার্কশিট সংরক্ষণ করা হয়েছে (এখনো অপ্রকাশিত — শিক্ষার্থী দেখতে পাবে না যতক্ষণ না আপনি "প্রকাশ করুন" চাপবেন)');
   }).catch(e => alert('সংরক্ষণ ব্যর্থ: ' + e.message));
+}
+
+function togglePublish(docId, currentlyPublished) {
+  db.collection('results').doc(docId).set({ published: !currentlyPublished }, { merge: true })
+    .catch(e => alert('আপডেট ব্যর্থ: ' + e.message));
 }
 
 function deleteMarksheet(docId) {
