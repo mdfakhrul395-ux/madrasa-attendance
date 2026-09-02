@@ -10,6 +10,7 @@ let attClassFilter = 'all';
 let resultsClassFilter = 'all';
 let leavesClassFilter = 'all';
 let tlClassFilter = 'all';
+let diaryClassFilter = 'all';
 
 // marksheet entry state (teacher side, in-progress subject rows before save)
 let currentMarksheetSubjects = [];
@@ -201,6 +202,7 @@ function showTeacherApp() {
     <button class="tab-btn" onclick="teacherTab('results', this)">রেজাল্ট</button>
     <button class="tab-btn" onclick="teacherTab('timeleft', this)">বের হওয়ার সময়</button>
     <button class="tab-btn" onclick="teacherTab('notices', this)">নোটিশ</button>
+    <button class="tab-btn" onclick="teacherTab('diary', this)">ডায়েরী</button>
   `;
   teacherTab('students');
 }
@@ -212,6 +214,7 @@ function showStudentApp() {
     <button class="tab-btn" onclick="studentTab('leaves', this)">ছুটির আবেদন</button>
     <button class="tab-btn" onclick="studentTab('results', this)">রেজাল্ট</button>
     <button class="tab-btn" onclick="studentTab('notices', this)">নোটিশ</button>
+    <button class="tab-btn" onclick="studentTab('diary', this)">ডায়েরী</button>
   `;
   studentTab('attendance');
 }
@@ -240,6 +243,7 @@ function teacherTab(tab, el) {
   if (tab === 'results') { currentMarksheetSubjects = []; renderResultsScreen(true); }
   if (tab === 'timeleft') renderTimeLeftScreen();
   if (tab === 'notices') renderNoticesScreen(true);
+  if (tab === 'diary') renderDiaryScreen(true);
 }
 
 function studentTab(tab, el) {
@@ -248,6 +252,7 @@ function studentTab(tab, el) {
   if (tab === 'leaves') renderLeavesScreen(false);
   if (tab === 'results') renderResultsScreen(false);
   if (tab === 'notices') renderNoticesScreen(false);
+  if (tab === 'diary') renderDiaryScreen(false);
 }
 
 // ---- Students list (teacher) ----
@@ -881,4 +886,130 @@ function addNotice() {
 function deleteNotice(id) {
   if (!confirm('এই নোটিশ মুছতে চান?')) return;
   db.collection('notices').doc(id).delete();
+}
+
+// ---- Diary (শিক্ষকের ডায়েরি/হোমওয়ার্ক এন্ট্রি, শ্রেণি অনুযায়ী, ফাইল সংযুক্তি সহ) ----
+
+const DIARY_MAX_FILE_BYTES = 700 * 1024; // ~700KB raw file limit (base64 inflates it, Firestore doc cap is 1MB)
+
+function renderDiaryScreen(isTeacher) {
+  let html = '';
+  if (isTeacher) {
+    const classes = getClassList();
+    const classOpts = classes.map(c => `<option value="${c}">${c}</option>`).join('');
+    html += `
+      <div class="card">
+        <h2>নতুন ডায়েরি এন্ট্রি</h2>
+        <label>তারিখ</label><input type="date" id="diaryDate" value="${new Date().toISOString().slice(0,10)}">
+        <label>শ্রেণি</label>
+        <select id="diaryClass">${classOpts || '<option value="">কোনো শ্রেণি পাওয়া যায়নি, আগে শিক্ষার্থী যোগ করুন</option>'}</select>
+        <label>লেখা</label><textarea id="diaryText" rows="4" placeholder="হোমওয়ার্ক / ডায়েরি লিখুন"></textarea>
+        <label>ফাইল সংযুক্ত করুন (ঐচ্ছিক, সর্বোচ্চ ~৭০০KB)</label>
+        <input type="file" id="diaryFile">
+        <p id="diaryError" class="muted" style="color:#dc2626;"></p>
+        <button onclick="addDiaryEntry()">এন্ট্রি যোগ করুন</button>
+      </div>
+      <div class="card">
+        <h2>ডায়েরি তালিকা</h2>
+        <div id="diaryFilterWrap"></div>
+        <div id="diaryWrap">লোড হচ্ছে...</div>
+      </div>`;
+  } else {
+    html += `<div class="card"><h2>ডায়েরি</h2><div id="diaryWrap">লোড হচ্ছে...</div></div>`;
+  }
+  setScreen(html);
+
+  if (isTeacher) {
+    const filterWrap = document.getElementById('diaryFilterWrap');
+    if (filterWrap) filterWrap.innerHTML = classFilterDropdownHtml(diaryClassFilter, 'onDiaryClassFilterChange');
+  }
+
+  db.collection('diary').orderBy('createdAt', 'desc').onSnapshot(snap => {
+    const wrap = document.getElementById('diaryWrap');
+    if (!wrap) return;
+
+    let docs = snap.docs;
+    if (isTeacher) {
+      if (diaryClassFilter !== 'all') docs = docs.filter(d => d.data().className === diaryClassFilter);
+    } else {
+      const me = studentsCache.find(s => s.id === myStudentId);
+      const myClass = me ? me.className : null;
+      docs = docs.filter(d => d.data().className === myClass);
+    }
+
+    if (docs.length === 0) { wrap.innerHTML = '<p class="muted">কোনো ডায়েরি এন্ট্রি নেই</p>'; return; }
+
+    wrap.innerHTML = docs.map(d => {
+      const r = d.data();
+      let attachmentHtml = '';
+      if (r.attachmentDataUrl) {
+        if ((r.attachmentType || '').startsWith('image/')) {
+          attachmentHtml = `<div style="margin-top:6px;"><img src="${r.attachmentDataUrl}" style="max-width:100%;border-radius:8px;" alt="attachment"></div>`;
+        } else {
+          attachmentHtml = `<div style="margin-top:6px;"><a href="${r.attachmentDataUrl}" download="${r.attachmentName || 'file'}">📎 ${r.attachmentName || 'ফাইল ডাউনলোড করুন'}</a></div>`;
+        }
+      }
+      return `<div class="student-row" style="display:block;">
+        <div style="display:flex;justify-content:space-between;">
+          <b>${r.className || '-'}</b>
+          <span class="muted">${r.date || ''}</span>
+        </div>
+        <div style="margin-top:4px;">${(r.text || '').replace(/\n/g, '<br>')}</div>
+        ${attachmentHtml}
+        ${isTeacher ? `<button class="small danger" onclick="deleteDiaryEntry('${d.id}')" style="margin-top:6px;">মুছুন</button>` : ''}
+      </div>`;
+    }).join('');
+  }, err => {
+    const wrap = document.getElementById('diaryWrap');
+    if (wrap) wrap.innerHTML = '<p class="muted">লোড করতে সমস্যা হয়েছে: ' + err.message + '</p>';
+  });
+}
+
+function onDiaryClassFilterChange(value) {
+  diaryClassFilter = value;
+  renderDiaryScreen(true);
+}
+
+function addDiaryEntry() {
+  const date = document.getElementById('diaryDate').value;
+  const className = document.getElementById('diaryClass').value;
+  const text = document.getElementById('diaryText').value.trim();
+  const fileInput = document.getElementById('diaryFile');
+  const errEl = document.getElementById('diaryError');
+  if (errEl) errEl.textContent = '';
+
+  if (!className) { if (errEl) errEl.textContent = 'শ্রেণি নির্বাচন করুন'; return; }
+  if (!text) { if (errEl) errEl.textContent = 'লেখা দিন'; return; }
+
+  const file = fileInput && fileInput.files && fileInput.files[0];
+
+  const saveEntry = (attachmentDataUrl, attachmentName, attachmentType) => {
+    db.collection('diary').add({
+      date, className, text,
+      attachmentDataUrl: attachmentDataUrl || '',
+      attachmentName: attachmentName || '',
+      attachmentType: attachmentType || '',
+      createdAt: Date.now()
+    }).then(() => {
+      document.getElementById('diaryText').value = '';
+      if (fileInput) fileInput.value = '';
+    }).catch(e => { if (errEl) errEl.textContent = 'সংরক্ষণ ব্যর্থ: ' + e.message; });
+  };
+
+  if (!file) { saveEntry(); return; }
+
+  if (file.size > DIARY_MAX_FILE_BYTES) {
+    if (errEl) errEl.textContent = 'ফাইলটি অনেক বড়, সর্বোচ্চ ৭০০KB পর্যন্ত ফাইল দেওয়া যাবে';
+    return;
+  }
+
+  const reader = new FileReader();
+  reader.onload = () => saveEntry(reader.result, file.name, file.type);
+  reader.onerror = () => { if (errEl) errEl.textContent = 'ফাইল পড়তে সমস্যা হয়েছে'; };
+  reader.readAsDataURL(file);
+}
+
+function deleteDiaryEntry(id) {
+  if (!confirm('এই ডায়েরি এন্ট্রি মুছতে চান?')) return;
+  db.collection('diary').doc(id).delete();
 }
