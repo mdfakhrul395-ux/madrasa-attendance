@@ -924,17 +924,30 @@ function renderDiaryScreen(isTeacher) {
     if (filterWrap) filterWrap.innerHTML = classFilterDropdownHtml(diaryClassFilter, 'onDiaryClassFilterChange');
   }
 
-  db.collection('diary').orderBy('createdAt', 'desc').onSnapshot(snap => {
+  let diaryQuery;
+  if (isTeacher) {
+    diaryQuery = db.collection('diary').orderBy('createdAt', 'desc');
+  } else {
+    const me = studentsCache.find(s => s.id === myStudentId);
+    const myClass = me ? me.className : null;
+    if (!myClass) {
+      const wrap = document.getElementById('diaryWrap');
+      if (wrap) wrap.innerHTML = '<p class="muted">শ্রেণি তথ্য পাওয়া যায়নি</p>';
+      return;
+    }
+    // Firestore requires the query itself to filter by className (matching the
+    // security rule's resource.data.className check) — a plain list query
+    // without this where() is rejected as insufficient permissions.
+    diaryQuery = db.collection('diary').where('className', '==', myClass).orderBy('createdAt', 'desc');
+  }
+
+  diaryQuery.onSnapshot(snap => {
     const wrap = document.getElementById('diaryWrap');
     if (!wrap) return;
 
     let docs = snap.docs;
-    if (isTeacher) {
-      if (diaryClassFilter !== 'all') docs = docs.filter(d => d.data().className === diaryClassFilter);
-    } else {
-      const me = studentsCache.find(s => s.id === myStudentId);
-      const myClass = me ? me.className : null;
-      docs = docs.filter(d => d.data().className === myClass);
+    if (isTeacher && diaryClassFilter !== 'all') {
+      docs = docs.filter(d => d.data().className === diaryClassFilter);
     }
 
     if (docs.length === 0) { wrap.innerHTML = '<p class="muted">কোনো ডায়েরি এন্ট্রি নেই</p>'; return; }
