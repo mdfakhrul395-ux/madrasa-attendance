@@ -11,6 +11,10 @@ let resultsClassFilter = 'all';
 let leavesClassFilter = 'all';
 let tlClassFilter = 'all';
 
+// marksheet entry state (teacher side, in-progress subject rows before save)
+let currentMarksheetSubjects = [];
+let lastResultsIsTeacher = true;
+
 // ================= INIT =================
 window.addEventListener('DOMContentLoaded', () => {
   db.collection('_ping').doc('x').get()
@@ -233,7 +237,7 @@ function teacherTab(tab, el) {
   if (tab === 'students') renderStudentsScreen();
   if (tab === 'attendance') renderAttendanceScreen();
   if (tab === 'leaves') renderLeavesScreen(true);
-  if (tab === 'results') renderResultsScreen(true);
+  if (tab === 'results') { currentMarksheetSubjects = []; renderResultsScreen(true); }
   if (tab === 'timeleft') renderTimeLeftScreen();
   if (tab === 'notices') renderNoticesScreen(true);
 }
@@ -550,28 +554,47 @@ function setLeaveStatus(id, status) {
   db.collection('leaves').doc(id).update({ status });
 }
 
-// ---- Results ----
+// ================= RESULTS / MARKSHEET =================
+
+// Standard percentage -> grade scale used for the marksheet
+function gradeFromPercent(percent) {
+  if (percent >= 80) return { grade: 'A+', gpa: '5.00' };
+  if (percent >= 70) return { grade: 'A', gpa: '4.00' };
+  if (percent >= 60) return { grade: 'A-', gpa: '3.50' };
+  if (percent >= 50) return { grade: 'B', gpa: '3.00' };
+  if (percent >= 40) return { grade: 'C', gpa: '2.00' };
+  if (percent >= 33) return { grade: 'D', gpa: '1.00' };
+  return { grade: 'F', gpa: '0.00' };
+}
+
 function renderResultsScreen(isTeacher) {
+  lastResultsIsTeacher = isTeacher;
   let html = '';
   if (isTeacher) {
     const students = studentsByClass(resultsClassFilter);
-    const opts = students.map(s => `<option value="${s.id}">${s.name}</option>`).join('');
+    const opts = students.map(s => `<option value="${s.id}">${s.name} (${s.roll || ''})</option>`).join('');
     html += `
       <div class="card">
-        <h2>রেজাল্ট এন্ট্রি</h2>
+        <h2>নতুন মার্কশিট তৈরি করুন</h2>
         <div id="resultsFilterWrap"></div>
-        <label>শিক্ষার্থী</label><select id="resStudent">${opts}</select>
-        <label>পরীক্ষার নাম</label><input id="resExam" placeholder="যেমন: অর্ধবার্ষিক">
-        <label>প্রাপ্ত নম্বর</label><input id="resMarks" type="number">
-        <button onclick="submitResult()">সংরক্ষণ করুন</button>
+        <label>শিক্ষার্থী</label><select id="resStudent">${opts || '<option value="">কোনো শিক্ষার্থী নেই</option>'}</select>
+        <label>পরীক্ষার নাম</label><input id="resExam" placeholder="যেমন: অর্ধবার্ষিক পরীক্ষা ২০২৬">
+        <hr style="border:none;border-top:1px solid #eee;margin:10px 0;">
+        <label>বিষয়ের নাম</label><input id="resSubjectName" placeholder="যেমন: আরবি">
+        <label>পূর্ণ নম্বর</label><input id="resSubjectFull" type="number" value="100">
+        <label>প্রাপ্ত নম্বর</label><input id="resSubjectObtained" type="number">
+        <button class="secondary" onclick="addSubjectRow()">+ বিষয় যোগ করুন</button>
+        <div id="subjectRowsWrap" style="margin-top:10px;"></div>
+        <button onclick="saveMarksheet()" style="margin-top:10px;">মার্কশিট সংরক্ষণ করুন</button>
       </div>`;
   }
-  html += `<div class="card"><h2>${isTeacher ? 'সকল রেজাল্ট' : 'আমার রেজাল্ট'}</h2><div id="resultsWrap">লোড হচ্ছে...</div></div>`;
+  html += `<div class="card"><h2>${isTeacher ? 'সকল মার্কশিট' : 'আমার রেজাল্ট'}</h2><div id="resultsWrap">লোড হচ্ছে...</div></div>`;
   setScreen(html);
 
   if (isTeacher) {
     const filterWrap = document.getElementById('resultsFilterWrap');
     if (filterWrap) filterWrap.innerHTML = classFilterDropdownHtml(resultsClassFilter, 'onResultsClassFilterChange');
+    renderSubjectRows();
   }
 
   let q = db.collection('results');
@@ -597,9 +620,20 @@ function renderResultsScreen(isTeacher) {
     wrap.innerHTML = docs.map(d => {
       const r = d.data();
       const student = studentsCache.find(s => s.id === r.studentId);
-      return `<div class="student-row">
-        <span>${isTeacher ? (student ? student.name + (student.className ? ' (' + student.className + ')' : '') : 'অজানা') + ' - ' : ''}${r.examName}</span>
-        <b>${r.marks}</b>
+      const nameLine = isTeacher ? (student ? student.name + (student.className ? ' (' + student.className + ')' : '') : 'অজানা') : '';
+      const hasMarksheet = Array.isArray(r.subjects) && r.subjects.length > 0;
+      const summary = hasMarksheet
+        ? `${r.totalObtained}/${r.totalFull} &nbsp; <span class="badge">${r.grade}</span>`
+        : (r.marks !== undefined ? `${r.marks}` : '');
+      return `<div class="student-row" style="display:block;">
+        <div style="display:flex;justify-content:space-between;align-items:center;">
+          <span>${nameLine ? nameLine + ' - ' : ''}${r.examName}</span>
+          <span>${summary}</span>
+        </div>
+        <div style="margin-top:6px;">
+          <button class="small secondary" onclick="viewMarksheet('${r.studentId}','${d.id}')">মার্কশিট দেখুন</button>
+          ${isTeacher ? `<button class="small danger" onclick="deleteMarksheet('${d.id}')">মুছুন</button>` : ''}
+        </div>
       </div>`;
     }).join('');
   }, err => {
@@ -613,14 +647,140 @@ function onResultsClassFilterChange(value) {
   renderResultsScreen(true);
 }
 
-function submitResult() {
+function addSubjectRow() {
+  const name = document.getElementById('resSubjectName').value.trim();
+  const full = Number(document.getElementById('resSubjectFull').value);
+  const obtained = Number(document.getElementById('resSubjectObtained').value);
+  if (!name) return alert('বিষয়ের নাম লিখুন');
+  if (!full || full <= 0) return alert('পূর্ণ নম্বর সঠিকভাবে দিন');
+  if (document.getElementById('resSubjectObtained').value === '' || isNaN(obtained)) return alert('প্রাপ্ত নম্বর দিন');
+  if (obtained > full) return alert('প্রাপ্ত নম্বর পূর্ণ নম্বরের চেয়ে বেশি হতে পারে না');
+  currentMarksheetSubjects.push({ name, full, obtained });
+  document.getElementById('resSubjectName').value = '';
+  document.getElementById('resSubjectFull').value = '100';
+  document.getElementById('resSubjectObtained').value = '';
+  renderSubjectRows();
+}
+
+function removeSubjectRow(index) {
+  currentMarksheetSubjects.splice(index, 1);
+  renderSubjectRows();
+}
+
+function renderSubjectRows() {
+  const wrap = document.getElementById('subjectRowsWrap');
+  if (!wrap) return;
+  if (currentMarksheetSubjects.length === 0) {
+    wrap.innerHTML = '<p class="muted">এখনো কোনো বিষয় যোগ করা হয়নি</p>';
+    return;
+  }
+  wrap.innerHTML = currentMarksheetSubjects.map((s, i) => `
+    <div class="student-row">
+      <span>${s.name}</span>
+      <span>${s.obtained}/${s.full} <button class="small danger" onclick="removeSubjectRow(${i})">✕</button></span>
+    </div>
+  `).join('');
+}
+
+function saveMarksheet() {
   const studentId = document.getElementById('resStudent').value;
   const examName = document.getElementById('resExam').value.trim();
-  const marks = document.getElementById('resMarks').value;
-  if (!studentId || !examName || marks === '') return alert('সব ঘর পূরণ করুন');
+  if (!studentId) return alert('শিক্ষার্থী নির্বাচন করুন');
+  if (!examName) return alert('পরীক্ষার নাম লিখুন');
+  if (currentMarksheetSubjects.length === 0) return alert('অন্তত একটি বিষয় যোগ করুন');
+
+  const totalObtained = currentMarksheetSubjects.reduce((sum, s) => sum + s.obtained, 0);
+  const totalFull = currentMarksheetSubjects.reduce((sum, s) => sum + s.full, 0);
+  const percentage = totalFull > 0 ? (totalObtained / totalFull) * 100 : 0;
+  const { grade, gpa } = gradeFromPercent(percentage);
+
   db.collection('results').doc(studentId + '_' + examName).set({
-    studentId, examName, marks: Number(marks), date: new Date().toISOString().slice(0,10)
-  }).then(() => { document.getElementById('resExam').value=''; document.getElementById('resMarks').value=''; });
+    studentId,
+    examName,
+    subjects: currentMarksheetSubjects,
+    totalObtained,
+    totalFull,
+    percentage: Math.round(percentage * 100) / 100,
+    grade,
+    gpa,
+    date: new Date().toISOString().slice(0,10)
+  }).then(() => {
+    currentMarksheetSubjects = [];
+    document.getElementById('resExam').value = '';
+    renderSubjectRows();
+    alert('মার্কশিট সংরক্ষণ করা হয়েছে');
+  }).catch(e => alert('সংরক্ষণ ব্যর্থ: ' + e.message));
+}
+
+function deleteMarksheet(docId) {
+  if (!confirm('এই মার্কশিট মুছতে চান?')) return;
+  db.collection('results').doc(docId).delete();
+}
+
+function viewMarksheet(studentId, docId) {
+  db.collection('results').doc(docId).get().then(doc => {
+    if (!doc.exists) return alert('মার্কশিট খুঁজে পাওয়া যায়নি');
+    const r = doc.data();
+    const student = studentsCache.find(s => s.id === studentId) || {};
+    const hasSubjects = Array.isArray(r.subjects) && r.subjects.length > 0;
+
+    const rows = hasSubjects ? r.subjects.map(s => `
+      <tr>
+        <td style="padding:6px;border:1px solid #ddd;">${s.name}</td>
+        <td style="padding:6px;border:1px solid #ddd;text-align:center;">${s.full}</td>
+        <td style="padding:6px;border:1px solid #ddd;text-align:center;">${s.obtained}</td>
+      </tr>
+    `).join('') : `<tr><td colspan="3" style="padding:6px;border:1px solid #ddd;text-align:center;" class="muted">বিষয়ভিত্তিক তথ্য নেই (পুরাতন রেজাল্ট)</td></tr>`;
+
+    const totalRow = hasSubjects ? `
+      <tr>
+        <td style="padding:6px;border:1px solid #ddd;"><b>মোট</b></td>
+        <td style="padding:6px;border:1px solid #ddd;text-align:center;"><b>${r.totalFull}</b></td>
+        <td style="padding:6px;border:1px solid #ddd;text-align:center;"><b>${r.totalObtained}</b></td>
+      </tr>
+    ` : '';
+
+    setScreen(`
+      <style id="marksheetPrintStyle">
+        @media print {
+          #bottomNav, .no-print { display: none !important; }
+        }
+      </style>
+      <div class="card" id="marksheetPrintArea">
+        <h2 style="text-align:center;margin-bottom:2px;">মার্কশিট</h2>
+        <p class="muted" style="text-align:center;margin-top:0;">${r.examName}</p>
+        <hr style="border:none;border-top:1px solid #eee;margin:10px 0;">
+        <p><b>নাম:</b> ${student.name || '-'}</p>
+        <p><b>রোল:</b> ${student.roll || '-'} &nbsp;&nbsp; <b>শ্রেণি:</b> ${student.className || '-'}</p>
+        <table style="width:100%;border-collapse:collapse;margin-top:10px;">
+          <thead>
+            <tr>
+              <th style="padding:6px;border:1px solid #ddd;text-align:left;">বিষয়</th>
+              <th style="padding:6px;border:1px solid #ddd;">পূর্ণ নম্বর</th>
+              <th style="padding:6px;border:1px solid #ddd;">প্রাপ্ত নম্বর</th>
+            </tr>
+          </thead>
+          <tbody>
+            ${rows}
+            ${totalRow}
+          </tbody>
+        </table>
+        ${hasSubjects ? `
+          <p style="margin-top:10px;"><b>শতাংশ:</b> ${r.percentage}%</p>
+          <p><b>গ্রেড:</b> ${r.grade} ${r.gpa ? '(GPA ' + r.gpa + ')' : ''}</p>
+        ` : `<p style="margin-top:10px;"><b>প্রাপ্ত নম্বর:</b> ${r.marks !== undefined ? r.marks : '-'}</p>`}
+        <p class="muted" style="margin-top:10px;">তারিখ: ${r.date || '-'}</p>
+        <div class="no-print" style="margin-top:14px;">
+          <button onclick="printMarksheet()">🖨️ প্রিন্ট করুন</button>
+          <button class="secondary" onclick="renderResultsScreen(lastResultsIsTeacher)">ফিরে যান</button>
+        </div>
+      </div>
+    `);
+  }).catch(e => alert('লোড ব্যর্থ: ' + e.message));
+}
+
+function printMarksheet() {
+  window.print();
 }
 
 // ---- Time left home report (teacher) ----
