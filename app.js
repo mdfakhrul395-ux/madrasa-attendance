@@ -255,6 +255,10 @@ function renderStudentsScreen() {
         <label>নাম</label><input id="newName" placeholder="শিক্ষার্থীর নাম">
         <label>রোল</label><input id="newRoll" placeholder="রোল নম্বর">
         <label>শ্রেণি</label><input id="newClass" placeholder="শ্রেণি">
+        <label>মোবাইল নম্বর</label><input id="newPhone" type="tel" placeholder="যেমন: 01712345678">
+        <label style="display:flex;align-items:center;gap:6px;margin-top:6px;">
+          <input id="newWhatsapp" type="checkbox" style="width:auto;"> এই নম্বরে WhatsApp আছে
+        </label>
         <label>PIN (৪ সংখ্যা)</label><input id="newPin" type="text" inputmode="numeric" maxlength="4" placeholder="যেমন: 1234">
         <button onclick="addStudent()">যোগ করুন</button>
       </div>
@@ -282,28 +286,55 @@ function renderStudentsList() {
   const list = studentsByClass(studentsClassFilter);
   if (list.length === 0) { wrap.innerHTML = '<p class="muted">কোনো শিক্ষার্থী নেই</p>'; return; }
   wrap.innerHTML = list.map(s => `
-    <div class="student-row">
-      <span>${s.name} <span class="muted">(রোল ${s.roll || '-'}, ${s.className || '-'})</span> <span class="muted">${s.pin ? '✅ PIN সেট' : '❌ PIN নেই'}</span></span>
-      <span>
+    <div class="student-row" style="display:block;">
+      <div style="display:flex;justify-content:space-between;align-items:center;">
+        <span>${s.name} <span class="muted">(রোল ${s.roll || '-'}, ${s.className || '-'})</span></span>
+        ${s.hasWhatsapp && s.phone ? `<a href="https://wa.me/${normalizePhoneForWhatsapp(s.phone)}" target="_blank" style="text-decoration:none;font-size:20px;" title="WhatsApp-এ মেসেজ পাঠান">💬</a>` : ''}
+      </div>
+      <div class="muted" style="margin-top:2px;">
+        ${s.phone ? '📱 ' + s.phone : 'মোবাইল নম্বর নেই'} &nbsp; ${s.pin ? '✅ PIN সেট' : '❌ PIN নেই'}
+      </div>
+      <div style="margin-top:6px;">
         <button class="small secondary" onclick="setStudentPin('${s.id}')">PIN সেট/পরিবর্তন</button>
+        <button class="small secondary" onclick="setStudentPhone('${s.id}')">নম্বর সম্পাদনা</button>
         <button class="small danger" onclick="deleteStudent('${s.id}')">মুছুন</button>
-      </span>
+      </div>
     </div>
   `).join('');
+}
+
+function normalizePhoneForWhatsapp(phone) {
+  let p = (phone || '').replace(/[^0-9]/g, '');
+  if (p.startsWith('0')) p = '88' + p; // Bangladeshi local -> international
+  return p;
+}
+
+function setStudentPhone(id) {
+  const student = studentsCache.find(s => s.id === id);
+  const phone = prompt('মোবাইল নম্বর দিন (যেমন: 01712345678):', student && student.phone ? student.phone : '');
+  if (phone === null) return; // cancelled
+  const trimmed = phone.trim();
+  const hasWhatsapp = trimmed ? confirm('এই নম্বরে কি WhatsApp আছে?') : false;
+  db.collection('students').doc(id).set({ phone: trimmed, hasWhatsapp }, { merge: true })
+    .catch(e => alert('সংরক্ষণ ব্যর্থ: ' + e.message));
 }
 
 function addStudent() {
   const name = document.getElementById('newName').value.trim();
   const roll = document.getElementById('newRoll').value.trim();
   const className = document.getElementById('newClass').value.trim();
+  const phone = document.getElementById('newPhone').value.trim();
+  const hasWhatsapp = document.getElementById('newWhatsapp').checked;
   const pin = document.getElementById('newPin').value.trim();
   if (!name) return alert('নাম দিন');
   if (pin && !/^\d{4}$/.test(pin)) return alert('PIN অবশ্যই ৪ সংখ্যার হতে হবে');
-  db.collection('students').add({ name, roll, className, pin: pin || '', createdAt: Date.now() })
+  db.collection('students').add({ name, roll, className, phone, hasWhatsapp, pin: pin || '', createdAt: Date.now() })
     .then(() => {
       document.getElementById('newName').value = '';
       document.getElementById('newRoll').value = '';
       document.getElementById('newClass').value = '';
+      document.getElementById('newPhone').value = '';
+      document.getElementById('newWhatsapp').checked = false;
       document.getElementById('newPin').value = '';
     })
     .catch(e => alert('সংরক্ষণ ব্যর্থ: ' + e.message));
