@@ -1,0 +1,69 @@
+rules_version = '2';
+
+service cloud.firestore {
+  match /databases/{database}/documents {
+
+    // Teacher = signed in with email/password. Student = signed in anonymously.
+    function isTeacherAuth() {
+      return request.auth != null && request.auth.token.firebase.sign_in_provider == 'password';
+    }
+    function isStudentAuth() {
+      return request.auth != null && request.auth.token.firebase.sign_in_provider == 'anonymous';
+    }
+    function mySessionStudentId() {
+      return get(/databases/$(database)/documents/sessions/$(request.auth.uid)).data.studentId;
+    }
+
+    // Student profiles (includes PIN). Any signed-in user (teacher or student,
+    // even before PIN entry) can read, since the app needs the name list and
+    // the PIN check itself happens client-side against this collection.
+    // Only the teacher can write (add/edit/delete students, set PINs).
+    match /students/{studentId} {
+      allow read: if request.auth != null;
+      allow write: if isTeacherAuth();
+    }
+
+    // Session mapping: anonymous uid -> which student they verified as.
+    // Each user may only read/write their own session document.
+    match /sessions/{uid} {
+      allow read, write: if request.auth != null && request.auth.uid == uid;
+    }
+
+    // Attendance: teacher can read/write everything.
+    // A signed-in student can only read/write their own attendance record.
+    match /attendance/{docId} {
+      allow read: if isTeacherAuth() ||
+        (isStudentAuth() && resource.data.studentId == mySessionStudentId());
+      allow write: if isTeacherAuth() ||
+        (isStudentAuth() && request.resource.data.studentId == mySessionStudentId());
+    }
+
+    // Leaves: student can create/read only their own; only teacher can approve/reject (update) or delete.
+    match /leaves/{docId} {
+      allow read: if isTeacherAuth() ||
+        (isStudentAuth() && resource.data.studentId == mySessionStudentId());
+      allow create: if isTeacherAuth() ||
+        (isStudentAuth() && request.resource.data.studentId == mySessionStudentId());
+      allow update, delete: if isTeacherAuth();
+    }
+
+    // Results: only teacher can write; student can only read their own.
+    match /results/{docId} {
+      allow read: if isTeacherAuth() ||
+        (isStudentAuth() && resource.data.studentId == mySessionStudentId());
+      allow write: if isTeacherAuth();
+    }
+
+    // Notices: readable by anyone signed in (teacher or student); only teacher can post/delete.
+    match /notices/{docId} {
+      allow read: if request.auth != null;
+      allow write: if isTeacherAuth();
+    }
+
+    // Health-check doc used by the app to detect connectivity.
+    match /_ping/{doc} {
+      allow read: if true;
+      allow write: if false;
+    }
+  }
+}

@@ -18,17 +18,33 @@ window.addEventListener('DOMContentLoaded', () => {
     .catch(() => setSync(false));
 
   auth.onAuthStateChanged(user => {
+    if (!user) {
+      // Everyone (teacher or student) needs to be signed in (at least anonymously)
+      // before Firestore rules will allow reading student/attendance/result data.
+      auth.signInAnonymously().catch(err => console.error('Anonymous sign-in failed:', err));
+      return; // onAuthStateChanged will fire again once signed in
+    }
+
+    listenStudents();
+
+    const isTeacherAccount = user.providerData.length > 0; // email/password = teacher, anonymous = student/guest
+
     if (role === 'teacher') {
-      if (user) showTeacherApp();
+      if (isTeacherAccount) showTeacherApp();
       else showTeacherLogin();
     } else if (role === 'student' && myStudentId) {
-      showStudentApp();
+      // verify this device's session still matches the signed-in anonymous user
+      db.collection('sessions').doc(user.uid).get().then(doc => {
+        if (doc.exists && doc.data().studentId === myStudentId) {
+          showStudentApp();
+        } else {
+          showStudentPicker();
+        }
+      }).catch(() => showStudentPicker());
     } else {
       showRoleSelect();
     }
   });
-
-  listenStudents();
 });
 
 function setSync(ok) {
@@ -76,7 +92,7 @@ function pickRole(r) {
   role = r;
   localStorage.setItem('role', r);
   if (r === 'teacher') {
-    if (auth.currentUser) showTeacherApp();
+    if (auth.currentUser && auth.currentUser.providerData.length > 0) showTeacherApp();
     else showTeacherLogin();
   } else {
     showStudentPicker();
@@ -113,13 +129,17 @@ function teacherLogin() {
     });
 }
 
+// ================= STUDENT PIN LOGIN =================
 function showStudentPicker() {
   const opts = studentsCache.map(s => `<option value="${s.id}">${s.name} (${s.roll || ''})</option>`).join('');
   setScreen(`
     <div class="card">
       <h2>আপনার নাম নির্বাচন করুন</h2>
       <select id="studentPick">${opts || '<option>কোনো শিক্ষার্থী যোগ করা হয়নি</option>'}</select>
-      <button onclick="confirmStudentPick()">নিশ্চিত করুন</button>
+      <label>আপনার PIN দিন</label>
+      <input id="studentPinInput" type="password" inputmode="numeric" maxlength="4" placeholder="৪ সংখ্যার PIN">
+      <p id="pinError" class="muted" style="color:#dc2626;"></p>
+      <button onclick="confirmStudentPick()">প্রবেশ করুন</button>
       <button class="secondary" onclick="logout()">ফিরে যান</button>
     </div>
   `);
@@ -128,14 +148,36 @@ function showStudentPicker() {
 
 function confirmStudentPick() {
   const sel = document.getElementById('studentPick');
+  const pinInput = document.getElementById('studentPinInput');
+  const errEl = document.getElementById('pinError');
+  if (errEl) errEl.textContent = '';
   if (!sel || !sel.value) return alert('তালিকায় কোনো শিক্ষার্থী নেই। আগে শিক্ষককে যোগ করতে বলুন।');
-  myStudentId = sel.value;
-  localStorage.setItem('myStudentId', myStudentId);
-  showStudentApp();
+
+  const student = studentsCache.find(s => s.id === sel.value);
+  const enteredPin = (pinInput.value || '').trim();
+
+  if (!student) return alert('শিক্ষার্থী খুঁজে পাওয়া যায়নি');
+  if (!student.pin) {
+    if (errEl) errEl.textContent = 'এই শিক্ষার্থীর জন্য এখনো PIN সেট করা হয়নি। শিক্ষককে জানান।';
+    return;
+  }
+  if (enteredPin !== student.pin) {
+    if (errEl) errEl.textContent = 'ভুল PIN দিয়েছেন';
+    return;
+  }
+
+  const uid = auth.currentUser.uid;
+  db.collection('sessions').doc(uid).set({ studentId: student.id, name: student.name, updatedAt: Date.now() }, { merge: true })
+    .then(() => {
+      myStudentId = student.id;
+      localStorage.setItem('myStudentId', myStudentId);
+      showStudentApp();
+    })
+    .catch(e => { if (errEl) errEl.textContent = 'প্রবেশ ব্যর্থ: ' + e.message; });
 }
 
 function logout() {
-  if (role === 'teacher' && auth.currentUser) auth.signOut();
+  if (role === 'teacher' && auth.currentUser && auth.currentUser.providerData.length > 0) auth.signOut();
   localStorage.removeItem('role');
   localStorage.removeItem('myStudentId');
   role = null; myStudentId = null;
@@ -213,6 +255,7 @@ function renderStudentsScreen() {
         <label>নাম</label><input id="newName" placeholder="শিক্ষার্থীর নাম">
         <label>রোল</label><input id="newRoll" placeholder="রোল নম্বর">
         <label>শ্রেণি</label><input id="newClass" placeholder="শ্রেণি">
+        <label>PIN (৪ সংখ্যা)</label><input id="newPin" type="text" inputmode="numeric" maxlength="4" placeholder="যেমন: 1234">
         <button onclick="addStudent()">যোগ করুন</button>
       </div>
       <div class="card">
@@ -240,8 +283,11 @@ function renderStudentsList() {
   if (list.length === 0) { wrap.innerHTML = '<p class="muted">কোনো শিক্ষার্থী নেই</p>'; return; }
   wrap.innerHTML = list.map(s => `
     <div class="student-row">
-      <span>${s.name} <span class="muted">(রোল ${s.roll || '-'}, ${s.className || '-'})</span></span>
-      <button class="small danger" onclick="deleteStudent('${s.id}')">মুছুন</button>
+      <span>${s.name} <span class="muted">(রোল ${s.roll || '-'}, ${s.className || '-'})</span> <span class="muted">${s.pin ? '✅ PIN সেট' : '❌ PIN নেই'}</span></span>
+      <span>
+        <button class="small secondary" onclick="setStudentPin('${s.id}')">PIN সেট/পরিবর্তন</button>
+        <button class="small danger" onclick="deleteStudent('${s.id}')">মুছুন</button>
+      </span>
     </div>
   `).join('');
 }
@@ -250,10 +296,25 @@ function addStudent() {
   const name = document.getElementById('newName').value.trim();
   const roll = document.getElementById('newRoll').value.trim();
   const className = document.getElementById('newClass').value.trim();
+  const pin = document.getElementById('newPin').value.trim();
   if (!name) return alert('নাম দিন');
-  db.collection('students').add({ name, roll, className, createdAt: Date.now() })
-    .then(() => { document.getElementById('newName').value=''; document.getElementById('newRoll').value=''; document.getElementById('newClass').value=''; })
+  if (pin && !/^\d{4}$/.test(pin)) return alert('PIN অবশ্যই ৪ সংখ্যার হতে হবে');
+  db.collection('students').add({ name, roll, className, pin: pin || '', createdAt: Date.now() })
+    .then(() => {
+      document.getElementById('newName').value = '';
+      document.getElementById('newRoll').value = '';
+      document.getElementById('newClass').value = '';
+      document.getElementById('newPin').value = '';
+    })
     .catch(e => alert('সংরক্ষণ ব্যর্থ: ' + e.message));
+}
+
+function setStudentPin(id) {
+  const pin = prompt('শিক্ষার্থীর জন্য ৪-সংখ্যার PIN দিন:');
+  if (pin === null) return; // cancelled
+  if (!/^\d{4}$/.test(pin)) { alert('PIN অবশ্যই ৪ সংখ্যার হতে হবে'); return; }
+  db.collection('students').doc(id).set({ pin }, { merge: true })
+    .catch(e => alert('PIN সংরক্ষণ ব্যর্থ: ' + e.message));
 }
 
 function deleteStudent(id) {
