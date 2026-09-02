@@ -1,4 +1,4 @@
-const CACHE_NAME = 'madrasa-attendance-v2';
+const CACHE_NAME = 'madrasa-attendance-v3';
 const ASSETS = [
   './index.html',
   './style.css',
@@ -22,9 +22,20 @@ self.addEventListener('activate', e => {
 });
 
 self.addEventListener('fetch', e => {
-  // Network-first for everything so Firestore data & app updates stay fresh;
-  // falls back to cache when offline.
+  // Only handle our own app-shell files; let everything else (Firebase/Firestore) go straight to network.
+  const url = new URL(e.request.url);
+  if (url.origin !== self.location.origin) return;
+
   e.respondWith(
-    fetch(e.request).catch(() => caches.match(e.request))
+    caches.match(e.request).then(cached => {
+      const networkFetch = fetch(e.request)
+        .then(response => {
+          caches.open(CACHE_NAME).then(c => c.put(e.request, response.clone()));
+          return response;
+        })
+        .catch(() => cached);
+      // Cache-first: show cached immediately if available, update in background
+      return cached || networkFetch;
+    })
   );
 });
