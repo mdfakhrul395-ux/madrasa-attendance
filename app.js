@@ -279,6 +279,7 @@ function renderStudentsScreen() {
       <div class="card">
         <h2>শিক্ষার্থী তালিকা</h2>
         <div id="studentsFilterWrap"></div>
+        <div id="studentsCountWrap"></div>
         <div id="studentsListWrap"></div>
       </div>
     </div>
@@ -294,6 +295,17 @@ function onStudentsClassFilterChange(value) {
 function renderStudentsList() {
   const filterWrap = document.getElementById('studentsFilterWrap');
   if (filterWrap) filterWrap.innerHTML = classFilterDropdownHtml(studentsClassFilter, 'onStudentsClassFilterChange');
+
+  const countWrap = document.getElementById('studentsCountWrap');
+  if (countWrap) {
+    const total = studentsCache.length;
+    if (studentsClassFilter === 'all') {
+      countWrap.innerHTML = `<p class="muted">মোট শিক্ষার্থী: <b>${total}</b> জন</p>`;
+    } else {
+      const filteredCount = studentsByClass(studentsClassFilter).length;
+      countWrap.innerHTML = `<p class="muted">${studentsClassFilter} শ্রেণিতে: <b>${filteredCount}</b> জন &nbsp; (সর্বমোট: ${total} জন)</p>`;
+    }
+  }
 
   const wrap = document.getElementById('studentsListWrap');
   if (!wrap) return;
