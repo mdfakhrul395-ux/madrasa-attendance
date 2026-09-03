@@ -24,6 +24,9 @@ let reportStudentId = '';
 let currentMarksheetSubjects = [];
 let lastResultsIsTeacher = true;
 
+// app settings (madrasa name & logo)
+let appSettings = {};
+
 // ================= INIT =================
 window.addEventListener('DOMContentLoaded', () => {
   db.collection('_ping').doc('x').get()
@@ -39,6 +42,7 @@ window.addEventListener('DOMContentLoaded', () => {
     }
 
     listenStudents();
+    listenSettings();
 
     const isTeacherAccount = user.providerData.length > 0; // email/password = teacher, anonymous = student/guest
 
@@ -63,6 +67,94 @@ window.addEventListener('DOMContentLoaded', () => {
 function setSync(ok) {
   const dot = document.getElementById('syncDot');
   if (dot) dot.className = 'sync-dot' + (ok ? '' : ' offline');
+}
+
+// ================= APP SETTINGS (মাদরাসার নাম ও লোগো) =================
+function listenSettings() {
+  db.collection('settings').doc('app').onSnapshot(doc => {
+    appSettings = doc.exists ? (doc.data() || {}) : {};
+    renderTopBar();
+  }, () => renderTopBar());
+}
+
+function renderTopBar() {
+  let bar = document.getElementById('topBar');
+  if (!bar) {
+    bar = document.createElement('div');
+    bar.id = 'topBar';
+    bar.style.cssText = 'display:flex;align-items:center;gap:10px;padding:10px 14px;background:#fff;border-bottom:1px solid #eee;position:sticky;top:0;z-index:50;';
+    bar.innerHTML = `
+      <img id="topBarLogo" style="width:36px;height:36px;border-radius:8px;object-fit:cover;display:none;" alt="logo">
+      <b id="topBarName" style="font-size:16px;"></b>
+    `;
+    const appEl = document.getElementById('app');
+    if (appEl && appEl.parentNode) appEl.parentNode.insertBefore(bar, appEl);
+    else document.body.insertBefore(bar, document.body.firstChild);
+  }
+  const nameEl = document.getElementById('topBarName');
+  const logoEl = document.getElementById('topBarLogo');
+  if (nameEl) nameEl.textContent = (appSettings && appSettings.madrasaName) ? appSettings.madrasaName : 'মাদরাসা হাজিরা অ্যাপ';
+  if (logoEl) {
+    if (appSettings && appSettings.logoDataUrl) {
+      logoEl.src = appSettings.logoDataUrl;
+      logoEl.style.display = 'block';
+    } else {
+      logoEl.style.display = 'none';
+    }
+  }
+}
+
+function renderSettingsScreen() {
+  const s = appSettings || {};
+  setScreen(`
+    <div class="card">
+      <h2>মাদরাসার সেটিংস</h2>
+      <label>মাদরাসার নাম</label>
+      <input id="settingsName" placeholder="মাদরাসার নাম লিখুন" value="${(s.madrasaName || '').replace(/"/g,'&quot;')}">
+      <label>লোগো</label>
+      <div style="margin:8px 0;">
+        ${s.logoDataUrl ? `<img src="${s.logoDataUrl}" style="width:80px;height:80px;border-radius:10px;object-fit:cover;">` : '<p class="muted">এখনো কোনো লোগো সেট করা হয়নি</p>'}
+      </div>
+      <input type="file" id="settingsLogoFile" accept="image/*">
+      <p id="settingsError" class="muted" style="color:#dc2626;"></p>
+      <button onclick="saveSettings()" style="margin-top:10px;">সংরক্ষণ করুন</button>
+      ${s.logoDataUrl ? `<button class="small danger" onclick="removeLogo()" style="margin-top:8px;">লোগো মুছুন</button>` : ''}
+    </div>
+  `);
+}
+
+function saveSettings() {
+  const name = document.getElementById('settingsName').value.trim();
+  const fileInput = document.getElementById('settingsLogoFile');
+  const errEl = document.getElementById('settingsError');
+  if (errEl) errEl.textContent = '';
+  const file = fileInput && fileInput.files && fileInput.files[0];
+
+  const doSave = (logoDataUrl) => {
+    const data = { madrasaName: name };
+    if (logoDataUrl !== undefined) data.logoDataUrl = logoDataUrl;
+    db.collection('settings').doc('app').set(data, { merge: true })
+      .then(() => { alert('সংরক্ষণ করা হয়েছে'); renderSettingsScreen(); })
+      .catch(e => { if (errEl) errEl.textContent = 'সংরক্ষণ ব্যর্থ: ' + e.message; });
+  };
+
+  if (!file) { doSave(); return; }
+
+  if (file.size > 500 * 1024) {
+    if (errEl) errEl.textContent = 'লোগো ফাইলটি অনেক বড়, সর্বোচ্চ ৫০০KB পর্যন্ত দেওয়া যাবে';
+    return;
+  }
+  const reader = new FileReader();
+  reader.onload = () => doSave(reader.result);
+  reader.onerror = () => { if (errEl) errEl.textContent = 'ফাইল পড়তে সমস্যা হয়েছে'; };
+  reader.readAsDataURL(file);
+}
+
+function removeLogo() {
+  if (!confirm('লোগো মুছতে চান?')) return;
+  db.collection('settings').doc('app').set({ logoDataUrl: '' }, { merge: true })
+    .then(() => renderSettingsScreen())
+    .catch(e => alert('মুছতে ব্যর্থ: ' + e.message));
 }
 
 // ================= CLASS FILTER HELPERS =================
@@ -213,6 +305,7 @@ function showTeacherApp() {
     <button class="tab-btn" onclick="teacherTab('notices', this)">নোটিশ</button>
     <button class="tab-btn" onclick="teacherTab('diary', this)">ডায়েরী</button>
     <button class="tab-btn" onclick="teacherTab('suggestions', this)">পরামর্শ</button>
+    <button class="tab-btn" onclick="teacherTab('settings', this)">সেটিংস</button>
   `;
   teacherTab('students');
 }
@@ -257,6 +350,7 @@ function teacherTab(tab, el) {
   if (tab === 'notices') renderNoticesScreen(true);
   if (tab === 'diary') renderDiaryScreen(true);
   if (tab === 'suggestions') renderSuggestionsScreen(true);
+  if (tab === 'settings') renderSettingsScreen();
 }
 
 function studentTab(tab, el) {
