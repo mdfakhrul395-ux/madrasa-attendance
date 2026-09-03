@@ -27,6 +27,12 @@ let lastResultsIsTeacher = true;
 // app settings (madrasa name & logo)
 let appSettings = {};
 
+// unread notification badges (student side)
+let unreadCounts = { notices: 0, diary: 0 };
+let unreadNoticesUnsub = null;
+let unreadDiaryUnsub = null; // { unsub, className }
+let currentStudentTab = 'attendance';
+
 // ================= NAV CONFIG =================
 const teacherPrimaryTabs = [
   { key: 'students', label: 'শিক্ষার্থী', icon: '\u{1F468}\u200D\u{1F393}' },
@@ -207,6 +213,66 @@ function studentsByClass(filterValue) {
   return studentsCache.filter(s => s.className === filterValue);
 }
 
+// ================= UNREAD BADGES (student notices/diary) =================
+// Tracks, per-student (per device), a "last seen" timestamp for notices and
+// diary entries. Any item posted after that timestamp counts as unread and
+// shows as a small red badge on the bottom nav until the student opens that tab.
+
+function noticesSeenKey() { return 'lastSeenNotices_' + (myStudentId || 'x'); }
+function diarySeenKey() { return 'lastSeenDiary_' + (myStudentId || 'x'); }
+
+function iconWithBadge(icon, badgeCount, cls) {
+  const badge = badgeCount
+    ? `<span style="position:absolute;top:-4px;right:-6px;background:#dc2626;color:#fff;border-radius:10px;font-size:10px;min-width:16px;height:16px;line-height:16px;text-align:center;padding:0 3px;">${badgeCount > 9 ? '9+' : badgeCount}</span>`
+    : '';
+  return `<span class="${cls}" style="position:relative;display:inline-block;">${icon}${badge}</span>`;
+}
+
+function startUnreadListeners() {
+  if (role !== 'student' || !myStudentId) return;
+  startNoticesUnreadListener();
+  startDiaryUnreadListener();
+}
+
+function startNoticesUnreadListener() {
+  if (unreadNoticesUnsub) return; // already listening
+  unreadNoticesUnsub = db.collection('notices').orderBy('createdAt', 'desc').onSnapshot(snap => {
+    const lastSeen = Number(localStorage.getItem(noticesSeenKey()) || 0);
+    unreadCounts.notices = snap.docs.filter(d => (d.data().createdAt || 0) > lastSeen).length;
+    if (role === 'student') renderStudentNav(currentStudentTab);
+  });
+}
+
+function startDiaryUnreadListener() {
+  const me = studentsCache.find(s => s.id === myStudentId);
+  const myClass = me ? me.className : null;
+  if (!myClass) return; // will retry once class info is loaded (see listenStudents)
+  if (unreadDiaryUnsub && unreadDiaryUnsub.className === myClass) return; // already listening for this class
+  if (unreadDiaryUnsub && unreadDiaryUnsub.unsub) unreadDiaryUnsub.unsub();
+  const unsub = db.collection('diary').where('className', '==', myClass).orderBy('createdAt', 'desc').onSnapshot(snap => {
+    const lastSeen = Number(localStorage.getItem(diarySeenKey()) || 0);
+    unreadCounts.diary = snap.docs.filter(d => (d.data().createdAt || 0) > lastSeen).length;
+    if (role === 'student') renderStudentNav(currentStudentTab);
+  });
+  unreadDiaryUnsub = { unsub, className: myClass };
+}
+
+function stopUnreadListeners() {
+  if (unreadNoticesUnsub) { unreadNoticesUnsub(); unreadNoticesUnsub = null; }
+  if (unreadDiaryUnsub && unreadDiaryUnsub.unsub) { unreadDiaryUnsub.unsub(); unreadDiaryUnsub = null; }
+  unreadCounts = { notices: 0, diary: 0 };
+}
+
+function markNoticesSeen() {
+  localStorage.setItem(noticesSeenKey(), String(Date.now()));
+  unreadCounts.notices = 0;
+}
+
+function markDiarySeen() {
+  localStorage.setItem(diarySeenKey(), String(Date.now()));
+  unreadCounts.diary = 0;
+}
+
 // ================= ROLE SELECT =================
 function showRoleSelect() {
   setScreen(`
@@ -310,6 +376,7 @@ function confirmStudentPick() {
 
 function logout() {
   if (role === 'teacher' && auth.currentUser && auth.currentUser.providerData.length > 0) auth.signOut();
+  stopUnreadListeners();
   localStorage.removeItem('role');
   localStorage.removeItem('myStudentId');
   role = null; myStudentId = null;
@@ -323,25 +390,28 @@ function hideNav() {
 }
 function setScreen(html) { document.getElementById('app').innerHTML = html; }
 
-function buildNavHtml(primaryTabs, moreTabs, tabFnName, activeKey) {
+function buildNavHtml(primaryTabs, moreTabs, tabFnName, activeKey, badges) {
+  badges = badges || {};
+
   const primaryHtml = primaryTabs.map(t => `
     <button class="tab-btn ${activeKey === t.key ? 'active' : ''}" onclick="${tabFnName}('${t.key}')">
-      <span class="tab-icon">${t.icon}</span>
+      ${iconWithBadge(t.icon, badges[t.key], 'tab-icon')}
       <span>${t.label}</span>
     </button>
   `).join('');
 
   const moreActive = moreTabs.some(t => t.key === activeKey);
+  const moreBadgeTotal = moreTabs.reduce((sum, t) => sum + (badges[t.key] || 0), 0);
   const moreBtnHtml = `
     <button class="tab-btn ${moreActive ? 'active' : ''}" onclick="toggleMoreMenu()">
-      <span class="tab-icon">\u2022\u2022\u2022</span>
+      ${iconWithBadge('\u2022\u2022\u2022', moreBadgeTotal, 'tab-icon')}
       <span>আরও</span>
     </button>
   `;
 
   const moreItemsHtml = moreTabs.map(t => `
     <div class="more-item ${activeKey === t.key ? 'active' : ''}" onclick="${tabFnName}('${t.key}'); closeMoreMenu();">
-      <span class="more-icon">${t.icon}</span>
+      ${iconWithBadge(t.icon, badges[t.key], 'more-icon')}
       <span>${t.label}</span>
     </div>
   `).join('');
@@ -381,7 +451,7 @@ function renderTeacherNav(activeKey) {
 function renderStudentNav(activeKey) {
   const nav = document.getElementById('bottomNav');
   nav.style.display = 'block';
-  nav.innerHTML = buildNavHtml(studentPrimaryTabs, studentMoreTabs, 'studentTab', activeKey);
+  nav.innerHTML = buildNavHtml(studentPrimaryTabs, studentMoreTabs, 'studentTab', activeKey, unreadCounts);
 }
 
 function showTeacherApp() {
@@ -389,6 +459,7 @@ function showTeacherApp() {
 }
 
 function showStudentApp() {
+  startUnreadListeners();
   studentTab('attendance');
 }
 
@@ -400,6 +471,7 @@ function listenStudents() {
     // refresh currently visible screen if it depends on student list
     if (role === 'teacher' && document.getElementById('studentsScreen')) renderStudentsList();
     if (role === 'teacher' && document.getElementById('attendanceScreen')) renderAttendanceList();
+    if (role === 'student' && myStudentId) startDiaryUnreadListener();
   }, () => setSync(false));
 }
 
@@ -418,6 +490,9 @@ function teacherTab(tab) {
 }
 
 function studentTab(tab) {
+  currentStudentTab = tab;
+  if (tab === 'notices') markNoticesSeen();
+  if (tab === 'diary') markDiarySeen();
   renderStudentNav(tab);
   if (tab === 'attendance') renderMyAttendance();
   if (tab === 'leaves') renderLeavesScreen(false);
