@@ -11,6 +11,7 @@ let resultsClassFilter = 'all';
 let leavesClassFilter = 'all';
 let tlClassFilter = 'all';
 let diaryClassFilter = 'all';
+let suggestionsClassFilter = 'all';
 
 // marksheet entry state (teacher side, in-progress subject rows before save)
 let currentMarksheetSubjects = [];
@@ -203,6 +204,7 @@ function showTeacherApp() {
     <button class="tab-btn" onclick="teacherTab('timeleft', this)">বের হওয়ার সময়</button>
     <button class="tab-btn" onclick="teacherTab('notices', this)">নোটিশ</button>
     <button class="tab-btn" onclick="teacherTab('diary', this)">ডায়েরী</button>
+    <button class="tab-btn" onclick="teacherTab('suggestions', this)">পরামর্শ</button>
   `;
   teacherTab('students');
 }
@@ -215,6 +217,7 @@ function showStudentApp() {
     <button class="tab-btn" onclick="studentTab('results', this)">রেজাল্ট</button>
     <button class="tab-btn" onclick="studentTab('notices', this)">নোটিশ</button>
     <button class="tab-btn" onclick="studentTab('diary', this)">ডায়েরী</button>
+    <button class="tab-btn" onclick="studentTab('suggestions', this)">পরামর্শ</button>
   `;
   studentTab('attendance');
 }
@@ -244,6 +247,7 @@ function teacherTab(tab, el) {
   if (tab === 'timeleft') renderTimeLeftScreen();
   if (tab === 'notices') renderNoticesScreen(true);
   if (tab === 'diary') renderDiaryScreen(true);
+  if (tab === 'suggestions') renderSuggestionsScreen(true);
 }
 
 function studentTab(tab, el) {
@@ -253,6 +257,7 @@ function studentTab(tab, el) {
   if (tab === 'results') renderResultsScreen(false);
   if (tab === 'notices') renderNoticesScreen(false);
   if (tab === 'diary') renderDiaryScreen(false);
+  if (tab === 'suggestions') renderSuggestionsScreen(false);
 }
 
 // ---- Students list (teacher) ----
@@ -1025,4 +1030,92 @@ function addDiaryEntry() {
 function deleteDiaryEntry(id) {
   if (!confirm('এই ডায়েরি এন্ট্রি মুছতে চান?')) return;
   db.collection('diary').doc(id).delete();
+}
+
+// ---- Suggestion box (পরামর্শ বক্স, শিক্ষার্থীর নাম-সহ) ----
+
+function renderSuggestionsScreen(isTeacher) {
+  let html = '';
+  if (!isTeacher) {
+    html += `
+      <div class="card">
+        <h2>পরামর্শ পাঠান</h2>
+        <label>আপনার পরামর্শ লিখুন</label>
+        <textarea id="suggestionText" rows="4" placeholder="আপনার পরামর্শ / মতামত লিখুন"></textarea>
+        <p id="suggestionError" class="muted" style="color:#dc2626;"></p>
+        <button onclick="submitSuggestion()">পাঠান</button>
+      </div>`;
+  }
+  html += `<div class="card">
+    <h2>${isTeacher ? 'সকল পরামর্শ' : 'আমার পাঠানো পরামর্শ'}</h2>
+    ${isTeacher ? '<div id="suggestionsFilterWrap"></div>' : ''}
+    <div id="suggestionsWrap">লোড হচ্ছে...</div>
+  </div>`;
+  setScreen(html);
+
+  if (isTeacher) {
+    const filterWrap = document.getElementById('suggestionsFilterWrap');
+    if (filterWrap) filterWrap.innerHTML = classFilterDropdownHtml(suggestionsClassFilter, 'onSuggestionsClassFilterChange');
+  }
+
+  let q = db.collection('suggestions');
+  if (isTeacher) q = q.orderBy('createdAt', 'desc');
+  else q = q.where('studentId', '==', myStudentId);
+
+  q.onSnapshot(snap => {
+    const wrap = document.getElementById('suggestionsWrap');
+    if (!wrap) return;
+    if (snap.empty) { wrap.innerHTML = '<p class="muted">কোনো পরামর্শ নেই</p>'; return; }
+    let docs = snap.docs;
+    if (!isTeacher) docs = [...docs].sort((a,b) => (b.data().createdAt||0) - (a.data().createdAt||0));
+
+    if (isTeacher && suggestionsClassFilter !== 'all') {
+      docs = docs.filter(d => {
+        const student = studentsCache.find(s => s.id === d.data().studentId);
+        return student && student.className === suggestionsClassFilter;
+      });
+    }
+
+    if (docs.length === 0) { wrap.innerHTML = '<p class="muted">এই শ্রেণিতে কোনো পরামর্শ নেই</p>'; return; }
+
+    wrap.innerHTML = docs.map(d => {
+      const r = d.data();
+      const student = studentsCache.find(s => s.id === r.studentId);
+      const date = r.createdAt ? new Date(r.createdAt).toLocaleDateString('bn-BD') : '';
+      return `<div class="student-row" style="display:block;">
+        <div style="display:flex;justify-content:space-between;">
+          <b>${isTeacher ? (student ? student.name + (student.className ? ' (' + student.className + ')' : '') : 'অজানা') : 'আপনার পরামর্শ'}</b>
+          <span class="muted">${date}</span>
+        </div>
+        <div style="margin-top:4px;">${r.text}</div>
+        ${isTeacher ? `<button class="small danger" onclick="deleteSuggestion('${d.id}')" style="margin-top:6px;">মুছুন</button>` : ''}
+      </div>`;
+    }).join('');
+  }, err => {
+    const wrap = document.getElementById('suggestionsWrap');
+    if (wrap) wrap.innerHTML = '<p class="muted">লোড করতে সমস্যা হয়েছে: ' + err.message + '</p>';
+  });
+}
+
+function onSuggestionsClassFilterChange(value) {
+  suggestionsClassFilter = value;
+  renderSuggestionsScreen(true);
+}
+
+function submitSuggestion() {
+  const text = document.getElementById('suggestionText').value.trim();
+  const errEl = document.getElementById('suggestionError');
+  if (errEl) errEl.textContent = '';
+  if (!text) { if (errEl) errEl.textContent = 'পরামর্শ লিখুন'; return; }
+  db.collection('suggestions').add({ studentId: myStudentId, text, createdAt: Date.now() })
+    .then(() => {
+      document.getElementById('suggestionText').value = '';
+      alert('আপনার পরামর্শ পাঠানো হয়েছে');
+    })
+    .catch(e => { if (errEl) errEl.textContent = 'পাঠাতে ব্যর্থ: ' + e.message; });
+}
+
+function deleteSuggestion(id) {
+  if (!confirm('এই পরামর্শ মুছতে চান?')) return;
+  db.collection('suggestions').doc(id).delete();
 }
