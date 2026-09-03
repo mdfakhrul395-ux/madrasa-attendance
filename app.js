@@ -13,6 +13,13 @@ let tlClassFilter = 'all';
 let diaryClassFilter = 'all';
 let suggestionsClassFilter = 'all';
 
+// attendance report state (daily/monthly)
+let reportClassFilter = 'all';
+let reportMode = 'daily'; // 'daily' | 'monthly'
+let reportDate = new Date().toISOString().slice(0,10);
+let reportMonth = new Date().toISOString().slice(0,7); // 'YYYY-MM'
+let reportStudentId = '';
+
 // marksheet entry state (teacher side, in-progress subject rows before save)
 let currentMarksheetSubjects = [];
 let lastResultsIsTeacher = true;
@@ -199,6 +206,7 @@ function showTeacherApp() {
   document.getElementById('bottomNav').innerHTML = `
     <button class="tab-btn active" onclick="teacherTab('students', this)">শিক্ষার্থী</button>
     <button class="tab-btn" onclick="teacherTab('attendance', this)">উপস্থিতি</button>
+    <button class="tab-btn" onclick="teacherTab('report', this)">রিপোর্ট</button>
     <button class="tab-btn" onclick="teacherTab('leaves', this)">ছুটি</button>
     <button class="tab-btn" onclick="teacherTab('results', this)">রেজাল্ট</button>
     <button class="tab-btn" onclick="teacherTab('timeleft', this)">বের হওয়ার সময়</button>
@@ -242,6 +250,7 @@ function teacherTab(tab, el) {
   tabActive(el);
   if (tab === 'students') renderStudentsScreen();
   if (tab === 'attendance') renderAttendanceScreen();
+  if (tab === 'report') renderReportScreen();
   if (tab === 'leaves') renderLeavesScreen(true);
   if (tab === 'results') { currentMarksheetSubjects = []; renderResultsScreen(true); }
   if (tab === 'timeleft') renderTimeLeftScreen();
@@ -852,6 +861,227 @@ function loadTimeLeftReport() {
       return `<div class="student-row"><span>${s.name} <span class="muted">(${s.className || '-'})</span></span><span>${r.timeLeftHome || '—'}</span></div>`;
     }).join('');
   });
+}
+
+// ---- Attendance report (দৈনিক / মাসিক, teacher) ----
+function renderReportScreen() {
+  setScreen(`
+    <div class="card">
+      <h2>উপস্থিতি রিপোর্ট</h2>
+      <div class="row" style="margin-bottom:10px;">
+        <button class="small ${reportMode==='daily' ? '' : 'secondary'}" onclick="switchReportMode('daily')">দৈনিক রিপোর্ট</button>
+        <button class="small ${reportMode==='monthly' ? '' : 'secondary'}" onclick="switchReportMode('monthly')">মাসিক রিপোর্ট</button>
+      </div>
+      <div id="reportControlsWrap"></div>
+    </div>
+    <div id="reportResultWrap"></div>
+  `);
+  if (reportMode === 'daily') renderDailyReportControls();
+  else renderMonthlyReportControls();
+}
+
+function switchReportMode(mode) {
+  reportMode = mode;
+  renderReportScreen();
+}
+
+// -- daily report --
+function renderDailyReportControls() {
+  const controlsWrap = document.getElementById('reportControlsWrap');
+  if (!controlsWrap) return;
+  controlsWrap.innerHTML = `
+    <label>তারিখ</label>
+    <input type="date" id="reportDateInput" value="${reportDate}" onchange="onReportDateChange(this.value)">
+    <div id="reportClassFilterWrap"></div>
+  `;
+  document.getElementById('reportClassFilterWrap').innerHTML = classFilterDropdownHtml(reportClassFilter, 'onReportClassFilterChange');
+  loadDailyReport();
+}
+
+function onReportDateChange(value) {
+  reportDate = value;
+  loadDailyReport();
+}
+
+function onReportClassFilterChange(value) {
+  reportClassFilter = value;
+  if (reportMode === 'daily') loadDailyReport();
+  else { populateReportStudentSelect(); loadMonthlyReport(); }
+}
+
+function loadDailyReport() {
+  const resultWrap = document.getElementById('reportResultWrap');
+  if (!resultWrap) return;
+  resultWrap.innerHTML = '<div class="card"><p class="muted">লোড হচ্ছে...</p></div>';
+
+  const students = studentsByClass(reportClassFilter);
+  if (students.length === 0) { resultWrap.innerHTML = '<div class="card"><p class="muted">কোনো শিক্ষার্থী নেই</p></div>'; return; }
+
+  const date = reportDate;
+  Promise.all(students.map(s => db.collection('attendance').doc(s.id + '_' + date).get()))
+    .then(docs => {
+      let presentCount = 0, absentCount = 0, unmarkedCount = 0;
+      const rows = students.map((s, i) => {
+        const doc = docs[i];
+        const d = doc.exists ? doc.data() : {};
+        const status = d.status;
+        if (status === 'present') presentCount++;
+        else if (status === 'absent') absentCount++;
+        else unmarkedCount++;
+        const statusText = status === 'present' ? 'উপস্থিত' : (status === 'absent' ? 'অনুপস্থিত' : 'চিহ্নিত হয়নি');
+        const badgeClass = status === 'present' ? 'present' : (status === 'absent' ? 'absent' : 'pending');
+        return `
+          <tr>
+            <td style="padding:6px;border:1px solid #ddd;">${s.roll || '-'}</td>
+            <td style="padding:6px;border:1px solid #ddd;">${s.name}</td>
+            <td style="padding:6px;border:1px solid #ddd;">${s.className || '-'}</td>
+            <td style="padding:6px;border:1px solid #ddd;text-align:center;"><span class="badge ${badgeClass}">${statusText}</span></td>
+            <td style="padding:6px;border:1px solid #ddd;">${d.timeLeftHome || '-'}</td>
+            <td style="padding:6px;border:1px solid #ddd;">${d.reason || '-'}</td>
+          </tr>
+        `;
+      }).join('');
+
+      resultWrap.innerHTML = `
+        <style id="reportPrintStyle">
+          @media print { #bottomNav, .no-print { display: none !important; } }
+        </style>
+        <div class="card" id="reportPrintArea">
+          <h2 style="text-align:center;margin-bottom:2px;">দৈনিক উপস্থিতি রিপোর্ট</h2>
+          <p class="muted" style="text-align:center;margin-top:0;">তারিখ: ${date}${reportClassFilter !== 'all' ? ' | শ্রেণি: ' + reportClassFilter : ''}</p>
+          <p style="text-align:center;">মোট: <b>${students.length}</b> &nbsp; উপস্থিত: <b>${presentCount}</b> &nbsp; অনুপস্থিত: <b>${absentCount}</b> &nbsp; চিহ্নিত হয়নি: <b>${unmarkedCount}</b></p>
+          <table style="width:100%;border-collapse:collapse;margin-top:10px;">
+            <thead>
+              <tr>
+                <th style="padding:6px;border:1px solid #ddd;">রোল</th>
+                <th style="padding:6px;border:1px solid #ddd;">নাম</th>
+                <th style="padding:6px;border:1px solid #ddd;">শ্রেণি</th>
+                <th style="padding:6px;border:1px solid #ddd;">অবস্থা</th>
+                <th style="padding:6px;border:1px solid #ddd;">বের হওয়ার সময়</th>
+                <th style="padding:6px;border:1px solid #ddd;">কারণ</th>
+              </tr>
+            </thead>
+            <tbody>${rows}</tbody>
+          </table>
+          <div class="no-print" style="margin-top:14px;text-align:center;">
+            <button onclick="window.print()">🖨️ প্রিন্ট করুন</button>
+          </div>
+        </div>
+      `;
+    })
+    .catch(e => {
+      resultWrap.innerHTML = '<div class="card"><p class="muted">লোড করতে সমস্যা হয়েছে: ' + e.message + '</p></div>';
+    });
+}
+
+// -- monthly report --
+function renderMonthlyReportControls() {
+  const controlsWrap = document.getElementById('reportControlsWrap');
+  if (!controlsWrap) return;
+  controlsWrap.innerHTML = `
+    <div id="reportClassFilterWrap"></div>
+    <label>শিক্ষার্থী</label>
+    <select id="reportStudentSelect" onchange="onReportStudentChange(this.value)"></select>
+    <label>মাস</label>
+    <input type="month" id="reportMonthInput" value="${reportMonth}" onchange="onReportMonthChange(this.value)">
+  `;
+  document.getElementById('reportClassFilterWrap').innerHTML = classFilterDropdownHtml(reportClassFilter, 'onReportClassFilterChange');
+  populateReportStudentSelect();
+  loadMonthlyReport();
+}
+
+function onReportMonthChange(value) {
+  reportMonth = value;
+  loadMonthlyReport();
+}
+
+function populateReportStudentSelect() {
+  const sel = document.getElementById('reportStudentSelect');
+  if (!sel) return;
+  const students = studentsByClass(reportClassFilter);
+  if (students.length === 0) {
+    sel.innerHTML = '<option value="">কোনো শিক্ষার্থী নেই</option>';
+    reportStudentId = '';
+    return;
+  }
+  if (!reportStudentId || !students.find(s => s.id === reportStudentId)) {
+    reportStudentId = students[0].id;
+  }
+  sel.innerHTML = students.map(s => `<option value="${s.id}" ${s.id === reportStudentId ? 'selected' : ''}>${s.name} (${s.roll || ''})</option>`).join('');
+}
+
+function onReportStudentChange(value) {
+  reportStudentId = value;
+  loadMonthlyReport();
+}
+
+function loadMonthlyReport() {
+  const resultWrap = document.getElementById('reportResultWrap');
+  if (!resultWrap) return;
+
+  if (!reportStudentId) {
+    resultWrap.innerHTML = '<div class="card"><p class="muted">কোনো শিক্ষার্থী নেই</p></div>';
+    return;
+  }
+
+  resultWrap.innerHTML = '<div class="card"><p class="muted">লোড হচ্ছে...</p></div>';
+  const student = studentsCache.find(s => s.id === reportStudentId);
+  const month = reportMonth; // 'YYYY-MM'
+
+  db.collection('attendance').where('studentId', '==', reportStudentId).get()
+    .then(snap => {
+      const entries = snap.docs
+        .map(d => d.data())
+        .filter(d => (d.date || '').startsWith(month))
+        .sort((a, b) => (a.date || '').localeCompare(b.date || ''));
+
+      const presentCount = entries.filter(e => e.status === 'present').length;
+      const absentCount = entries.filter(e => e.status === 'absent').length;
+      const markedCount = presentCount + absentCount;
+      const rate = markedCount > 0 ? Math.round((presentCount / markedCount) * 1000) / 10 : 0;
+
+      const rows = entries.length > 0 ? entries.map(e => {
+        const statusText = e.status === 'present' ? 'উপস্থিত' : (e.status === 'absent' ? 'অনুপস্থিত' : 'চিহ্নিত হয়নি');
+        const badgeClass = e.status === 'present' ? 'present' : (e.status === 'absent' ? 'absent' : 'pending');
+        return `
+          <tr>
+            <td style="padding:6px;border:1px solid #ddd;">${e.date}</td>
+            <td style="padding:6px;border:1px solid #ddd;text-align:center;"><span class="badge ${badgeClass}">${statusText}</span></td>
+            <td style="padding:6px;border:1px solid #ddd;">${e.timeLeftHome || '-'}</td>
+            <td style="padding:6px;border:1px solid #ddd;">${e.reason || '-'}</td>
+          </tr>
+        `;
+      }).join('') : `<tr><td colspan="4" style="padding:6px;border:1px solid #ddd;text-align:center;" class="muted">এই মাসে কোনো তথ্য নেই</td></tr>`;
+
+      resultWrap.innerHTML = `
+        <style id="reportPrintStyle">
+          @media print { #bottomNav, .no-print { display: none !important; } }
+        </style>
+        <div class="card" id="reportPrintArea">
+          <h2 style="text-align:center;margin-bottom:2px;">মাসিক উপস্থিতি রিপোর্ট</h2>
+          <p class="muted" style="text-align:center;margin-top:0;">${student ? student.name + ' (রোল ' + (student.roll || '-') + ', ' + (student.className || '-') + ')' : ''}</p>
+          <p class="muted" style="text-align:center;margin-top:0;">মাস: ${month}</p>
+          <p style="text-align:center;">উপস্থিত: <b>${presentCount}</b> &nbsp; অনুপস্থিত: <b>${absentCount}</b> &nbsp; চিহ্নিত দিন: <b>${markedCount}</b> &nbsp; উপস্থিতির হার: <b>${rate}%</b></p>
+          <table style="width:100%;border-collapse:collapse;margin-top:10px;">
+            <thead>
+              <tr>
+                <th style="padding:6px;border:1px solid #ddd;">তারিখ</th>
+                <th style="padding:6px;border:1px solid #ddd;">অবস্থা</th>
+                <th style="padding:6px;border:1px solid #ddd;">বের হওয়ার সময়</th>
+                <th style="padding:6px;border:1px solid #ddd;">কারণ</th>
+              </tr>
+            </thead>
+            <tbody>${rows}</tbody>
+          </table>
+          <div class="no-print" style="margin-top:14px;text-align:center;">
+            <button onclick="window.print()">🖨️ প্রিন্ট করুন</button>
+          </div>
+        </div>
+      `;
+    })
+    .catch(e => {
+      resultWrap.innerHTML = '<div class="card"><p class="muted">লোড করতে সমস্যা হয়েছে: ' + e.message + '</p></div>';
+    });
 }
 
 // ---- Notices (shared, realtime) ----
