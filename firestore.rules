@@ -65,7 +65,10 @@ service cloud.firestore {
         (isStudentAuth() && request.resource.data.studentId == mySessionStudentId());
       allow update, delete: if isTeacherAuth();
     }
-
+match /settings/{docId} {
+  allow read: if request.auth != null;
+  allow write: if isTeacherAuth();
+}
     match /_ping/{doc} {
       allow read: if true;
       allow write: if false;
