@@ -27,6 +27,33 @@ let lastResultsIsTeacher = true;
 // app settings (madrasa name & logo)
 let appSettings = {};
 
+// ================= NAV CONFIG =================
+const teacherPrimaryTabs = [
+  { key: 'students', label: 'শিক্ষার্থী', icon: '\u{1F468}\u200D\u{1F393}' },
+  { key: 'attendance', label: 'উপস্থিতি', icon: '\u2705' },
+  { key: 'report', label: 'রিপোর্ট', icon: '\u{1F4CA}' },
+  { key: 'results', label: 'রেজাল্ট', icon: '\u{1F3C6}' }
+];
+const teacherMoreTabs = [
+  { key: 'leaves', label: 'ছুটি', icon: '\u{1F4C5}' },
+  { key: 'timeleft', label: 'বের হওয়ার সময়', icon: '\u23F0' },
+  { key: 'notices', label: 'নোটিশ', icon: '\u{1F4E2}' },
+  { key: 'diary', label: 'ডায়েরী', icon: '\u{1F4D3}' },
+  { key: 'suggestions', label: 'পরামর্শ', icon: '\u{1F4AC}' },
+  { key: 'settings', label: 'সেটিংস', icon: '\u2699\uFE0F' }
+];
+
+const studentPrimaryTabs = [
+  { key: 'attendance', label: 'উপস্থিতি', icon: '\u2705' },
+  { key: 'results', label: 'রেজাল্ট', icon: '\u{1F3C6}' },
+  { key: 'notices', label: 'নোটিশ', icon: '\u{1F4E2}' },
+  { key: 'diary', label: 'ডায়েরী', icon: '\u{1F4D3}' }
+];
+const studentMoreTabs = [
+  { key: 'leaves', label: 'ছুটির আবেদন', icon: '\u{1F4C5}' },
+  { key: 'suggestions', label: 'পরামর্শ', icon: '\u{1F4AC}' }
+];
+
 // ================= INIT =================
 window.addEventListener('DOMContentLoaded', () => {
   db.collection('_ping').doc('x').get()
@@ -290,42 +317,79 @@ function logout() {
 }
 
 // ================= NAV =================
-function hideNav() { document.getElementById('bottomNav').style.display = 'none'; }
+function hideNav() {
+  closeMoreMenu();
+  document.getElementById('bottomNav').style.display = 'none';
+}
 function setScreen(html) { document.getElementById('app').innerHTML = html; }
 
-function showTeacherApp() {
-  document.getElementById('bottomNav').style.display = 'flex';
-  document.getElementById('bottomNav').innerHTML = `
-    <button class="tab-btn active" onclick="teacherTab('students', this)">শিক্ষার্থী</button>
-    <button class="tab-btn" onclick="teacherTab('attendance', this)">উপস্থিতি</button>
-    <button class="tab-btn" onclick="teacherTab('report', this)">রিপোর্ট</button>
-    <button class="tab-btn" onclick="teacherTab('leaves', this)">ছুটি</button>
-    <button class="tab-btn" onclick="teacherTab('results', this)">রেজাল্ট</button>
-    <button class="tab-btn" onclick="teacherTab('timeleft', this)">বের হওয়ার সময়</button>
-    <button class="tab-btn" onclick="teacherTab('notices', this)">নোটিশ</button>
-    <button class="tab-btn" onclick="teacherTab('diary', this)">ডায়েরী</button>
-    <button class="tab-btn" onclick="teacherTab('suggestions', this)">পরামর্শ</button>
-    <button class="tab-btn" onclick="teacherTab('settings', this)">সেটিংস</button>
+function buildNavHtml(primaryTabs, moreTabs, tabFnName, activeKey) {
+  const primaryHtml = primaryTabs.map(t => `
+    <button class="tab-btn ${activeKey === t.key ? 'active' : ''}" onclick="${tabFnName}('${t.key}')">
+      <span class="tab-icon">${t.icon}</span>
+      <span>${t.label}</span>
+    </button>
+  `).join('');
+
+  const moreActive = moreTabs.some(t => t.key === activeKey);
+  const moreBtnHtml = `
+    <button class="tab-btn ${moreActive ? 'active' : ''}" onclick="toggleMoreMenu()">
+      <span class="tab-icon">\u2022\u2022\u2022</span>
+      <span>আরও</span>
+    </button>
   `;
+
+  const moreItemsHtml = moreTabs.map(t => `
+    <div class="more-item ${activeKey === t.key ? 'active' : ''}" onclick="${tabFnName}('${t.key}'); closeMoreMenu();">
+      <span class="more-icon">${t.icon}</span>
+      <span>${t.label}</span>
+    </div>
+  `).join('');
+
+  return `
+    <div class="tabs-primary">${primaryHtml}${moreBtnHtml}</div>
+    <div id="moreSheetBackdrop" class="more-sheet-backdrop" style="display:none;" onclick="closeMoreMenu()"></div>
+    <div id="moreSheet" class="more-sheet" style="display:none;">
+      <div class="more-title">সব মেনু</div>
+      <div class="more-grid">${moreItemsHtml}</div>
+    </div>
+  `;
+}
+
+function toggleMoreMenu() {
+  const sheet = document.getElementById('moreSheet');
+  const backdrop = document.getElementById('moreSheetBackdrop');
+  if (!sheet || !backdrop) return;
+  const isOpen = sheet.style.display === 'block';
+  sheet.style.display = isOpen ? 'none' : 'block';
+  backdrop.style.display = isOpen ? 'none' : 'block';
+}
+
+function closeMoreMenu() {
+  const sheet = document.getElementById('moreSheet');
+  const backdrop = document.getElementById('moreSheetBackdrop');
+  if (sheet) sheet.style.display = 'none';
+  if (backdrop) backdrop.style.display = 'none';
+}
+
+function renderTeacherNav(activeKey) {
+  const nav = document.getElementById('bottomNav');
+  nav.style.display = 'block';
+  nav.innerHTML = buildNavHtml(teacherPrimaryTabs, teacherMoreTabs, 'teacherTab', activeKey);
+}
+
+function renderStudentNav(activeKey) {
+  const nav = document.getElementById('bottomNav');
+  nav.style.display = 'block';
+  nav.innerHTML = buildNavHtml(studentPrimaryTabs, studentMoreTabs, 'studentTab', activeKey);
+}
+
+function showTeacherApp() {
   teacherTab('students');
 }
 
 function showStudentApp() {
-  document.getElementById('bottomNav').style.display = 'flex';
-  document.getElementById('bottomNav').innerHTML = `
-    <button class="tab-btn active" onclick="studentTab('attendance', this)">উপস্থিতি</button>
-    <button class="tab-btn" onclick="studentTab('leaves', this)">ছুটির আবেদন</button>
-    <button class="tab-btn" onclick="studentTab('results', this)">রেজাল্ট</button>
-    <button class="tab-btn" onclick="studentTab('notices', this)">নোটিশ</button>
-    <button class="tab-btn" onclick="studentTab('diary', this)">ডায়েরী</button>
-    <button class="tab-btn" onclick="studentTab('suggestions', this)">পরামর্শ</button>
-  `;
   studentTab('attendance');
-}
-
-function tabActive(el) {
-  document.querySelectorAll('.tab-btn').forEach(b => b.classList.remove('active'));
-  if (el) el.classList.add('active');
 }
 
 // ================= STUDENTS (shared, realtime) =================
@@ -339,8 +403,8 @@ function listenStudents() {
   }, () => setSync(false));
 }
 
-function teacherTab(tab, el) {
-  tabActive(el);
+function teacherTab(tab) {
+  renderTeacherNav(tab);
   if (tab === 'students') renderStudentsScreen();
   if (tab === 'attendance') renderAttendanceScreen();
   if (tab === 'report') renderReportScreen();
@@ -353,8 +417,8 @@ function teacherTab(tab, el) {
   if (tab === 'settings') renderSettingsScreen();
 }
 
-function studentTab(tab, el) {
-  tabActive(el);
+function studentTab(tab) {
+  renderStudentNav(tab);
   if (tab === 'attendance') renderMyAttendance();
   if (tab === 'leaves') renderLeavesScreen(false);
   if (tab === 'results') renderResultsScreen(false);

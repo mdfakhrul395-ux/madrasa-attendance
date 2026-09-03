@@ -3,7 +3,7 @@ body {
   font-family: 'Noto Sans Bengali', 'Segoe UI', sans-serif;
   background: #f2f5f7;
   color: #1e293b;
-  padding-bottom: 70px;
+  padding-bottom: 84px;
 }
 header {
   background: #0f766e;
@@ -66,26 +66,116 @@ button.small { width: auto; padding: 6px 12px; font-size: 13px; margin: 4px 4px 
 .badge.pending { background: #fef9c3; color: #854d0e; }
 .badge.approved { background: #dcfce7; color: #166534; }
 .badge.rejected { background: #fee2e2; color: #991b1b; }
+
+/* ================= BOTTOM NAVIGATION ================= */
 nav.tabs {
   position: fixed;
   bottom: 0;
   left: 0;
   right: 0;
-  background: white;
+  z-index: 30;
+  max-width: 600px;
+  margin: 0 auto;
+}
+.tabs-primary {
   display: flex;
-  border-top: 1px solid #ddd;
-  z-index: 10;
+  justify-content: space-around;
+  align-items: stretch;
+  background: white;
+  border-top: 1px solid #e2e8f0;
+  box-shadow: 0 -2px 12px rgba(15,23,42,0.06);
+  padding: 6px 4px 8px;
+  border-radius: 16px 16px 0 0;
 }
-nav.tabs button {
+.tabs-primary .tab-btn {
   flex: 1;
+  width: auto;
   background: none;
+  border: none;
   color: #64748b;
-  border-radius: 0;
-  font-size: 12px;
-  padding: 10px 2px;
+  font-size: 11px;
+  font-family: inherit;
+  padding: 4px 2px;
   margin: 0;
+  display: flex;
+  flex-direction: column;
+  align-items: center;
+  gap: 2px;
+  cursor: pointer;
 }
-nav.tabs button.active { color: #0f766e; font-weight: bold; }
+.tabs-primary .tab-btn .tab-icon {
+  font-size: 19px;
+  line-height: 1;
+  padding: 5px 14px;
+  border-radius: 14px;
+  transition: background 0.15s ease, color 0.15s ease;
+}
+.tabs-primary .tab-btn span:last-child {
+  margin-top: 1px;
+}
+.tabs-primary .tab-btn.active {
+  color: #0f766e;
+  font-weight: bold;
+}
+.tabs-primary .tab-btn.active .tab-icon {
+  background: #ccfbf1;
+}
+.tabs-primary .tab-btn:not(.active) .tab-icon {
+  background: transparent;
+}
+
+.more-sheet-backdrop {
+  position: fixed;
+  inset: 0;
+  background: rgba(15,23,42,0.35);
+  z-index: 25;
+}
+.more-sheet {
+  position: fixed;
+  left: 0;
+  right: 0;
+  bottom: 68px;
+  max-width: 600px;
+  margin: 0 auto;
+  background: white;
+  border-radius: 16px 16px 0 0;
+  box-shadow: 0 -6px 20px rgba(15,23,42,0.12);
+  padding: 14px 14px 20px;
+  z-index: 28;
+}
+.more-title {
+  font-size: 12px;
+  color: #94a3b8;
+  font-weight: 600;
+  margin-bottom: 10px;
+}
+.more-grid {
+  display: grid;
+  grid-template-columns: repeat(3, 1fr);
+  gap: 10px;
+}
+.more-grid .more-item {
+  display: flex;
+  flex-direction: column;
+  align-items: center;
+  gap: 6px;
+  padding: 12px 4px;
+  border-radius: 12px;
+  background: #f8fafc;
+  border: 1px solid #eef2f5;
+  color: #334155;
+  font-size: 11.5px;
+  text-align: center;
+  cursor: pointer;
+}
+.more-grid .more-item .more-icon { font-size: 21px; }
+.more-grid .more-item.active {
+  background: #ccfbf1;
+  color: #0f766e;
+  font-weight: bold;
+  border-color: #99f6e4;
+}
+
 .sync-dot {
   display: inline-block;
   width: 8px; height: 8px;
