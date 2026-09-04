@@ -17,9 +17,42 @@ service cloud.firestore {
       return get(/databases/$(database)/documents/students/$(mySessionStudentId())).data.className;
     }
 
+    // Which madrasa (tenant) the current signed-in user belongs to.
+    // Teacher accounts look this up from /teachers/{uid}; student (anonymous)
+    // accounts look this up from their own /sessions/{uid} doc.
+    function myMadrasaId() {
+      return isTeacherAuth()
+        ? get(/databases/$(database)/documents/teachers/$(request.auth.uid)).data.madrasaId
+        : get(/databases/$(database)/documents/sessions/$(request.auth.uid)).data.madrasaId;
+    }
+
+    // Maps a teacher's Firebase Auth uid to the madrasa (tenant) they belong
+    // to. A teacher can only read/write their own mapping doc, and only the
+    // first time (client creates it on first login) — this lets a brand new
+    // teacher account bootstrap itself without needing myMadrasaId() first.
+    match /teachers/{uid} {
+      allow read: if request.auth != null && request.auth.uid == uid;
+      allow write: if isTeacherAuth() && request.auth.uid == uid;
+    }
+
+    // Per-madrasa settings (name, logo, subscription info later).
+    match /madrasas/{madrasaId} {
+      allow read: if request.auth != null;
+      allow write: if isTeacherAuth() && madrasaId == myMadrasaId();
+    }
+
+    // Student directory. Read stays open to any signed-in user (teacher or
+    // anonymous) because the student-name picker screen needs to list names
+    // before a student has logged in / has a session yet. This means, for
+    // now, any device can technically list student names/rolls/phone numbers
+    // across madrasas via direct API calls (the app UI itself only shows the
+    // madrasa it's linked to). Tightening this further requires a public,
+    // pre-login way to identify a device's madrasa (e.g. a per-madrasa access
+    // code) — worth doing in a later hardening pass once there are multiple
+    // real tenants.
     match /students/{studentId} {
       allow read: if request.auth != null;
-      allow write: if isTeacherAuth();
+      allow write: if isTeacherAuth() && request.resource.data.madrasaId == myMadrasaId();
     }
 
     match /sessions/{uid} {
@@ -27,48 +60,45 @@ service cloud.firestore {
     }
 
     match /attendance/{docId} {
-      allow read: if isTeacherAuth() ||
+      allow read: if (isTeacherAuth() && resource.data.madrasaId == myMadrasaId()) ||
         (isStudentAuth() && resource.data.studentId == mySessionStudentId());
-      allow write: if isTeacherAuth() ||
+      allow write: if (isTeacherAuth() && request.resource.data.madrasaId == myMadrasaId()) ||
         (isStudentAuth() && request.resource.data.studentId == mySessionStudentId());
     }
 
     match /leaves/{docId} {
-      allow read: if isTeacherAuth() ||
+      allow read: if (isTeacherAuth() && resource.data.madrasaId == myMadrasaId()) ||
         (isStudentAuth() && resource.data.studentId == mySessionStudentId());
-      allow create: if isTeacherAuth() ||
+      allow create: if (isTeacherAuth() && request.resource.data.madrasaId == myMadrasaId()) ||
         (isStudentAuth() && request.resource.data.studentId == mySessionStudentId());
-      allow update, delete: if isTeacherAuth();
+      allow update, delete: if isTeacherAuth() && resource.data.madrasaId == myMadrasaId();
     }
 
     match /results/{docId} {
-      allow read: if isTeacherAuth() ||
+      allow read: if (isTeacherAuth() && resource.data.madrasaId == myMadrasaId()) ||
         (isStudentAuth() && resource.data.studentId == mySessionStudentId());
-      allow write: if isTeacherAuth();
+      allow write: if isTeacherAuth() && request.resource.data.madrasaId == myMadrasaId();
     }
 
     match /notices/{docId} {
-      allow read: if request.auth != null;
-      allow write: if isTeacherAuth();
+      allow read: if request.auth != null && resource.data.madrasaId == myMadrasaId();
+      allow write: if isTeacherAuth() && request.resource.data.madrasaId == myMadrasaId();
     }
 
     match /diary/{docId} {
-      allow read: if isTeacherAuth() ||
-        (isStudentAuth() && resource.data.className == myClassName());
-      allow write: if isTeacherAuth();
+      allow read: if (isTeacherAuth() && resource.data.madrasaId == myMadrasaId()) ||
+        (isStudentAuth() && resource.data.madrasaId == myMadrasaId() && resource.data.className == myClassName());
+      allow write: if isTeacherAuth() && request.resource.data.madrasaId == myMadrasaId();
     }
 
     match /suggestions/{docId} {
-      allow read: if isTeacherAuth() ||
+      allow read: if (isTeacherAuth() && resource.data.madrasaId == myMadrasaId()) ||
         (isStudentAuth() && resource.data.studentId == mySessionStudentId());
-      allow create: if isTeacherAuth() ||
+      allow create: if (isTeacherAuth() && request.resource.data.madrasaId == myMadrasaId()) ||
         (isStudentAuth() && request.resource.data.studentId == mySessionStudentId());
-      allow update, delete: if isTeacherAuth();
+      allow update, delete: if isTeacherAuth() && resource.data.madrasaId == myMadrasaId();
     }
-match /settings/{docId} {
-  allow read: if request.auth != null;
-  allow write: if isTeacherAuth();
-}
+
     match /_ping/{doc} {
       allow read: if true;
       allow write: if false;
