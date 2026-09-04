@@ -1,3 +1,18 @@
+// ================= MULTI-TENANT: MADRASA ID =================
+// Each madrasa gets its own link like yourapp.com/?m=abc123 — opening that
+// link once saves the id to this device permanently (localStorage). Existing
+// users (who never used a ?m= link) automatically stay on 'madrasa-001' —
+// their current data — so nothing changes for them.
+(function initMadrasaId() {
+  const params = new URLSearchParams(window.location.search);
+  const fromUrl = params.get('m');
+  if (fromUrl) localStorage.setItem('madrasaId', fromUrl);
+  if (!localStorage.getItem('madrasaId')) localStorage.setItem('madrasaId', 'madrasa-001');
+})();
+// This can change after a teacher logs in (it's re-read from their teacher
+// profile, which is the authoritative source of which madrasa they belong to).
+let madrasaId = localStorage.getItem('madrasaId');
+
 // ================= STATE =================
 let role = localStorage.getItem('role') || null; // 'teacher' | 'student'
 let myStudentId = localStorage.getItem('myStudentId') || null;
@@ -74,25 +89,35 @@ window.addEventListener('DOMContentLoaded', () => {
       return; // onAuthStateChanged will fire again once signed in
     }
 
-    listenStudents();
-    listenSettings();
-
     const isTeacherAccount = user.providerData.length > 0; // email/password = teacher, anonymous = student/guest
 
-    if (role === 'teacher') {
-      if (isTeacherAccount) showTeacherApp();
-      else showTeacherLogin();
-    } else if (role === 'student' && myStudentId) {
-      // verify this device's session still matches the signed-in anonymous user
-      db.collection('sessions').doc(user.uid).get().then(doc => {
-        if (doc.exists && doc.data().studentId === myStudentId) {
-          showStudentApp();
-        } else {
-          showStudentPicker();
-        }
-      }).catch(() => showStudentPicker());
+    const afterMadrasaResolved = () => {
+      listenStudents();
+      listenSettings();
+
+      if (role === 'teacher') {
+        if (isTeacherAccount) showTeacherApp();
+        else showTeacherLogin();
+      } else if (role === 'student' && myStudentId) {
+        // verify this device's session still matches the signed-in anonymous user
+        db.collection('sessions').doc(user.uid).get().then(doc => {
+          if (doc.exists && doc.data().studentId === myStudentId) {
+            showStudentApp();
+          } else {
+            showStudentPicker();
+          }
+        }).catch(() => showStudentPicker());
+      } else {
+        showRoleSelect();
+      }
+    };
+
+    if (isTeacherAccount) {
+      // Resolve which madrasa this teacher belongs to (and auto-migrate old
+      // data the very first time this runs after the update), then proceed.
+      ensureTeacherDoc(user).then(() => runMigrationIfNeeded()).finally(afterMadrasaResolved);
     } else {
-      showRoleSelect();
+      afterMadrasaResolved();
     }
   });
 });
@@ -102,12 +127,71 @@ function setSync(ok) {
   if (dot) dot.className = 'sync-dot' + (ok ? '' : ' offline');
 }
 
+// ================= MULTI-TENANT: TEACHER <-> MADRASA LINK =================
+// A teacher's madrasa is decided by their teachers/{uid} profile doc, not by
+// whatever link/localStorage this particular device has. The first time an
+// existing teacher logs in after this update, we create that profile for
+// them automatically using the device's current madrasaId (their existing
+// madrasa), so nothing needs to be set up manually.
+function ensureTeacherDoc(user) {
+  const ref = db.collection('teachers').doc(user.uid);
+  return ref.get().then(doc => {
+    if (doc.exists && doc.data().madrasaId) {
+      madrasaId = doc.data().madrasaId;
+      localStorage.setItem('madrasaId', madrasaId);
+      return;
+    }
+    return ref.set({ madrasaId, email: user.email || '', createdAt: Date.now() }, { merge: true });
+  }).catch(err => console.error('ensureTeacherDoc failed:', err));
+}
+
+// ================= MULTI-TENANT: ONE-TIME DATA MIGRATION =================
+// Tags every existing document (students, attendance, leaves, results,
+// notices, diary, suggestions) that doesn't yet have a madrasaId with this
+// madrasa's id. Runs once per madrasa (tracked in localStorage) the first
+// time a teacher of that madrasa opens the app after this update.
+function runMigrationIfNeeded() {
+  const flagKey = 'migrationDone_' + madrasaId;
+  if (localStorage.getItem(flagKey)) return Promise.resolve();
+  const collections = ['students', 'attendance', 'leaves', 'results', 'notices', 'diary', 'suggestions'];
+  let chain = Promise.resolve();
+  collections.forEach(colName => { chain = chain.then(() => migrateCollection(colName)); });
+  return chain.then(() => {
+    localStorage.setItem(flagKey, '1');
+    console.log('Multi-tenant migration complete for', madrasaId);
+  }).catch(err => console.error('Migration error:', err));
+}
+
+function migrateCollection(colName) {
+  return db.collection(colName).get().then(snap => {
+    const toTag = snap.docs.filter(d => !d.data().madrasaId);
+    if (toTag.length === 0) return;
+    const commits = [];
+    for (let i = 0; i < toTag.length; i += 400) {
+      const batch = db.batch();
+      toTag.slice(i, i + 400).forEach(d => batch.update(d.ref, { madrasaId }));
+      commits.push(batch.commit());
+    }
+    return Promise.all(commits);
+  });
+}
+
 // ================= APP SETTINGS (মাদরাসার নাম ও লোগো) =================
 function listenSettings() {
-  db.collection('settings').doc('app').onSnapshot(doc => {
-    appSettings = doc.exists ? (doc.data() || {}) : {};
-    renderTopBar();
-  }, () => renderTopBar());
+  const ref = db.collection('madrasas').doc(madrasaId);
+  ref.get().then(doc => {
+    if (doc.exists) return;
+    // one-time fallback: copy the old single-tenant settings/app doc over,
+    // if this madrasa has never had its own madrasas/{id} doc yet
+    return db.collection('settings').doc('app').get().then(legacyDoc => {
+      if (legacyDoc.exists) return ref.set(legacyDoc.data(), { merge: true });
+    });
+  }).catch(() => {}).then(() => {
+    ref.onSnapshot(doc => {
+      appSettings = doc.exists ? (doc.data() || {}) : {};
+      renderTopBar();
+    }, () => renderTopBar());
+  });
 }
 
 function renderTopBar() {
@@ -166,7 +250,7 @@ function saveSettings() {
   const doSave = (logoDataUrl) => {
     const data = { madrasaName: name };
     if (logoDataUrl !== undefined) data.logoDataUrl = logoDataUrl;
-    db.collection('settings').doc('app').set(data, { merge: true })
+    db.collection('madrasas').doc(madrasaId).set(data, { merge: true })
       .then(() => { alert('সংরক্ষণ করা হয়েছে'); renderSettingsScreen(); })
       .catch(e => { if (errEl) errEl.textContent = 'সংরক্ষণ ব্যর্থ: ' + e.message; });
   };
@@ -185,7 +269,7 @@ function saveSettings() {
 
 function removeLogo() {
   if (!confirm('লোগো মুছতে চান?')) return;
-  db.collection('settings').doc('app').set({ logoDataUrl: '' }, { merge: true })
+  db.collection('madrasas').doc(madrasaId).set({ logoDataUrl: '' }, { merge: true })
     .then(() => renderSettingsScreen())
     .catch(e => alert('মুছতে ব্যর্থ: ' + e.message));
 }
@@ -214,10 +298,6 @@ function studentsByClass(filterValue) {
 }
 
 // ================= UNREAD BADGES (student notices/diary) =================
-// Tracks, per-student (per device), a "last seen" timestamp for notices and
-// diary entries. Any item posted after that timestamp counts as unread and
-// shows as a small red badge on the bottom nav until the student opens that tab.
-
 function noticesSeenKey() { return 'lastSeenNotices_' + (myStudentId || 'x'); }
 function diarySeenKey() { return 'lastSeenDiary_' + (myStudentId || 'x'); }
 
@@ -236,11 +316,14 @@ function startUnreadListeners() {
 
 function startNoticesUnreadListener() {
   if (unreadNoticesUnsub) return; // already listening
-  unreadNoticesUnsub = db.collection('notices').orderBy('createdAt', 'desc').onSnapshot(snap => {
-    const lastSeen = Number(localStorage.getItem(noticesSeenKey()) || 0);
-    unreadCounts.notices = snap.docs.filter(d => (d.data().createdAt || 0) > lastSeen).length;
-    if (role === 'student') renderStudentNav(currentStudentTab);
-  });
+  unreadNoticesUnsub = db.collection('notices')
+    .where('madrasaId', '==', madrasaId)
+    .orderBy('createdAt', 'desc')
+    .onSnapshot(snap => {
+      const lastSeen = Number(localStorage.getItem(noticesSeenKey()) || 0);
+      unreadCounts.notices = snap.docs.filter(d => (d.data().createdAt || 0) > lastSeen).length;
+      if (role === 'student') renderStudentNav(currentStudentTab);
+    });
 }
 
 function startDiaryUnreadListener() {
@@ -249,11 +332,15 @@ function startDiaryUnreadListener() {
   if (!myClass) return; // will retry once class info is loaded (see listenStudents)
   if (unreadDiaryUnsub && unreadDiaryUnsub.className === myClass) return; // already listening for this class
   if (unreadDiaryUnsub && unreadDiaryUnsub.unsub) unreadDiaryUnsub.unsub();
-  const unsub = db.collection('diary').where('className', '==', myClass).orderBy('createdAt', 'desc').onSnapshot(snap => {
-    const lastSeen = Number(localStorage.getItem(diarySeenKey()) || 0);
-    unreadCounts.diary = snap.docs.filter(d => (d.data().createdAt || 0) > lastSeen).length;
-    if (role === 'student') renderStudentNav(currentStudentTab);
-  });
+  const unsub = db.collection('diary')
+    .where('madrasaId', '==', madrasaId)
+    .where('className', '==', myClass)
+    .orderBy('createdAt', 'desc')
+    .onSnapshot(snap => {
+      const lastSeen = Number(localStorage.getItem(diarySeenKey()) || 0);
+      unreadCounts.diary = snap.docs.filter(d => (d.data().createdAt || 0) > lastSeen).length;
+      if (role === 'student') renderStudentNav(currentStudentTab);
+    });
   unreadDiaryUnsub = { unsub, className: myClass };
 }
 
@@ -319,7 +406,9 @@ function teacherLogin() {
   errEl.textContent = '';
   if (!email || !password) { errEl.textContent = 'ইমেইল ও পাসওয়ার্ড দিন'; return; }
   auth.signInWithEmailAndPassword(email, password)
-    .then(() => showTeacherApp())
+    .then(user => ensureTeacherDoc(user.user || auth.currentUser))
+    .then(() => runMigrationIfNeeded())
+    .then(() => { listenStudents(); listenSettings(); showTeacherApp(); })
     .catch(err => {
       errEl.textContent = err.code === 'auth/invalid-credential' || err.code === 'auth/wrong-password' || err.code === 'auth/user-not-found'
         ? 'ইমেইল বা পাসওয়ার্ড সঠিক নয়'
@@ -365,7 +454,7 @@ function confirmStudentPick() {
   }
 
   const uid = auth.currentUser.uid;
-  db.collection('sessions').doc(uid).set({ studentId: student.id, name: student.name, updatedAt: Date.now() }, { merge: true })
+  db.collection('sessions').doc(uid).set({ studentId: student.id, madrasaId, name: student.name, updatedAt: Date.now() }, { merge: true })
     .then(() => {
       myStudentId = student.id;
       localStorage.setItem('myStudentId', myStudentId);
@@ -465,14 +554,17 @@ function showStudentApp() {
 
 // ================= STUDENTS (shared, realtime) =================
 function listenStudents() {
-  db.collection('students').orderBy('roll').onSnapshot(snap => {
-    studentsCache = snap.docs.map(d => ({ id: d.id, ...d.data() }));
-    setSync(true);
-    // refresh currently visible screen if it depends on student list
-    if (role === 'teacher' && document.getElementById('studentsScreen')) renderStudentsList();
-    if (role === 'teacher' && document.getElementById('attendanceScreen')) renderAttendanceList();
-    if (role === 'student' && myStudentId) startDiaryUnreadListener();
-  }, () => setSync(false));
+  db.collection('students')
+    .where('madrasaId', '==', madrasaId)
+    .orderBy('roll')
+    .onSnapshot(snap => {
+      studentsCache = snap.docs.map(d => ({ id: d.id, ...d.data() }));
+      setSync(true);
+      // refresh currently visible screen if it depends on student list
+      if (role === 'teacher' && document.getElementById('studentsScreen')) renderStudentsList();
+      if (role === 'teacher' && document.getElementById('attendanceScreen')) renderAttendanceList();
+      if (role === 'student' && myStudentId) startDiaryUnreadListener();
+    }, () => setSync(false));
 }
 
 function teacherTab(tab) {
@@ -596,7 +688,7 @@ function addStudent() {
   const pin = document.getElementById('newPin').value.trim();
   if (!name) return alert('নাম দিন');
   if (pin && !/^\d{4}$/.test(pin)) return alert('PIN অবশ্যই ৪ সংখ্যার হতে হবে');
-  db.collection('students').add({ name, roll, className, phone, hasWhatsapp, pin: pin || '', createdAt: Date.now() })
+  db.collection('students').add({ madrasaId, name, roll, className, phone, hasWhatsapp, pin: pin || '', createdAt: Date.now() })
     .then(() => {
       document.getElementById('newName').value = '';
       document.getElementById('newRoll').value = '';
@@ -678,12 +770,12 @@ function renderAttendanceList() {
 }
 
 function setAttendance(studentId, date, status) {
-  db.collection('attendance').doc(studentId + '_' + date).set({ studentId, date, status }, { merge: true })
+  db.collection('attendance').doc(studentId + '_' + date).set({ studentId, date, status, madrasaId }, { merge: true })
     .then(() => renderAttendanceList());
 }
 
 function updateAttField(studentId, date, field, value) {
-  db.collection('attendance').doc(studentId + '_' + date).set({ studentId, date, [field]: value }, { merge: true });
+  db.collection('attendance').doc(studentId + '_' + date).set({ studentId, date, madrasaId, [field]: value }, { merge: true });
 }
 
 // ---- Student's own attendance view ----
@@ -729,7 +821,7 @@ function submitMyTimeLeft() {
   const value = document.getElementById('myTimeLeft').value;
   if (!value) return;
   db.collection('attendance').doc(myStudentId + '_' + today).set({
-    studentId: myStudentId, date: today, timeLeftHome: value
+    studentId: myStudentId, date: today, madrasaId, timeLeftHome: value
   }, { merge: true });
 }
 
@@ -759,7 +851,7 @@ function renderLeavesScreen(isTeacher) {
   }
 
   let q = db.collection('leaves');
-  if (isTeacher) q = q.orderBy('createdAt', 'desc');
+  if (isTeacher) q = q.where('madrasaId', '==', madrasaId).orderBy('createdAt', 'desc');
   else q = q.where('studentId', '==', myStudentId);
 
   q.onSnapshot(snap => {
@@ -810,7 +902,7 @@ function submitLeave() {
   const date = document.getElementById('leaveDate').value;
   const reason = document.getElementById('leaveReason').value.trim();
   if (!reason) return alert('কারণ লিখুন');
-  db.collection('leaves').add({ studentId: myStudentId, date, reason, status: 'pending', createdAt: Date.now() })
+  db.collection('leaves').add({ madrasaId, studentId: myStudentId, date, reason, status: 'pending', createdAt: Date.now() })
     .then(() => { document.getElementById('leaveReason').value=''; });
 }
 
@@ -819,8 +911,6 @@ function setLeaveStatus(id, status) {
 }
 
 // ================= RESULTS / MARKSHEET =================
-
-// Standard percentage -> grade scale used for the marksheet
 function gradeFromPercent(percent) {
   if (percent >= 80) return { grade: 'A+', gpa: '5.00' };
   if (percent >= 70) return { grade: 'A', gpa: '4.00' };
@@ -863,7 +953,7 @@ function renderResultsScreen(isTeacher) {
 
   let q = db.collection('results');
   if (isTeacher) {
-    q = q.orderBy('date', 'desc');
+    q = q.where('madrasaId', '==', madrasaId).orderBy('date', 'desc');
   } else {
     q = q.where('studentId', '==', myStudentId).where('published', '==', true);
   }
@@ -965,6 +1055,7 @@ function saveMarksheet() {
   const { grade, gpa } = gradeFromPercent(percentage);
 
   db.collection('results').doc(studentId + '_' + examName).set({
+    madrasaId,
     studentId,
     examName,
     subjects: currentMarksheetSubjects,
@@ -1083,7 +1174,7 @@ function loadTimeLeftReport() {
   if (filterWrap) filterWrap.innerHTML = classFilterDropdownHtml(tlClassFilter, 'onTlClassFilterChange');
 
   const date = document.getElementById('tlDate').value;
-  db.collection('attendance').where('date', '==', date).get().then(snap => {
+  db.collection('attendance').where('madrasaId', '==', madrasaId).where('date', '==', date).get().then(snap => {
     const wrap = document.getElementById('tlWrap');
     const rows = {};
     snap.docs.forEach(d => rows[d.data().studentId] = d.data());
@@ -1332,7 +1423,7 @@ function renderNoticesScreen(isTeacher) {
   html += `<div class="card"><h2>নোটিশ বোর্ড</h2><div id="noticesWrap">লোড হচ্ছে...</div></div>`;
   setScreen(html);
 
-  db.collection('notices').orderBy('createdAt', 'desc').onSnapshot(snap => {
+  db.collection('notices').where('madrasaId', '==', madrasaId).orderBy('createdAt', 'desc').onSnapshot(snap => {
     const wrap = document.getElementById('noticesWrap');
     if (!wrap) return;
     if (snap.empty) { wrap.innerHTML = '<p class="muted">কোনো নোটিশ নেই</p>'; return; }
@@ -1358,7 +1449,7 @@ function addNotice() {
   const title = document.getElementById('noticeTitle').value.trim();
   const body = document.getElementById('noticeBody').value.trim();
   if (!title || !body) return alert('শিরোনাম ও বিস্তারিত লিখুন');
-  db.collection('notices').add({ title, body, createdAt: Date.now() })
+  db.collection('notices').add({ madrasaId, title, body, createdAt: Date.now() })
     .then(() => { document.getElementById('noticeTitle').value=''; document.getElementById('noticeBody').value=''; })
     .catch(e => alert('সংরক্ষণ ব্যর্থ: ' + e.message));
 }
@@ -1406,7 +1497,7 @@ function renderDiaryScreen(isTeacher) {
 
   let diaryQuery;
   if (isTeacher) {
-    diaryQuery = db.collection('diary').orderBy('createdAt', 'desc');
+    diaryQuery = db.collection('diary').where('madrasaId', '==', madrasaId).orderBy('createdAt', 'desc');
   } else {
     const me = studentsCache.find(s => s.id === myStudentId);
     const myClass = me ? me.className : null;
@@ -1415,10 +1506,7 @@ function renderDiaryScreen(isTeacher) {
       if (wrap) wrap.innerHTML = '<p class="muted">শ্রেণি তথ্য পাওয়া যায়নি</p>';
       return;
     }
-    // Firestore requires the query itself to filter by className (matching the
-    // security rule's resource.data.className check) — a plain list query
-    // without this where() is rejected as insufficient permissions.
-    diaryQuery = db.collection('diary').where('className', '==', myClass).orderBy('createdAt', 'desc');
+    diaryQuery = db.collection('diary').where('madrasaId', '==', madrasaId).where('className', '==', myClass).orderBy('createdAt', 'desc');
   }
 
   diaryQuery.onSnapshot(snap => {
@@ -1478,7 +1566,7 @@ function addDiaryEntry() {
 
   const saveEntry = (attachmentDataUrl, attachmentName, attachmentType) => {
     db.collection('diary').add({
-      date, className, text,
+      madrasaId, date, className, text,
       attachmentDataUrl: attachmentDataUrl || '',
       attachmentName: attachmentName || '',
       attachmentType: attachmentType || '',
@@ -1534,7 +1622,7 @@ function renderSuggestionsScreen(isTeacher) {
   }
 
   let q = db.collection('suggestions');
-  if (isTeacher) q = q.orderBy('createdAt', 'desc');
+  if (isTeacher) q = q.where('madrasaId', '==', madrasaId).orderBy('createdAt', 'desc');
   else q = q.where('studentId', '==', myStudentId);
 
   q.onSnapshot(snap => {
@@ -1582,7 +1670,7 @@ function submitSuggestion() {
   const errEl = document.getElementById('suggestionError');
   if (errEl) errEl.textContent = '';
   if (!text) { if (errEl) errEl.textContent = 'পরামর্শ লিখুন'; return; }
-  db.collection('suggestions').add({ studentId: myStudentId, text, createdAt: Date.now() })
+  db.collection('suggestions').add({ madrasaId, studentId: myStudentId, text, createdAt: Date.now() })
     .then(() => {
       document.getElementById('suggestionText').value = '';
       alert('আপনার পরামর্শ পাঠানো হয়েছে');
