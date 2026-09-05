@@ -13,6 +13,28 @@
 // profile, which is the authoritative source of which madrasa they belong to).
 let madrasaId = localStorage.getItem('madrasaId');
 
+// ================= DIAGNOSTIC BANNER (temporary, for debugging on mobile) =================
+// Shows any Firestore/auth error directly on screen, since there's no way to
+// open browser dev tools on a phone. Remove this block once the issue is fixed.
+function showDiagBanner(msg) {
+  let el = document.getElementById('diagBanner');
+  if (!el) {
+    el = document.createElement('div');
+    el.id = 'diagBanner';
+    el.style.cssText = 'position:fixed;top:0;left:0;right:0;z-index:99999;background:#fee2e2;color:#7f1d1d;padding:10px 12px;font-size:12px;line-height:1.5;white-space:pre-wrap;word-break:break-word;border-bottom:3px solid #dc2626;max-height:40vh;overflow:auto;';
+    document.body.insertBefore(el, document.body.firstChild);
+    const closeBtn = document.createElement('div');
+    closeBtn.textContent = '✕ বন্ধ করুন';
+    closeBtn.style.cssText = 'text-align:right;font-weight:bold;cursor:pointer;margin-top:6px;';
+    closeBtn.onclick = () => { el.style.display = 'none'; };
+    el.appendChild(closeBtn);
+  }
+  const textNode = document.createElement('div');
+  textNode.textContent = new Date().toLocaleTimeString() + ' — ' + msg;
+  el.insertBefore(textNode, el.firstChild);
+  el.style.display = 'block';
+}
+
 // ================= STATE =================
 let role = localStorage.getItem('role') || null; // 'teacher' | 'student'
 let myStudentId = localStorage.getItem('myStudentId') || null;
@@ -85,7 +107,7 @@ window.addEventListener('DOMContentLoaded', () => {
     if (!user) {
       // Everyone (teacher or student) needs to be signed in (at least anonymously)
       // before Firestore rules will allow reading student/attendance/result data.
-      auth.signInAnonymously().catch(err => console.error('Anonymous sign-in failed:', err));
+      auth.signInAnonymously().catch(err => { console.error('Anonymous sign-in failed:', err); showDiagBanner('Anonymous sign-in ব্যর্থ: ' + err.message); });
       return; // onAuthStateChanged will fire again once signed in
     }
 
@@ -106,7 +128,7 @@ window.addEventListener('DOMContentLoaded', () => {
           } else {
             showStudentPicker();
           }
-        }).catch(() => showStudentPicker());
+        }).catch(err => { showDiagBanner('Session চেক ব্যর্থ: ' + err.message); showStudentPicker(); });
       } else {
         showRoleSelect();
       }
@@ -142,7 +164,7 @@ function ensureTeacherDoc(user) {
       return;
     }
     return ref.set({ madrasaId, email: user.email || '', createdAt: Date.now() }, { merge: true });
-  }).catch(err => console.error('ensureTeacherDoc failed:', err));
+  }).catch(err => { console.error('ensureTeacherDoc failed:', err); showDiagBanner('ensureTeacherDoc এরর: ' + err.message); });
 }
 
 // ================= MULTI-TENANT: ONE-TIME DATA MIGRATION =================
@@ -159,7 +181,7 @@ function runMigrationIfNeeded() {
   return chain.then(() => {
     localStorage.setItem(flagKey, '1');
     console.log('Multi-tenant migration complete for', madrasaId);
-  }).catch(err => console.error('Migration error:', err));
+  }).catch(err => { console.error('Migration error:', err); showDiagBanner('মাইগ্রেশন এরর: ' + err.message); });
 }
 
 function migrateCollection(colName) {
@@ -173,7 +195,7 @@ function migrateCollection(colName) {
       commits.push(batch.commit());
     }
     return Promise.all(commits);
-  });
+  }).catch(err => { showDiagBanner('মাইগ্রেশন এরর (' + colName + '): ' + err.message); throw err; });
 }
 
 // ================= APP SETTINGS (মাদরাসার নাম ও লোগো) =================
@@ -190,7 +212,7 @@ function listenSettings() {
     ref.onSnapshot(doc => {
       appSettings = doc.exists ? (doc.data() || {}) : {};
       renderTopBar();
-    }, () => renderTopBar());
+    }, err => { showDiagBanner('Settings লোড এরর: ' + err.message); renderTopBar(); });
   });
 }
 
@@ -252,7 +274,7 @@ function saveSettings() {
     if (logoDataUrl !== undefined) data.logoDataUrl = logoDataUrl;
     db.collection('madrasas').doc(madrasaId).set(data, { merge: true })
       .then(() => { alert('সংরক্ষণ করা হয়েছে'); renderSettingsScreen(); })
-      .catch(e => { if (errEl) errEl.textContent = 'সংরক্ষণ ব্যর্থ: ' + e.message; });
+      .catch(e => { if (errEl) errEl.textContent = 'সংরক্ষণ ব্যর্থ: ' + e.message; showDiagBanner('Settings সংরক্ষণ ব্যর্থ: ' + e.message); });
   };
 
   if (!file) { doSave(); return; }
@@ -323,7 +345,7 @@ function startNoticesUnreadListener() {
       const lastSeen = Number(localStorage.getItem(noticesSeenKey()) || 0);
       unreadCounts.notices = snap.docs.filter(d => (d.data().createdAt || 0) > lastSeen).length;
       if (role === 'student') renderStudentNav(currentStudentTab);
-    });
+    }, err => showDiagBanner('নোটিশ আনরিড লোড এরর: ' + err.message));
 }
 
 function startDiaryUnreadListener() {
@@ -340,7 +362,7 @@ function startDiaryUnreadListener() {
       const lastSeen = Number(localStorage.getItem(diarySeenKey()) || 0);
       unreadCounts.diary = snap.docs.filter(d => (d.data().createdAt || 0) > lastSeen).length;
       if (role === 'student') renderStudentNav(currentStudentTab);
-    });
+    }, err => showDiagBanner('ডায়েরী আনরিড লোড এরর: ' + err.message));
   unreadDiaryUnsub = { unsub, className: myClass };
 }
 
@@ -413,6 +435,7 @@ function teacherLogin() {
       errEl.textContent = err.code === 'auth/invalid-credential' || err.code === 'auth/wrong-password' || err.code === 'auth/user-not-found'
         ? 'ইমেইল বা পাসওয়ার্ড সঠিক নয়'
         : 'লগইন ব্যর্থ: ' + err.message;
+      showDiagBanner('Login ব্যর্থ: ' + err.message);
     });
 }
 
@@ -460,7 +483,7 @@ function confirmStudentPick() {
       localStorage.setItem('myStudentId', myStudentId);
       showStudentApp();
     })
-    .catch(e => { if (errEl) errEl.textContent = 'প্রবেশ ব্যর্থ: ' + e.message; });
+    .catch(e => { if (errEl) errEl.textContent = 'প্রবেশ ব্যর্থ: ' + e.message; showDiagBanner('Session সংরক্ষণ ব্যর্থ: ' + e.message); });
 }
 
 function logout() {
@@ -564,7 +587,10 @@ function listenStudents() {
       if (role === 'teacher' && document.getElementById('studentsScreen')) renderStudentsList();
       if (role === 'teacher' && document.getElementById('attendanceScreen')) renderAttendanceList();
       if (role === 'student' && myStudentId) startDiaryUnreadListener();
-    }, () => setSync(false));
+    }, err => {
+      setSync(false);
+      showDiagBanner('স্টুডেন্ট লিস্ট লোড এরর (madrasaId=' + madrasaId + '): ' + err.message);
+    });
 }
 
 function teacherTab(tab) {
@@ -676,7 +702,7 @@ function setStudentPhone(id) {
   const trimmed = phone.trim();
   const hasWhatsapp = trimmed ? confirm('এই নম্বরে কি WhatsApp আছে?') : false;
   db.collection('students').doc(id).set({ phone: trimmed, hasWhatsapp }, { merge: true })
-    .catch(e => alert('সংরক্ষণ ব্যর্থ: ' + e.message));
+    .catch(e => { alert('সংরক্ষণ ব্যর্থ: ' + e.message); showDiagBanner('ফোন সংরক্ষণ ব্যর্থ: ' + e.message); });
 }
 
 function addStudent() {
@@ -697,7 +723,7 @@ function addStudent() {
       document.getElementById('newWhatsapp').checked = false;
       document.getElementById('newPin').value = '';
     })
-    .catch(e => alert('সংরক্ষণ ব্যর্থ: ' + e.message));
+    .catch(e => { alert('সংরক্ষণ ব্যর্থ: ' + e.message); showDiagBanner('স্টুডেন্ট যোগ ব্যর্থ (madrasaId=' + madrasaId + '): ' + e.message); });
 }
 
 function setStudentPin(id) {
@@ -705,7 +731,7 @@ function setStudentPin(id) {
   if (pin === null) return; // cancelled
   if (!/^\d{4}$/.test(pin)) { alert('PIN অবশ্যই ৪ সংখ্যার হতে হবে'); return; }
   db.collection('students').doc(id).set({ pin }, { merge: true })
-    .catch(e => alert('PIN সংরক্ষণ ব্যর্থ: ' + e.message));
+    .catch(e => { alert('PIN সংরক্ষণ ব্যর্থ: ' + e.message); showDiagBanner('PIN সংরক্ষণ ব্যর্থ: ' + e.message); });
 }
 
 function deleteStudent(id) {
@@ -765,17 +791,19 @@ function renderAttendanceList() {
         <label>অনুপস্থিতির কারণ (যদি থাকে)</label>
         <input value="${d.reason||''}" onchange="updateAttField('${s.id}','${date}','reason',this.value)">
       `;
-    });
+    }).catch(e => showDiagBanner('অ্যাটেন্ডেন্স লোড ব্যর্থ: ' + e.message));
   });
 }
 
 function setAttendance(studentId, date, status) {
   db.collection('attendance').doc(studentId + '_' + date).set({ studentId, date, status, madrasaId }, { merge: true })
-    .then(() => renderAttendanceList());
+    .then(() => renderAttendanceList())
+    .catch(e => showDiagBanner('অ্যাটেন্ডেন্স সংরক্ষণ ব্যর্থ: ' + e.message));
 }
 
 function updateAttField(studentId, date, field, value) {
-  db.collection('attendance').doc(studentId + '_' + date).set({ studentId, date, madrasaId, [field]: value }, { merge: true });
+  db.collection('attendance').doc(studentId + '_' + date).set({ studentId, date, madrasaId, [field]: value }, { merge: true })
+    .catch(e => showDiagBanner('অ্যাটেন্ডেন্স ফিল্ড সংরক্ষণ ব্যর্থ: ' + e.message));
 }
 
 // ---- Student's own attendance view ----
@@ -813,6 +841,7 @@ function renderMyAttendance() {
     }, err => {
       const wrap = document.getElementById('myAttWrap');
       if (wrap) wrap.innerHTML = '<p class="muted">লোড করতে সমস্যা হয়েছে: ' + err.message + '</p>';
+      showDiagBanner('আমার উপস্থিতি লোড এরর: ' + err.message);
     });
 }
 
@@ -822,7 +851,7 @@ function submitMyTimeLeft() {
   if (!value) return;
   db.collection('attendance').doc(myStudentId + '_' + today).set({
     studentId: myStudentId, date: today, madrasaId, timeLeftHome: value
-  }, { merge: true });
+  }, { merge: true }).catch(e => showDiagBanner('বের হওয়ার সময় সংরক্ষণ ব্যর্থ: ' + e.message));
 }
 
 // ---- Leaves ----
@@ -890,6 +919,7 @@ function renderLeavesScreen(isTeacher) {
   }, err => {
     const wrap = document.getElementById('leavesWrap');
     if (wrap) wrap.innerHTML = '<p class="muted">লোড করতে সমস্যা হয়েছে: ' + err.message + '</p>';
+    showDiagBanner('ছুটির আবেদন লোড এরর: ' + err.message);
   });
 }
 
@@ -903,11 +933,12 @@ function submitLeave() {
   const reason = document.getElementById('leaveReason').value.trim();
   if (!reason) return alert('কারণ লিখুন');
   db.collection('leaves').add({ madrasaId, studentId: myStudentId, date, reason, status: 'pending', createdAt: Date.now() })
-    .then(() => { document.getElementById('leaveReason').value=''; });
+    .then(() => { document.getElementById('leaveReason').value=''; })
+    .catch(e => showDiagBanner('ছুটির আবেদন সংরক্ষণ ব্যর্থ: ' + e.message));
 }
 
 function setLeaveStatus(id, status) {
-  db.collection('leaves').doc(id).update({ status });
+  db.collection('leaves').doc(id).update({ status }).catch(e => showDiagBanner('ছুটি স্ট্যাটাস আপডেট ব্যর্থ: ' + e.message));
 }
 
 // ================= RESULTS / MARKSHEET =================
@@ -999,6 +1030,7 @@ function renderResultsScreen(isTeacher) {
   }, err => {
     const wrap = document.getElementById('resultsWrap');
     if (wrap) wrap.innerHTML = '<p class="muted">লোড করতে সমস্যা হয়েছে: ' + err.message + '</p>';
+    showDiagBanner('রেজাল্ট লোড এরর: ' + err.message);
   });
 }
 
@@ -1071,12 +1103,12 @@ function saveMarksheet() {
     document.getElementById('resExam').value = '';
     renderSubjectRows();
     alert('মার্কশিট সংরক্ষণ করা হয়েছে (এখনো অপ্রকাশিত — শিক্ষার্থী দেখতে পাবে না যতক্ষণ না আপনি "প্রকাশ করুন" চাপবেন)');
-  }).catch(e => alert('সংরক্ষণ ব্যর্থ: ' + e.message));
+  }).catch(e => { alert('সংরক্ষণ ব্যর্থ: ' + e.message); showDiagBanner('মার্কশিট সংরক্ষণ ব্যর্থ: ' + e.message); });
 }
 
 function togglePublish(docId, currentlyPublished) {
   db.collection('results').doc(docId).set({ published: !currentlyPublished }, { merge: true })
-    .catch(e => alert('আপডেট ব্যর্থ: ' + e.message));
+    .catch(e => { alert('আপডেট ব্যর্থ: ' + e.message); showDiagBanner('প্রকাশ/স্থগিত ব্যর্থ: ' + e.message); });
 }
 
 function deleteMarksheet(docId) {
@@ -1143,7 +1175,7 @@ function viewMarksheet(studentId, docId) {
         </div>
       </div>
     `);
-  }).catch(e => alert('লোড ব্যর্থ: ' + e.message));
+  }).catch(e => { alert('লোড ব্যর্থ: ' + e.message); showDiagBanner('মার্কশিট লোড ব্যর্থ: ' + e.message); });
 }
 
 function printMarksheet() {
@@ -1184,7 +1216,7 @@ function loadTimeLeftReport() {
       const r = rows[s.id] || {};
       return `<div class="student-row"><span>${s.name} <span class="muted">(${s.className || '-'})</span></span><span>${r.timeLeftHome || '—'}</span></div>`;
     }).join('');
-  });
+  }).catch(e => showDiagBanner('বের হওয়ার সময় রিপোর্ট এরর: ' + e.message));
 }
 
 // ---- Attendance report (দৈনিক / মাসিক, teacher) ----
@@ -1295,6 +1327,7 @@ function loadDailyReport() {
     })
     .catch(e => {
       resultWrap.innerHTML = '<div class="card"><p class="muted">লোড করতে সমস্যা হয়েছে: ' + e.message + '</p></div>';
+      showDiagBanner('দৈনিক রিপোর্ট এরর: ' + e.message);
     });
 }
 
@@ -1405,6 +1438,7 @@ function loadMonthlyReport() {
     })
     .catch(e => {
       resultWrap.innerHTML = '<div class="card"><p class="muted">লোড করতে সমস্যা হয়েছে: ' + e.message + '</p></div>';
+      showDiagBanner('মাসিক রিপোর্ট এরর: ' + e.message);
     });
 }
 
@@ -1442,6 +1476,7 @@ function renderNoticesScreen(isTeacher) {
   }, err => {
     const wrap = document.getElementById('noticesWrap');
     if (wrap) wrap.innerHTML = '<p class="muted">লোড করতে সমস্যা হয়েছে: ' + err.message + '</p>';
+    showDiagBanner('নোটিশ লোড এরর: ' + err.message);
   });
 }
 
@@ -1451,7 +1486,7 @@ function addNotice() {
   if (!title || !body) return alert('শিরোনাম ও বিস্তারিত লিখুন');
   db.collection('notices').add({ madrasaId, title, body, createdAt: Date.now() })
     .then(() => { document.getElementById('noticeTitle').value=''; document.getElementById('noticeBody').value=''; })
-    .catch(e => alert('সংরক্ষণ ব্যর্থ: ' + e.message));
+    .catch(e => { alert('সংরক্ষণ ব্যর্থ: ' + e.message); showDiagBanner('নোটিশ সংরক্ষণ ব্যর্থ: ' + e.message); });
 }
 
 function deleteNotice(id) {
@@ -1543,6 +1578,7 @@ function renderDiaryScreen(isTeacher) {
   }, err => {
     const wrap = document.getElementById('diaryWrap');
     if (wrap) wrap.innerHTML = '<p class="muted">লোড করতে সমস্যা হয়েছে: ' + err.message + '</p>';
+    showDiagBanner('ডায়েরী লোড এরর: ' + err.message);
   });
 }
 
@@ -1574,7 +1610,7 @@ function addDiaryEntry() {
     }).then(() => {
       document.getElementById('diaryText').value = '';
       if (fileInput) fileInput.value = '';
-    }).catch(e => { if (errEl) errEl.textContent = 'সংরক্ষণ ব্যর্থ: ' + e.message; });
+    }).catch(e => { if (errEl) errEl.textContent = 'সংরক্ষণ ব্যর্থ: ' + e.message; showDiagBanner('ডায়েরী সংরক্ষণ ব্যর্থ: ' + e.message); });
   };
 
   if (!file) { saveEntry(); return; }
@@ -1657,6 +1693,7 @@ function renderSuggestionsScreen(isTeacher) {
   }, err => {
     const wrap = document.getElementById('suggestionsWrap');
     if (wrap) wrap.innerHTML = '<p class="muted">লোড করতে সমস্যা হয়েছে: ' + err.message + '</p>';
+    showDiagBanner('পরামর্শ লোড এরর: ' + err.message);
   });
 }
 
@@ -1675,7 +1712,7 @@ function submitSuggestion() {
       document.getElementById('suggestionText').value = '';
       alert('আপনার পরামর্শ পাঠানো হয়েছে');
     })
-    .catch(e => { if (errEl) errEl.textContent = 'পাঠাতে ব্যর্থ: ' + e.message; });
+    .catch(e => { if (errEl) errEl.textContent = 'পাঠাতে ব্যর্থ: ' + e.message; showDiagBanner('পরামর্শ পাঠাতে ব্যর্থ: ' + e.message); });
 }
 
 function deleteSuggestion(id) {
