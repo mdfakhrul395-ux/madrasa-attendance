@@ -1,6 +1,6 @@
 {
-  "name": "মাদরাসা হাজিরা অ্যাপ",
-  "short_name": "হাজিরা",
+  "name": "ShikkhaOS",
+  "short_name": "ShikkhaOS",
   "start_url": "./index.html",
   "display": "standalone",
   "background_color": "#f2f5f7",
