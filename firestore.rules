@@ -50,13 +50,41 @@ service cloud.firestore {
     // pre-login way to identify a device's madrasa (e.g. a per-madrasa access
     // code) — worth doing in a later hardening pass once there are multiple
     // real tenants.
+    //
+    // IMPORTANT: PINs are never stored on this document (see student_pins
+    // below) — only a harmless hasPinSet:true/false flag lives here.
     match /students/{studentId} {
       allow read: if request.auth != null;
       allow write: if isTeacherAuth() && request.resource.data.madrasaId == myMadrasaId();
     }
 
+    // Student PIN secrets — kept in their own collection so they are never
+    // exposed by the open `students` read rule above. No client, not even
+    // the student who owns it, can ever read this collection directly.
+    // Firestore rules match a PIN server-side (via get()) only at the
+    // moment a student's login session is created/renewed, in the
+    // `sessions` rule below. Only a teacher of the matching madrasa may
+    // set or change a student's PIN.
+    match /student_pins/{studentId} {
+      allow read: if false;
+      allow write: if isTeacherAuth() &&
+        get(/databases/$(database)/documents/students/$(studentId)).data.madrasaId == myMadrasaId();
+    }
+
+    // Student login session: proves (Firebase Auth uid -> studentId) once a
+    // correct PIN has been supplied. The write must include the student's
+    // real, current PIN as `pin` in the same request — this rule checks it
+    // against student_pins/{studentId} via get(); if it doesn't match (or
+    // the student has no PIN set yet), the whole write fails with
+    // "permission-denied" and the app shows "ভুল PIN". The submitted `pin`
+    // value ends up stored on the session doc itself, but that's harmless:
+    // this doc can only ever be read by the same signed-in uid (see allow
+    // read below), so it never reaches anyone else.
     match /sessions/{uid} {
-      allow read, write: if request.auth != null && request.auth.uid == uid;
+      allow read: if request.auth != null && request.auth.uid == uid;
+      allow write: if isStudentAuth() && request.auth.uid == uid &&
+        exists(/databases/$(database)/documents/student_pins/$(request.resource.data.studentId)) &&
+        get(/databases/$(database)/documents/student_pins/$(request.resource.data.studentId)).data.pin == request.resource.data.pin;
     }
 
     match /attendance/{docId} {

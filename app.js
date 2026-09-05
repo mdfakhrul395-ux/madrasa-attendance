@@ -137,7 +137,7 @@ window.addEventListener('DOMContentLoaded', () => {
     if (isTeacherAccount) {
       // Resolve which madrasa this teacher belongs to (and auto-migrate old
       // data the very first time this runs after the update), then proceed.
-      ensureTeacherDoc(user).then(() => runMigrationIfNeeded()).finally(afterMadrasaResolved);
+      ensureTeacherDoc(user).then(() => runMigrationIfNeeded()).then(() => migratePinsIfNeeded()).finally(afterMadrasaResolved);
     } else {
       afterMadrasaResolved();
     }
@@ -196,6 +196,34 @@ function migrateCollection(colName) {
     }
     return Promise.all(commits);
   }).catch(err => { showDiagBanner('মাইগ্রেশন এরর (' + colName + '): ' + err.message); throw err; });
+}
+
+// ================= SECURITY: STUDENT PIN MIGRATION =================
+// Older versions stored each student's PIN directly on the students/{id}
+// document (readable by any signed-in device). This moves every existing
+// plaintext PIN into the student_pins/{id} collection (which no client can
+// ever read — see firestore.rules) and replaces it on the students doc with
+// a harmless hasPinSet:true/false flag. Runs once per madrasa (tracked in
+// localStorage) the first time a teacher opens the app after this update.
+function migratePinsIfNeeded() {
+  const flagKey = 'pinsMigrated_' + madrasaId;
+  if (localStorage.getItem(flagKey)) return Promise.resolve();
+  return db.collection('students').where('madrasaId', '==', madrasaId).get().then(snap => {
+    const withPin = snap.docs.filter(d => d.data().pin);
+    if (withPin.length === 0) { localStorage.setItem(flagKey, '1'); return; }
+    let chain = Promise.resolve();
+    withPin.forEach(docSnap => {
+      chain = chain.then(() => {
+        const pin = docSnap.data().pin;
+        return db.collection('student_pins').doc(docSnap.id).set({ pin })
+          .then(() => docSnap.ref.set({ hasPinSet: true, pin: firebase.firestore.FieldValue.delete() }, { merge: true }));
+      });
+    });
+    return chain.then(() => {
+      localStorage.setItem(flagKey, '1');
+      console.log('PIN migration complete for', madrasaId);
+    });
+  }).catch(err => { console.error('PIN migration error:', err); showDiagBanner('PIN মাইগ্রেশন এরর: ' + err.message); });
 }
 
 // ================= APP SETTINGS (মাদরাসার নাম ও লোগো) =================
@@ -430,6 +458,7 @@ function teacherLogin() {
   auth.signInWithEmailAndPassword(email, password)
     .then(user => ensureTeacherDoc(user.user || auth.currentUser))
     .then(() => runMigrationIfNeeded())
+    .then(() => migratePinsIfNeeded())
     .then(() => { listenStudents(); listenSettings(); showTeacherApp(); })
     .catch(err => {
       errEl.textContent = err.code === 'auth/invalid-credential' || err.code === 'auth/wrong-password' || err.code === 'auth/user-not-found'
@@ -467,23 +496,37 @@ function confirmStudentPick() {
   const enteredPin = (pinInput.value || '').trim();
 
   if (!student) return alert('শিক্ষার্থী খুঁজে পাওয়া যায়নি');
-  if (!student.pin) {
+  if (!enteredPin) {
+    if (errEl) errEl.textContent = 'PIN দিন';
+    return;
+  }
+  if (!student.hasPinSet) {
     if (errEl) errEl.textContent = 'এই শিক্ষার্থীর জন্য এখনো PIN সেট করা হয়নি। শিক্ষককে জানান।';
     return;
   }
-  if (enteredPin !== student.pin) {
-    if (errEl) errEl.textContent = 'ভুল PIN দিয়েছেন';
-    return;
-  }
 
+  // The PIN itself is never checked here on the client (it can't be — this
+  // device is never allowed to read the real PIN). Instead we attempt to
+  // create the session doc with the entered PIN attached, and a Firestore
+  // rule checks it server-side against student_pins/{studentId}. A wrong
+  // PIN makes the write itself fail with "permission-denied".
   const uid = auth.currentUser.uid;
-  db.collection('sessions').doc(uid).set({ studentId: student.id, madrasaId, name: student.name, updatedAt: Date.now() }, { merge: true })
+  db.collection('sessions').doc(uid).set({
+    studentId: student.id, madrasaId, name: student.name, pin: enteredPin, updatedAt: Date.now()
+  }, { merge: true })
     .then(() => {
       myStudentId = student.id;
       localStorage.setItem('myStudentId', myStudentId);
       showStudentApp();
     })
-    .catch(e => { if (errEl) errEl.textContent = 'প্রবেশ ব্যর্থ: ' + e.message; showDiagBanner('Session সংরক্ষণ ব্যর্থ: ' + e.message); });
+    .catch(e => {
+      if (e.code === 'permission-denied') {
+        if (errEl) errEl.textContent = 'ভুল PIN দিয়েছেন';
+      } else {
+        if (errEl) errEl.textContent = 'প্রবেশ ব্যর্থ: ' + e.message;
+        showDiagBanner('Session সংরক্ষণ ব্যর্থ: ' + e.message);
+      }
+    });
 }
 
 function logout() {
@@ -678,7 +721,7 @@ function renderStudentsList() {
         ${s.hasWhatsapp && s.phone ? `<a href="https://wa.me/${normalizePhoneForWhatsapp(s.phone)}" target="_blank" style="text-decoration:none;font-size:20px;" title="WhatsApp-এ মেসেজ পাঠান">💬</a>` : ''}
       </div>
       <div class="muted" style="margin-top:2px;">
-        ${s.phone ? '📱 ' + s.phone : 'মোবাইল নম্বর নেই'} &nbsp; ${s.pin ? '✅ PIN সেট' : '❌ PIN নেই'}
+        ${s.phone ? '📱 ' + s.phone : 'মোবাইল নম্বর নেই'} &nbsp; ${s.hasPinSet ? '✅ PIN সেট' : '❌ PIN নেই'}
       </div>
       <div style="margin-top:6px;">
         <button class="small secondary" onclick="setStudentPin('${s.id}')">PIN সেট/পরিবর্তন</button>
@@ -714,14 +757,22 @@ function addStudent() {
   const pin = document.getElementById('newPin').value.trim();
   if (!name) return alert('নাম দিন');
   if (pin && !/^\d{4}$/.test(pin)) return alert('PIN অবশ্যই ৪ সংখ্যার হতে হবে');
-  db.collection('students').add({ madrasaId, name, roll, className, phone, hasWhatsapp, pin: pin || '', createdAt: Date.now() })
-    .then(() => {
-      document.getElementById('newName').value = '';
-      document.getElementById('newRoll').value = '';
-      document.getElementById('newClass').value = '';
-      document.getElementById('newPhone').value = '';
-      document.getElementById('newWhatsapp').checked = false;
-      document.getElementById('newPin').value = '';
+
+  const clearForm = () => {
+    document.getElementById('newName').value = '';
+    document.getElementById('newRoll').value = '';
+    document.getElementById('newClass').value = '';
+    document.getElementById('newPhone').value = '';
+    document.getElementById('newWhatsapp').checked = false;
+    document.getElementById('newPin').value = '';
+  };
+
+  db.collection('students').add({ madrasaId, name, roll, className, phone, hasWhatsapp, hasPinSet: !!pin, createdAt: Date.now() })
+    .then(docRef => {
+      if (pin) {
+        return db.collection('student_pins').doc(docRef.id).set({ pin }).then(clearForm);
+      }
+      clearForm();
     })
     .catch(e => { alert('সংরক্ষণ ব্যর্থ: ' + e.message); showDiagBanner('স্টুডেন্ট যোগ ব্যর্থ (madrasaId=' + madrasaId + '): ' + e.message); });
 }
@@ -730,7 +781,8 @@ function setStudentPin(id) {
   const pin = prompt('শিক্ষার্থীর জন্য ৪-সংখ্যার PIN দিন:');
   if (pin === null) return; // cancelled
   if (!/^\d{4}$/.test(pin)) { alert('PIN অবশ্যই ৪ সংখ্যার হতে হবে'); return; }
-  db.collection('students').doc(id).set({ pin }, { merge: true })
+  db.collection('student_pins').doc(id).set({ pin }, { merge: true })
+    .then(() => db.collection('students').doc(id).set({ hasPinSet: true }, { merge: true }))
     .catch(e => { alert('PIN সংরক্ষণ ব্যর্থ: ' + e.message); showDiagBanner('PIN সংরক্ষণ ব্যর্থ: ' + e.message); });
 }
 
