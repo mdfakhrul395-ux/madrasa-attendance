@@ -41,6 +41,12 @@ let myStudentId = localStorage.getItem('myStudentId') || null;
 let studentsCache = [];
 const auth = firebase.auth();
 
+// live listener handles (so we can cleanly unsubscribe on logout / auth
+// changes instead of letting them keep firing against a stale/no-auth
+// session, which used to show spurious "permission-denied" banners)
+let studentsUnsub = null;
+let settingsUnsub = null;
+
 // class filter state per screen (teacher side)
 let studentsClassFilter = 'all';
 let attClassFilter = 'all';
@@ -228,6 +234,7 @@ function migratePinsIfNeeded() {
 
 // ================= APP SETTINGS (মাদরাসার নাম ও লোগো) =================
 function listenSettings() {
+  if (settingsUnsub) { settingsUnsub(); settingsUnsub = null; }
   const ref = db.collection('madrasas').doc(madrasaId);
   ref.get().then(doc => {
     if (doc.exists) return;
@@ -237,10 +244,16 @@ function listenSettings() {
       if (legacyDoc.exists) return ref.set(legacyDoc.data(), { merge: true });
     });
   }).catch(() => {}).then(() => {
-    ref.onSnapshot(doc => {
+    settingsUnsub = ref.onSnapshot(doc => {
       appSettings = doc.exists ? (doc.data() || {}) : {};
       renderTopBar();
-    }, err => { showDiagBanner('Settings লোড এরর: ' + err.message); renderTopBar(); });
+    }, err => {
+      // Ignore permission-denied here: this fires briefly during logout /
+      // role switches while auth is momentarily unresolved, and the
+      // listener re-attaches with a valid session moments later anyway.
+      if (err.code !== 'permission-denied') showDiagBanner('Settings লোড এরর: ' + err.message);
+      renderTopBar();
+    });
   });
 }
 
@@ -530,8 +543,16 @@ function confirmStudentPick() {
 }
 
 function logout() {
-  if (role === 'teacher' && auth.currentUser && auth.currentUser.providerData.length > 0) auth.signOut();
+  // Tear down any live listeners *before* switching auth state — otherwise
+  // they keep firing during the brief window where request.auth is null
+  // (between signOut and the automatic anonymous re-sign-in), which used to
+  // surface a burst of harmless "Missing or insufficient permissions"
+  // errors on the diagnostic banner.
+  if (studentsUnsub) { studentsUnsub(); studentsUnsub = null; }
+  if (settingsUnsub) { settingsUnsub(); settingsUnsub = null; }
   stopUnreadListeners();
+
+  if (role === 'teacher' && auth.currentUser && auth.currentUser.providerData.length > 0) auth.signOut();
   localStorage.removeItem('role');
   localStorage.removeItem('myStudentId');
   role = null; myStudentId = null;
@@ -620,7 +641,8 @@ function showStudentApp() {
 
 // ================= STUDENTS (shared, realtime) =================
 function listenStudents() {
-  db.collection('students')
+  if (studentsUnsub) { studentsUnsub(); studentsUnsub = null; }
+  studentsUnsub = db.collection('students')
     .where('madrasaId', '==', madrasaId)
     .orderBy('roll')
     .onSnapshot(snap => {
@@ -632,7 +654,12 @@ function listenStudents() {
       if (role === 'student' && myStudentId) startDiaryUnreadListener();
     }, err => {
       setSync(false);
-      showDiagBanner('স্টুডেন্ট লিস্ট লোড এরর (madrasaId=' + madrasaId + '): ' + err.message);
+      // Ignore permission-denied here: this fires briefly during logout /
+      // role switches while auth is momentarily unresolved, and the
+      // listener re-attaches with a valid session moments later anyway.
+      if (err.code !== 'permission-denied') {
+        showDiagBanner('স্টুডেন্ট লিস্ট লোড এরর (madrasaId=' + madrasaId + '): ' + err.message);
+      }
     });
 }
 
@@ -1082,7 +1109,7 @@ function renderResultsScreen(isTeacher) {
   }, err => {
     const wrap = document.getElementById('resultsWrap');
     if (wrap) wrap.innerHTML = '<p class="muted">লোড করতে সমস্যা হয়েছে: ' + err.message + '</p>';
-    showDiagBanner('রেজাল্ট লোড এরর: ' + err.message);
+    if (err.code !== 'permission-denied') showDiagBanner('রেজাল্ট লোড এরর: ' + err.message);
   });
 }
 
@@ -1379,7 +1406,7 @@ function loadDailyReport() {
     })
     .catch(e => {
       resultWrap.innerHTML = '<div class="card"><p class="muted">লোড করতে সমস্যা হয়েছে: ' + e.message + '</p></div>';
-      showDiagBanner('দৈনিক রিপোর্ট এরর: ' + e.message);
+      if (e.code !== 'permission-denied') showDiagBanner('দৈনিক রিপোর্ট এরর: ' + e.message);
     });
 }
 
@@ -1490,7 +1517,7 @@ function loadMonthlyReport() {
     })
     .catch(e => {
       resultWrap.innerHTML = '<div class="card"><p class="muted">লোড করতে সমস্যা হয়েছে: ' + e.message + '</p></div>';
-      showDiagBanner('মাসিক রিপোর্ট এরর: ' + e.message);
+      if (e.code !== 'permission-denied') showDiagBanner('মাসিক রিপোর্ট এরর: ' + e.message);
     });
 }
 
@@ -1528,7 +1555,7 @@ function renderNoticesScreen(isTeacher) {
   }, err => {
     const wrap = document.getElementById('noticesWrap');
     if (wrap) wrap.innerHTML = '<p class="muted">লোড করতে সমস্যা হয়েছে: ' + err.message + '</p>';
-    showDiagBanner('নোটিশ লোড এরর: ' + err.message);
+    if (err.code !== 'permission-denied') showDiagBanner('নোটিশ লোড এরর: ' + err.message);
   });
 }
 
@@ -1630,7 +1657,7 @@ function renderDiaryScreen(isTeacher) {
   }, err => {
     const wrap = document.getElementById('diaryWrap');
     if (wrap) wrap.innerHTML = '<p class="muted">লোড করতে সমস্যা হয়েছে: ' + err.message + '</p>';
-    showDiagBanner('ডায়েরী লোড এরর: ' + err.message);
+    if (err.code !== 'permission-denied') showDiagBanner('ডায়েরী লোড এরর: ' + err.message);
   });
 }
 
@@ -1745,7 +1772,7 @@ function renderSuggestionsScreen(isTeacher) {
   }, err => {
     const wrap = document.getElementById('suggestionsWrap');
     if (wrap) wrap.innerHTML = '<p class="muted">লোড করতে সমস্যা হয়েছে: ' + err.message + '</p>';
-    showDiagBanner('পরামর্শ লোড এরর: ' + err.message);
+    if (err.code !== 'permission-denied') showDiagBanner('পরামর্শ লোড এরর: ' + err.message);
   });
 }
 
