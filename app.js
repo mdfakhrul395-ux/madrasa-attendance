@@ -39,6 +39,7 @@ function showDiagBanner(msg) {
 let role = localStorage.getItem('role') || null; // 'teacher' | 'student'
 let myStudentId = localStorage.getItem('myStudentId') || null;
 let studentsCache = [];
+let studentContactsCache = {}; // keyed by studentId: { phone, hasWhatsapp } — teacher-only, loaded from student_contacts
 const auth = firebase.auth();
 
 // live listener handles (so we can cleanly unsubscribe on logout / auth
@@ -46,6 +47,7 @@ const auth = firebase.auth();
 // session, which used to show spurious "permission-denied" banners)
 let studentsUnsub = null;
 let settingsUnsub = null;
+let studentContactsUnsub = null;
 
 // class filter state per screen (teacher side)
 let studentsClassFilter = 'all';
@@ -122,6 +124,7 @@ window.addEventListener('DOMContentLoaded', () => {
     const afterMadrasaResolved = () => {
       listenStudents();
       listenSettings();
+      if (isTeacherAccount) listenStudentContacts(); else stopStudentContactsListener();
 
       if (role === 'teacher') {
         if (isTeacherAccount) showTeacherApp();
@@ -143,7 +146,7 @@ window.addEventListener('DOMContentLoaded', () => {
     if (isTeacherAccount) {
       // Resolve which madrasa this teacher belongs to (and auto-migrate old
       // data the very first time this runs after the update), then proceed.
-      ensureTeacherDoc(user).then(() => runMigrationIfNeeded()).then(() => migratePinsIfNeeded()).finally(afterMadrasaResolved);
+      ensureTeacherDoc(user).then(() => runMigrationIfNeeded()).then(() => migratePinsIfNeeded()).then(() => migrateContactsIfNeeded()).finally(afterMadrasaResolved);
     } else {
       afterMadrasaResolved();
     }
@@ -230,6 +233,40 @@ function migratePinsIfNeeded() {
       console.log('PIN migration complete for', madrasaId);
     });
   }).catch(err => { console.error('PIN migration error:', err); showDiagBanner('PIN মাইগ্রেশন এরর: ' + err.message); });
+}
+
+// ================= SECURITY: STUDENT PHONE/WHATSAPP MIGRATION =================
+// Older versions stored each student's phone number and WhatsApp flag
+// directly on the students/{id} document, which is readable by any
+// signed-in device (including anonymous students from other madrasas) via
+// the open `students` read rule. This moves that data into the
+// student_contacts/{id} collection (teacher-only read/write — see
+// firestore.rules) and removes phone/hasWhatsapp from the students doc.
+// Runs once per madrasa (tracked in localStorage) the first time a teacher
+// opens the app after this update.
+function migrateContactsIfNeeded() {
+  const flagKey = 'contactsMigrated_' + madrasaId;
+  if (localStorage.getItem(flagKey)) return Promise.resolve();
+  return db.collection('students').where('madrasaId', '==', madrasaId).get().then(snap => {
+    const withContact = snap.docs.filter(d => d.data().phone || d.data().hasWhatsapp);
+    if (withContact.length === 0) { localStorage.setItem(flagKey, '1'); return; }
+    let chain = Promise.resolve();
+    withContact.forEach(docSnap => {
+      chain = chain.then(() => {
+        const data = docSnap.data();
+        return db.collection('student_contacts').doc(docSnap.id).set({
+          madrasaId, phone: data.phone || '', hasWhatsapp: !!data.hasWhatsapp
+        }).then(() => docSnap.ref.set({
+          phone: firebase.firestore.FieldValue.delete(),
+          hasWhatsapp: firebase.firestore.FieldValue.delete()
+        }, { merge: true }));
+      });
+    });
+    return chain.then(() => {
+      localStorage.setItem(flagKey, '1');
+      console.log('Contact migration complete for', madrasaId);
+    });
+  }).catch(err => { console.error('Contact migration error:', err); showDiagBanner('যোগাযোগ তথ্য মাইগ্রেশন এরর: ' + err.message); });
 }
 
 // ================= APP SETTINGS (মাদরাসার নাম ও লোগো) =================
@@ -472,7 +509,8 @@ function teacherLogin() {
     .then(user => ensureTeacherDoc(user.user || auth.currentUser))
     .then(() => runMigrationIfNeeded())
     .then(() => migratePinsIfNeeded())
-    .then(() => { listenStudents(); listenSettings(); showTeacherApp(); })
+    .then(() => migrateContactsIfNeeded())
+    .then(() => { listenStudents(); listenSettings(); listenStudentContacts(); showTeacherApp(); })
     .catch(err => {
       errEl.textContent = err.code === 'auth/invalid-credential' || err.code === 'auth/wrong-password' || err.code === 'auth/user-not-found'
         ? 'ইমেইল বা পাসওয়ার্ড সঠিক নয়'
@@ -550,6 +588,7 @@ function logout() {
   // errors on the diagnostic banner.
   if (studentsUnsub) { studentsUnsub(); studentsUnsub = null; }
   if (settingsUnsub) { settingsUnsub(); settingsUnsub = null; }
+  stopStudentContactsListener();
   stopUnreadListeners();
 
   if (role === 'teacher' && auth.currentUser && auth.currentUser.providerData.length > 0) auth.signOut();
@@ -663,6 +702,31 @@ function listenStudents() {
     });
 }
 
+// ================= STUDENT CONTACTS (phone/WhatsApp — teacher-only, separate from students) =================
+// Kept in its own collection (not on students/{id}) so phone numbers are
+// never exposed by the open `students` read rule. Only loaded for
+// signed-in teacher accounts; students never need or can read this.
+function listenStudentContacts() {
+  if (studentContactsUnsub) { studentContactsUnsub(); studentContactsUnsub = null; }
+  studentContactsUnsub = db.collection('student_contacts')
+    .where('madrasaId', '==', madrasaId)
+    .onSnapshot(snap => {
+      const map = {};
+      snap.docs.forEach(d => { map[d.id] = d.data(); });
+      studentContactsCache = map;
+      if (role === 'teacher' && document.getElementById('studentsScreen')) renderStudentsList();
+    }, err => {
+      // Ignore permission-denied: fires briefly during logout/role-switch
+      // while auth is momentarily unresolved, same pattern as other listeners.
+      if (err.code !== 'permission-denied') showDiagBanner('যোগাযোগ তথ্য লোড এরর: ' + err.message);
+    });
+}
+
+function stopStudentContactsListener() {
+  if (studentContactsUnsub) { studentContactsUnsub(); studentContactsUnsub = null; }
+  studentContactsCache = {};
+}
+
 function teacherTab(tab) {
   renderTeacherNav(tab);
   if (tab === 'students') renderStudentsScreen();
@@ -741,14 +805,16 @@ function renderStudentsList() {
   if (!wrap) return;
   const list = studentsByClass(studentsClassFilter);
   if (list.length === 0) { wrap.innerHTML = '<p class="muted">কোনো শিক্ষার্থী নেই</p>'; return; }
-  wrap.innerHTML = list.map(s => `
+  wrap.innerHTML = list.map(s => {
+    const contact = studentContactsCache[s.id] || {};
+    return `
     <div class="student-row" style="display:block;">
       <div style="display:flex;justify-content:space-between;align-items:center;">
         <span>${s.name} <span class="muted">(রোল ${s.roll || '-'}, ${s.className || '-'})</span></span>
-        ${s.hasWhatsapp && s.phone ? `<a href="https://wa.me/${normalizePhoneForWhatsapp(s.phone)}" target="_blank" style="text-decoration:none;font-size:20px;" title="WhatsApp-এ মেসেজ পাঠান">💬</a>` : ''}
+        ${contact.hasWhatsapp && contact.phone ? `<a href="https://wa.me/${normalizePhoneForWhatsapp(contact.phone)}" target="_blank" style="text-decoration:none;font-size:20px;" title="WhatsApp-এ মেসেজ পাঠান">💬</a>` : ''}
       </div>
       <div class="muted" style="margin-top:2px;">
-        ${s.phone ? '📱 ' + s.phone : 'মোবাইল নম্বর নেই'} &nbsp; ${s.hasPinSet ? '✅ PIN সেট' : '❌ PIN নেই'}
+        ${contact.phone ? '📱 ' + contact.phone : 'মোবাইল নম্বর নেই'} &nbsp; ${s.hasPinSet ? '✅ PIN সেট' : '❌ PIN নেই'}
       </div>
       <div style="margin-top:6px;">
         <button class="small secondary" onclick="setStudentPin('${s.id}')">PIN সেট/পরিবর্তন</button>
@@ -756,7 +822,8 @@ function renderStudentsList() {
         <button class="small danger" onclick="deleteStudent('${s.id}')">মুছুন</button>
       </div>
     </div>
-  `).join('');
+  `;
+  }).join('');
 }
 
 function normalizePhoneForWhatsapp(phone) {
@@ -766,12 +833,12 @@ function normalizePhoneForWhatsapp(phone) {
 }
 
 function setStudentPhone(id) {
-  const student = studentsCache.find(s => s.id === id);
-  const phone = prompt('মোবাইল নম্বর দিন (যেমন: 01712345678):', student && student.phone ? student.phone : '');
+  const existing = studentContactsCache[id] || {};
+  const phone = prompt('মোবাইল নম্বর দিন (যেমন: 01712345678):', existing.phone || '');
   if (phone === null) return; // cancelled
   const trimmed = phone.trim();
   const hasWhatsapp = trimmed ? confirm('এই নম্বরে কি WhatsApp আছে?') : false;
-  db.collection('students').doc(id).set({ phone: trimmed, hasWhatsapp }, { merge: true })
+  db.collection('student_contacts').doc(id).set({ madrasaId, phone: trimmed, hasWhatsapp }, { merge: true })
     .catch(e => { alert('সংরক্ষণ ব্যর্থ: ' + e.message); showDiagBanner('ফোন সংরক্ষণ ব্যর্থ: ' + e.message); });
 }
 
@@ -794,12 +861,16 @@ function addStudent() {
     document.getElementById('newPin').value = '';
   };
 
-  db.collection('students').add({ madrasaId, name, roll, className, phone, hasWhatsapp, hasPinSet: !!pin, createdAt: Date.now() })
+  db.collection('students').add({ madrasaId, name, roll, className, hasPinSet: !!pin, createdAt: Date.now() })
     .then(docRef => {
-      if (pin) {
-        return db.collection('student_pins').doc(docRef.id).set({ pin }).then(clearForm);
+      let chain = Promise.resolve();
+      if (phone || hasWhatsapp) {
+        chain = chain.then(() => db.collection('student_contacts').doc(docRef.id).set({ madrasaId, phone, hasWhatsapp }));
       }
-      clearForm();
+      if (pin) {
+        chain = chain.then(() => db.collection('student_pins').doc(docRef.id).set({ pin }));
+      }
+      return chain.then(clearForm);
     })
     .catch(e => { alert('সংরক্ষণ ব্যর্থ: ' + e.message); showDiagBanner('স্টুডেন্ট যোগ ব্যর্থ (madrasaId=' + madrasaId + '): ' + e.message); });
 }
@@ -816,6 +887,8 @@ function setStudentPin(id) {
 function deleteStudent(id) {
   if (!confirm('সত্যিই মুছতে চান?')) return;
   db.collection('students').doc(id).delete();
+  db.collection('student_contacts').doc(id).delete().catch(() => {});
+  db.collection('student_pins').doc(id).delete().catch(() => {});
 }
 
 // ---- Attendance (teacher marks, shared) ----
