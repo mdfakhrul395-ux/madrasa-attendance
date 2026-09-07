@@ -1464,7 +1464,15 @@ function loadMonthlyReport() {
   const student = studentsCache.find(s => s.id === reportStudentId);
   const month = reportMonth; // 'YYYY-MM'
 
-  db.collection('attendance').where('studentId', '==', reportStudentId).get()
+  // NOTE: must filter by madrasaId as well as studentId — firestore.rules'
+  // teacher-read branch checks resource.data.madrasaId == myMadrasaId(),
+  // and Firestore rejects list queries whose filters can't prove that
+  // condition on every possible result. Without this, the whole query was
+  // failing with "Missing or insufficient permissions".
+  db.collection('attendance')
+    .where('madrasaId', '==', madrasaId)
+    .where('studentId', '==', reportStudentId)
+    .get()
     .then(snap => {
       const entries = snap.docs
         .map(d => d.data())
