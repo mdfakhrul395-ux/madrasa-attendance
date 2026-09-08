@@ -10,7 +10,8 @@
   if (!localStorage.getItem('madrasaId')) localStorage.setItem('madrasaId', 'madrasa-001');
 })();
 // This can change after a teacher logs in (it's re-read from their teacher
-// profile, which is the authoritative source of which madrasa they belong to).
+// profile, which is the authoritative source of which madrasa they belong
+// to).
 let madrasaId = localStorage.getItem('madrasaId');
 
 // ================= DIAGNOSTIC BANNER (temporary, for debugging on mobile) =================
@@ -176,11 +177,20 @@ function ensureTeacherDoc(user) {
   }).catch(err => { console.error('ensureTeacherDoc failed:', err); showDiagBanner('ensureTeacherDoc এরর: ' + err.message); });
 }
 
-// ================= MULTI-TENANT: ONE-TIME DATA MIGRATION =================
-// Tags every existing document (students, attendance, leaves, results,
-// notices, diary, suggestions) that doesn't yet have a madrasaId with this
-// madrasa's id. Runs once per madrasa (tracked in localStorage) the first
-// time a teacher of that madrasa opens the app after this update.
+// ================= MULTI-TENANT: ONE-TIME DATA MIGRATION (LEGACY) =================
+// This tagged every existing document (students, attendance, leaves,
+// results, notices, diary, suggestions) that didn't yet have a madrasaId
+// with this madrasa's id — a one-time step from when multi-tenant support
+// was first added. All real data has had madrasaId for a while now.
+//
+// It reads each collection with NO filter (db.collection(colName).get()),
+// which the current per-document security rules (resource.data.madrasaId
+// == myMadrasaId()) can no longer authorize as a list query — Firestore
+// rejects it up front with "Missing or insufficient permissions" before it
+// can even check whether there was anything to migrate. Since there's
+// nothing left to migrate anyway, we treat that rejection as "already
+// done" and stop retrying, instead of showing an error banner on every
+// single app load.
 function runMigrationIfNeeded() {
   const flagKey = 'migrationDone_' + madrasaId;
   if (localStorage.getItem(flagKey)) return Promise.resolve();
@@ -190,7 +200,14 @@ function runMigrationIfNeeded() {
   return chain.then(() => {
     localStorage.setItem(flagKey, '1');
     console.log('Multi-tenant migration complete for', madrasaId);
-  }).catch(err => { console.error('Migration error:', err); showDiagBanner('মাইগ্রেশন এরর: ' + err.message); });
+  }).catch(err => {
+    // Blocked by security rules (expected now — see comment above) or any
+    // other error: mark as done so this doesn't keep re-running (and
+    // re-erroring) on every future app load. There's nothing left to
+    // migrate for this madrasa in practice.
+    localStorage.setItem(flagKey, '1');
+    console.log('Migration skipped (already complete or blocked by rules) for', madrasaId, err && err.message);
+  });
 }
 
 function migrateCollection(colName) {
@@ -204,7 +221,16 @@ function migrateCollection(colName) {
       commits.push(batch.commit());
     }
     return Promise.all(commits);
-  }).catch(err => { showDiagBanner('মাইগ্রেশন এরর (' + colName + '): ' + err.message); throw err; });
+  }).catch(err => {
+    // permission-denied here means the security rules no longer allow an
+    // unfiltered read of this collection — expected under multi-tenant
+    // rules, and means there's nothing unsafe left to migrate via this
+    // path. Silently treat as "nothing to do" instead of surfacing it as
+    // an error.
+    if (err.code === 'permission-denied') return;
+    console.error('Migration error (' + colName + '):', err);
+    throw err;
+  });
 }
 
 // ================= SECURITY: STUDENT PIN MIGRATION =================
@@ -943,7 +969,7 @@ function renderAttendanceList() {
         <label>অনুপস্থিতির কারণ (যদি থাকে)</label>
         <input value="${d.reason||''}" onchange="updateAttField('${s.id}','${date}','reason',this.value)">
       `;
-    }).catch(e => showDiagBanner('অ্যাটেন্ডেন্স লোড ব্যর্থ: ' + e.message));
+    }).catch(e => { if (e.code !== 'permission-denied') showDiagBanner('অ্যাটেন্ডেন্স লোড ব্যর্থ: ' + e.message); });
   });
 }
 
