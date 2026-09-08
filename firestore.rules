@@ -139,6 +139,28 @@ service cloud.firestore {
       allow update, delete: if isTeacherAuth() && resource.data.madrasaId == myMadrasaId();
     }
 
+    // Monthly fee (মাসিক বেতন): one paid/due entry per student per month.
+    // Doc may not yet exist when a teacher's UI first checks a given
+    // student+month (same as attendance), so `resource == null` is allowed
+    // through on read — there is no data to protect on a doc that doesn't
+    // exist yet.
+    match /fees_monthly/{docId} {
+      allow read: if resource == null ||
+        (isTeacherAuth() && resource.data.madrasaId == myMadrasaId()) ||
+        (isStudentAuth() && resource.data.studentId == mySessionStudentId());
+      allow create, update: if isTeacherAuth() && request.resource.data.madrasaId == myMadrasaId();
+      allow delete: if isTeacherAuth() && resource.data.madrasaId == myMadrasaId();
+    }
+
+    // One-time fees (ভর্তি/পরীক্ষা ফি ইত্যাদি) — only a teacher can add,
+    // edit status, or delete; a student may only read their own.
+    match /fees_onetime/{docId} {
+      allow read: if (isTeacherAuth() && resource.data.madrasaId == myMadrasaId()) ||
+        (isStudentAuth() && resource.data.studentId == mySessionStudentId());
+      allow create, update: if isTeacherAuth() && request.resource.data.madrasaId == myMadrasaId();
+      allow delete: if isTeacherAuth() && resource.data.madrasaId == myMadrasaId();
+    }
+
     match /_ping/{doc} {
       allow read: if true;
       allow write: if false;

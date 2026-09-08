@@ -58,6 +58,12 @@ let leavesClassFilter = 'all';
 let tlClassFilter = 'all';
 let diaryClassFilter = 'all';
 let suggestionsClassFilter = 'all';
+let feesClassFilter = 'all';
+
+// fees (বেতন) state
+let feesMode = 'monthly'; // 'monthly' | 'onetime'
+let feesMonth = new Date().toISOString().slice(0,7); // 'YYYY-MM'
+let currentFeesIsTeacher = true;
 
 // attendance report state (daily/monthly)
 let reportClassFilter = 'all';
@@ -89,6 +95,7 @@ const teacherPrimaryTabs = [
 const teacherMoreTabs = [
   { key: 'leaves', label: 'ছুটি', icon: '\u{1F4C5}' },
   { key: 'timeleft', label: 'বের হওয়ার সময়', icon: '\u23F0' },
+  { key: 'fees', label: 'বেতন', icon: '\u{1F4B0}' },
   { key: 'notices', label: 'নোটিশ', icon: '\u{1F4E2}' },
   { key: 'diary', label: 'ডায়েরী', icon: '\u{1F4D3}' },
   { key: 'suggestions', label: 'পরামর্শ', icon: '\u{1F4AC}' },
@@ -103,6 +110,7 @@ const studentPrimaryTabs = [
 ];
 const studentMoreTabs = [
   { key: 'leaves', label: 'ছুটির আবেদন', icon: '\u{1F4C5}' },
+  { key: 'fees', label: 'বেতন', icon: '\u{1F4B0}' },
   { key: 'suggestions', label: 'পরামর্শ', icon: '\u{1F4AC}' }
 ];
 
@@ -761,6 +769,7 @@ function teacherTab(tab) {
   if (tab === 'leaves') renderLeavesScreen(true);
   if (tab === 'results') { currentMarksheetSubjects = []; renderResultsScreen(true); }
   if (tab === 'timeleft') renderTimeLeftScreen();
+  if (tab === 'fees') renderFeesScreen(true);
   if (tab === 'notices') renderNoticesScreen(true);
   if (tab === 'diary') renderDiaryScreen(true);
   if (tab === 'suggestions') renderSuggestionsScreen(true);
@@ -774,6 +783,7 @@ function studentTab(tab) {
   renderStudentNav(tab);
   if (tab === 'attendance') renderMyAttendance();
   if (tab === 'leaves') renderLeavesScreen(false);
+  if (tab === 'fees') renderFeesScreen(false);
   if (tab === 'results') renderResultsScreen(false);
   if (tab === 'notices') renderNoticesScreen(false);
   if (tab === 'diary') renderDiaryScreen(false);
@@ -1916,4 +1926,248 @@ function submitSuggestion() {
 function deleteSuggestion(id) {
   if (!confirm('এই পরামর্শ মুছতে চান?')) return;
   db.collection('suggestions').doc(id).delete();
+}
+
+// ================= FEES / বেতন =================
+// Two kinds of fee are tracked:
+//  - monthly (মাসিক বেতন): one paid/due entry per student per month, marked
+//    the same way attendance is (doc id = studentId_YYYY-MM, in fees_monthly)
+//  - onetime (ভর্তি/পরীক্ষা ফি): ad-hoc charges of any custom name/amount,
+//    each its own doc in fees_onetime, toggled paid/due individually
+//
+// Students can see only their own fee/due status; teachers see and manage
+// everyone's, filterable by class like the rest of the app.
+
+function renderFeesScreen(isTeacher) {
+  currentFeesIsTeacher = isTeacher;
+  setScreen(`
+    <div class="card">
+      <h2>বেতন / ফি</h2>
+      <div class="row" style="margin-bottom:10px;">
+        <button class="small ${feesMode==='monthly' ? '' : 'secondary'}" onclick="switchFeesMode('monthly')">মাসিক বেতন</button>
+        <button class="small ${feesMode==='onetime' ? '' : 'secondary'}" onclick="switchFeesMode('onetime')">ভর্তি/পরীক্ষা ফি</button>
+      </div>
+      <div id="feesControlsWrap"></div>
+    </div>
+    <div id="feesResultWrap"></div>
+  `);
+  if (feesMode === 'monthly') renderMonthlyFeesControls(isTeacher);
+  else renderOnetimeFeesControls(isTeacher);
+}
+
+function switchFeesMode(mode) {
+  feesMode = mode;
+  renderFeesScreen(currentFeesIsTeacher);
+}
+
+function onFeesClassFilterChange(value) {
+  feesClassFilter = value;
+  if (feesMode === 'monthly') loadMonthlyFeesTeacher();
+  else loadOnetimeFeesTeacher();
+}
+
+// ---- Monthly fee (মাসিক বেতন) ----
+function renderMonthlyFeesControls(isTeacher) {
+  const controlsWrap = document.getElementById('feesControlsWrap');
+  if (!controlsWrap) return;
+  if (isTeacher) {
+    controlsWrap.innerHTML = `
+      <label>মাস</label>
+      <input type="month" id="feesMonthInput" value="${feesMonth}" onchange="onFeesMonthChange(this.value)">
+      <div id="feesClassFilterWrap"></div>
+    `;
+    document.getElementById('feesClassFilterWrap').innerHTML = classFilterDropdownHtml(feesClassFilter, 'onFeesClassFilterChange');
+    loadMonthlyFeesTeacher();
+  } else {
+    controlsWrap.innerHTML = '';
+    loadMonthlyFeesStudent();
+  }
+}
+
+function onFeesMonthChange(value) {
+  feesMonth = value;
+  loadMonthlyFeesTeacher();
+}
+
+function loadMonthlyFeesTeacher() {
+  const resultWrap = document.getElementById('feesResultWrap');
+  if (!resultWrap) return;
+  const students = studentsByClass(feesClassFilter);
+  if (students.length === 0) { resultWrap.innerHTML = '<div class="card"><p class="muted">কোনো শিক্ষার্থী নেই</p></div>'; return; }
+  resultWrap.innerHTML = students.map(s => `<div class="card" id="fee_${s.id}">লোড হচ্ছে...</div>`).join('');
+  const month = feesMonth;
+  students.forEach(s => {
+    db.collection('fees_monthly').doc(s.id + '_' + month).get().then(doc => {
+      const d = doc.exists ? doc.data() : {};
+      const cell = document.getElementById('fee_' + s.id);
+      if (!cell) return;
+      const status = d.status || 'due';
+      cell.innerHTML = `
+        <b>${s.name}</b> <span class="muted">(${s.className || '-'})</span>
+        <label>বেতনের পরিমাণ</label>
+        <input type="number" value="${d.amount || ''}" onchange="updateFeeAmount('${s.id}','${month}',this.value)">
+        <div class="row" style="margin-top:6px;">
+          <button class="small ${status==='paid'?'':'secondary'}" onclick="setFeeStatus('${s.id}','${month}','paid')">পরিশোধিত</button>
+          <button class="small ${status==='due'?'danger':'secondary'}" onclick="setFeeStatus('${s.id}','${month}','due')">বকেয়া</button>
+        </div>
+        ${d.paidDate ? `<div class="muted" style="margin-top:4px;">পরিশোধের তারিখ: ${d.paidDate}</div>` : ''}
+      `;
+    }).catch(e => { if (e.code !== 'permission-denied') showDiagBanner('বেতন লোড ব্যর্থ: ' + e.message); });
+  });
+}
+
+function updateFeeAmount(studentId, month, value) {
+  db.collection('fees_monthly').doc(studentId + '_' + month).set({
+    studentId, month, madrasaId, amount: Number(value) || 0
+  }, { merge: true }).catch(e => showDiagBanner('বেতন সংরক্ষণ ব্যর্থ: ' + e.message));
+}
+
+function setFeeStatus(studentId, month, status) {
+  const data = { studentId, month, madrasaId, status };
+  if (status === 'paid') data.paidDate = new Date().toISOString().slice(0,10);
+  db.collection('fees_monthly').doc(studentId + '_' + month).set(data, { merge: true })
+    .then(() => {
+      updateFeeButtonsUI(studentId, status);
+      loadMonthlyFeesTeacher(); // refresh to show/hide the paid-date line correctly
+    })
+    .catch(e => showDiagBanner('বেতন স্ট্যাটাস আপডেট ব্যর্থ: ' + e.message));
+}
+
+function updateFeeButtonsUI(studentId, status) {
+  const cell = document.getElementById('fee_' + studentId);
+  if (!cell) return;
+  const buttons = cell.querySelectorAll('.row button');
+  if (buttons[0]) buttons[0].className = 'small' + (status === 'paid' ? '' : ' secondary');
+  if (buttons[1]) buttons[1].className = 'small' + (status === 'due' ? ' danger' : ' secondary');
+}
+
+// ---- Monthly fee (student's own view) ----
+function loadMonthlyFeesStudent() {
+  const resultWrap = document.getElementById('feesResultWrap');
+  if (!resultWrap) return;
+  resultWrap.innerHTML = '<div class="card"><p class="muted">লোড হচ্ছে...</p></div>';
+  db.collection('fees_monthly').where('studentId', '==', myStudentId)
+    .onSnapshot(snap => {
+      if (snap.empty) { resultWrap.innerHTML = '<div class="card"><p class="muted">কোনো তথ্য নেই</p></div>'; return; }
+      const rows = snap.docs.map(d => d.data()).sort((a,b) => (b.month||'').localeCompare(a.month||''));
+      resultWrap.innerHTML = `<div class="card">${rows.map(r => `
+        <div class="student-row">
+          <span>${r.month}</span>
+          <span class="badge ${r.status==='paid'?'present':'absent'}">${r.status==='paid'?'পরিশোধিত':'বকেয়া'}</span>
+        </div>
+        <div class="muted">পরিমাণ: ${r.amount || 0} টাকা${r.paidDate ? ' | পরিশোধের তারিখ: ' + r.paidDate : ''}</div>
+      `).join('<hr style="border:none;border-top:1px solid #eee;margin:6px 0;">')}</div>`;
+    }, err => {
+      resultWrap.innerHTML = '<div class="card"><p class="muted">লোড করতে সমস্যা হয়েছে: ' + err.message + '</p></div>';
+      showDiagBanner('আমার বেতন লোড এরর: ' + err.message);
+    });
+}
+
+// ---- One-time fee (ভর্তি/পরীক্ষা ফি ইত্যাদি, teacher) ----
+function renderOnetimeFeesControls(isTeacher) {
+  const controlsWrap = document.getElementById('feesControlsWrap');
+  if (!controlsWrap) return;
+  if (isTeacher) {
+    const students = studentsByClass(feesClassFilter);
+    const opts = students.map(s => `<option value="${s.id}">${s.name} (${s.roll || ''})</option>`).join('');
+    controlsWrap.innerHTML = `
+      <div id="feesClassFilterWrap"></div>
+      <h2 style="margin-top:10px;">নতুন ফি যোগ করুন</h2>
+      <label>শিক্ষার্থী</label><select id="onetimeStudent">${opts || '<option value="">কোনো শিক্ষার্থী নেই</option>'}</select>
+      <label>ফি এর ধরন</label><input id="onetimeFeeType" placeholder="যেমন: ভর্তি ফি, পরীক্ষার ফি">
+      <label>পরিমাণ</label><input id="onetimeAmount" type="number">
+      <p id="onetimeError" class="muted" style="color:#dc2626;"></p>
+      <button onclick="addOnetimeFee()" style="margin-top:8px;">যোগ করুন</button>
+    `;
+    document.getElementById('feesClassFilterWrap').innerHTML = classFilterDropdownHtml(feesClassFilter, 'onFeesClassFilterChange');
+    loadOnetimeFeesTeacher();
+  } else {
+    controlsWrap.innerHTML = '';
+    loadOnetimeFeesStudent();
+  }
+}
+
+function addOnetimeFee() {
+  const studentId = document.getElementById('onetimeStudent').value;
+  const feeType = document.getElementById('onetimeFeeType').value.trim();
+  const amount = Number(document.getElementById('onetimeAmount').value);
+  const errEl = document.getElementById('onetimeError');
+  if (errEl) errEl.textContent = '';
+  if (!studentId) { if (errEl) errEl.textContent = 'শিক্ষার্থী নির্বাচন করুন'; return; }
+  if (!feeType) { if (errEl) errEl.textContent = 'ফি এর ধরন লিখুন'; return; }
+  if (!amount || amount <= 0) { if (errEl) errEl.textContent = 'সঠিক পরিমাণ দিন'; return; }
+  db.collection('fees_onetime').add({
+    madrasaId, studentId, feeType, amount, status: 'due', date: new Date().toISOString().slice(0,10), createdAt: Date.now()
+  }).then(() => {
+    document.getElementById('onetimeFeeType').value = '';
+    document.getElementById('onetimeAmount').value = '';
+  }).catch(e => { if (errEl) errEl.textContent = 'সংরক্ষণ ব্যর্থ: ' + e.message; showDiagBanner('ফি যোগ ব্যর্থ: ' + e.message); });
+}
+
+function loadOnetimeFeesTeacher() {
+  const resultWrap = document.getElementById('feesResultWrap');
+  if (!resultWrap) return;
+  db.collection('fees_onetime').where('madrasaId', '==', madrasaId).orderBy('createdAt', 'desc')
+    .onSnapshot(snap => {
+      let docs = snap.docs;
+      if (feesClassFilter !== 'all') {
+        docs = docs.filter(d => {
+          const student = studentsCache.find(s => s.id === d.data().studentId);
+          return student && student.className === feesClassFilter;
+        });
+      }
+      if (docs.length === 0) { resultWrap.innerHTML = '<div class="card"><p class="muted">কোনো ফি এন্ট্রি নেই</p></div>'; return; }
+      resultWrap.innerHTML = docs.map(d => {
+        const r = d.data();
+        const student = studentsCache.find(s => s.id === r.studentId);
+        const isPaid = r.status === 'paid';
+        return `<div class="student-row" style="display:block;">
+          <div style="display:flex;justify-content:space-between;">
+            <span>${student ? student.name + (student.className ? ' (' + student.className + ')' : '') : 'অজানা'} - ${r.feeType}</span>
+            <span class="badge ${isPaid ? 'present' : 'absent'}">${isPaid ? 'পরিশোধিত' : 'বকেয়া'}</span>
+          </div>
+          <div class="muted">পরিমাণ: ${r.amount} টাকা | তারিখ: ${r.date}</div>
+          <div style="margin-top:6px;">
+            <button class="small ${isPaid ? 'secondary' : ''}" onclick="toggleOnetimeFeeStatus('${d.id}', ${isPaid})">${isPaid ? 'বকেয়া করুন' : 'পরিশোধিত চিহ্নিত করুন'}</button>
+            <button class="small danger" onclick="deleteOnetimeFee('${d.id}')">মুছুন</button>
+          </div>
+        </div>`;
+      }).join('');
+    }, err => {
+      resultWrap.innerHTML = '<div class="card"><p class="muted">লোড করতে সমস্যা হয়েছে: ' + err.message + '</p></div>';
+      if (err.code !== 'permission-denied') showDiagBanner('ফি লোড এরর: ' + err.message);
+    });
+}
+
+function toggleOnetimeFeeStatus(docId, currentlyPaid) {
+  db.collection('fees_onetime').doc(docId).set({ status: currentlyPaid ? 'due' : 'paid' }, { merge: true })
+    .catch(e => showDiagBanner('ফি স্ট্যাটাস আপডেট ব্যর্থ: ' + e.message));
+}
+
+function deleteOnetimeFee(docId) {
+  if (!confirm('এই ফি এন্ট্রি মুছতে চান?')) return;
+  db.collection('fees_onetime').doc(docId).delete();
+}
+
+// ---- One-time fee (student's own view) ----
+function loadOnetimeFeesStudent() {
+  const resultWrap = document.getElementById('feesResultWrap');
+  if (!resultWrap) return;
+  resultWrap.innerHTML = '<div class="card"><p class="muted">লোড হচ্ছে...</p></div>';
+  db.collection('fees_onetime').where('studentId', '==', myStudentId)
+    .onSnapshot(snap => {
+      if (snap.empty) { resultWrap.innerHTML = '<div class="card"><p class="muted">কোনো ফি তথ্য নেই</p></div>'; return; }
+      const rows = snap.docs.map(d => d.data()).sort((a,b) => (b.createdAt||0) - (a.createdAt||0));
+      resultWrap.innerHTML = `<div class="card">${rows.map(r => {
+        const isPaid = r.status === 'paid';
+        return `<div class="student-row">
+          <span>${r.feeType}</span>
+          <span class="badge ${isPaid ? 'present' : 'absent'}">${isPaid ? 'পরিশোধিত' : 'বকেয়া'}</span>
+        </div>
+        <div class="muted">পরিমাণ: ${r.amount} টাকা | তারিখ: ${r.date}</div>`;
+      }).join('<hr style="border:none;border-top:1px solid #eee;margin:6px 0;">')}</div>`;
+    }, err => {
+      resultWrap.innerHTML = '<div class="card"><p class="muted">লোড করতে সমস্যা হয়েছে: ' + err.message + '</p></div>';
+      showDiagBanner('আমার ফি লোড এরর: ' + err.message);
+    });
 }
