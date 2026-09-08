@@ -975,8 +975,20 @@ function renderAttendanceList() {
 
 function setAttendance(studentId, date, status) {
   db.collection('attendance').doc(studentId + '_' + date).set({ studentId, date, status, madrasaId }, { merge: true })
-    .then(() => renderAttendanceList())
+    .then(() => updateAttendanceButtonsUI(studentId, status))
     .catch(e => showDiagBanner('অ্যাটেন্ডেন্স সংরক্ষণ ব্যর্থ: ' + e.message));
+}
+
+// Updates just the clicked student's present/absent buttons in place,
+// instead of re-fetching and re-rendering every student's card (which used
+// to make the whole attendance list flash "লোড হচ্ছে..." and reload on
+// every single tap).
+function updateAttendanceButtonsUI(studentId, status) {
+  const cell = document.getElementById('att_' + studentId);
+  if (!cell) return;
+  const buttons = cell.querySelectorAll('.row button');
+  if (buttons[0]) buttons[0].className = 'small' + (status === 'present' ? '' : ' secondary');
+  if (buttons[1]) buttons[1].className = 'small' + (status === 'absent' ? ' danger' : ' secondary');
 }
 
 function updateAttField(studentId, date, field, value) {
