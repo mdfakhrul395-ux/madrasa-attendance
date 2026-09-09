@@ -3,9 +3,21 @@ rules_version = '2';
 service cloud.firestore {
   match /databases/{database}/documents {
 
-    // Teacher = signed in with email/password. Student = signed in anonymously.
+    // Teacher = signed in with email/password AND not deactivated.
+    // Student = signed in anonymously.
+    //
+    // The `active != false` check is what makes "নিষ্ক্রিয় করুন" (deactivate)
+    // in the শিক্ষকগণ screen instantly revoke a teacher's access EVERYWHERE
+    // in the app (students, attendance, results, notices, diary, fees,
+    // etc.) — every single rule in this file that grants teacher access
+    // goes through isTeacherAuth(), so this one check covers all of them.
+    // A doc with no `active` field at all (every teacher created before
+    // this update) is treated as active — `undefined != false` is true —
+    // so nothing changes for existing accounts until an admin explicitly
+    // deactivates one.
     function isTeacherAuth() {
-      return request.auth != null && request.auth.token.firebase.sign_in_provider == 'password';
+      return request.auth != null && request.auth.token.firebase.sign_in_provider == 'password' &&
+        get(/databases/$(database)/documents/teachers/$(request.auth.uid)).data.active != false;
     }
     function isStudentAuth() {
       return request.auth != null && request.auth.token.firebase.sign_in_provider == 'anonymous';
@@ -26,13 +38,57 @@ service cloud.firestore {
         : get(/databases/$(database)/documents/sessions/$(request.auth.uid)).data.madrasaId;
     }
 
+    // Whether the current signed-in teacher has isAdmin:true on their own
+    // teachers/{uid} doc — used by the শিক্ষকগণ (multi-admin) feature to
+    // gate adding/removing other teacher accounts and toggling admin status.
+    function isRequesterAdmin() {
+      return isTeacherAuth() &&
+        get(/databases/$(database)/documents/teachers/$(request.auth.uid)).data.isAdmin == true;
+    }
+
     // Maps a teacher's Firebase Auth uid to the madrasa (tenant) they belong
-    // to. A teacher can only read/write their own mapping doc, and only the
-    // first time (client creates it on first login) — this lets a brand new
-    // teacher account bootstrap itself without needing myMadrasaId() first.
+    // to, plus their isAdmin/active status.
+    //
+    // - Any signed-in teacher can read their OWN doc (to resolve their
+    //   madrasaId/isAdmin/active status on login).
+    // - An admin teacher can read/list ALL teacher docs in their own
+    //   madrasa (needed for the শিক্ষকগণ management screen).
+    // - Self-CREATE (bootstrap on first login, before any admin/teacher
+    //   docs exist for this device) is still allowed so an existing
+    //   single-teacher madrasa keeps working exactly as before — but it
+    //   can never self-grant isAdmin or active:false, only a real admin
+    //   (or manual Firebase Console edit, for the very first admin) can
+    //   set those.
+    // - An admin can create a new teacher's doc (right after creating
+    //   their Firebase Auth account from the শিক্ষকগণ screen) or update
+    //   any teacher's doc in their madrasa (promote/demote admin,
+    //   activate/deactivate).
+    // - A non-admin teacher may still update their own doc (e.g. re-save
+    //   their email), but may never change their own isAdmin or active
+    //   fields that way — only an admin, via the branch above, can do
+    //   that.
     match /teachers/{uid} {
-      allow read: if request.auth != null && request.auth.uid == uid;
-      allow write: if isTeacherAuth() && request.auth.uid == uid;
+      allow read: if request.auth != null && (
+        request.auth.uid == uid ||
+        (isTeacherAuth() && resource.data.madrasaId == myMadrasaId() && isRequesterAdmin())
+      );
+
+      allow create: if isTeacherAuth() && (
+        (request.auth.uid == uid &&
+          (request.resource.data.isAdmin == false || !('isAdmin' in request.resource.data)) &&
+          (request.resource.data.active == true || !('active' in request.resource.data))) ||
+        (isRequesterAdmin() && request.resource.data.madrasaId == myMadrasaId())
+      );
+
+      allow update: if isTeacherAuth() && (
+        (isRequesterAdmin() && resource.data.madrasaId == myMadrasaId()) ||
+        (request.auth.uid == uid &&
+          request.resource.data.madrasaId == resource.data.madrasaId &&
+          request.resource.data.isAdmin == resource.data.isAdmin &&
+          request.resource.data.active == resource.data.active)
+      );
+
+      allow delete: if false; // deactivate (active:false) instead of deleting — see comment above isTeacherAuth()
     }
 
     // Per-madrasa settings (name, logo, subscription info later).

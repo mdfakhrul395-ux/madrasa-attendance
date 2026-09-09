@@ -49,6 +49,7 @@ const auth = firebase.auth();
 let studentsUnsub = null;
 let settingsUnsub = null;
 let studentContactsUnsub = null;
+let teachersUnsub = null;
 
 // class filter state per screen (teacher side)
 let studentsClassFilter = 'all';
@@ -79,6 +80,11 @@ let lastResultsIsTeacher = true;
 // app settings (madrasa name & logo)
 let appSettings = {};
 
+// multi-admin (শিক্ষকগণ): whether the currently signed-in teacher account
+// has isAdmin:true on their teachers/{uid} doc. Only admin teachers can see
+// the "শিক্ষকগণ" tab and add/deactivate/promote other teacher accounts.
+let myTeacherIsAdmin = false;
+
 // unread notification badges (student side)
 let unreadCounts = { notices: 0, diary: 0 };
 let unreadNoticesUnsub = null;
@@ -99,6 +105,7 @@ const teacherMoreTabs = [
   { key: 'notices', label: 'নোটিশ', icon: '\u{1F4E2}' },
   { key: 'diary', label: 'ডায়েরী', icon: '\u{1F4D3}' },
   { key: 'suggestions', label: 'পরামর্শ', icon: '\u{1F4AC}' },
+  { key: 'teachers', label: 'শিক্ষকগণ', icon: '\u{1F465}' },
   { key: 'settings', label: 'সেটিংস', icon: '\u2699\uFE0F' }
 ];
 
@@ -173,14 +180,27 @@ function setSync(ok) {
 // existing teacher logs in after this update, we create that profile for
 // them automatically using the device's current madrasaId (their existing
 // madrasa), so nothing needs to be set up manually.
+//
+// Also resolves myTeacherIsAdmin from the same doc (isAdmin:true/false) —
+// see the শিক্ষকগণ (multi-admin) feature below. A teacher whose doc has
+// active:false has been deactivated by an admin; Firestore rules already
+// block all of their reads/writes everywhere (see isTeacherAuth() in
+// firestore.rules), this just also surfaces a clear banner instead of a
+// silent wall of permission-denied errors.
 function ensureTeacherDoc(user) {
   const ref = db.collection('teachers').doc(user.uid);
   return ref.get().then(doc => {
     if (doc.exists && doc.data().madrasaId) {
       madrasaId = doc.data().madrasaId;
       localStorage.setItem('madrasaId', madrasaId);
+      myTeacherIsAdmin = doc.data().isAdmin === true;
+      if (doc.data().active === false) {
+        myTeacherIsAdmin = false;
+        showDiagBanner('এই শিক্ষক অ্যাকাউন্টটি নিষ্ক্রিয় করা হয়েছে — অ্যাডমিনের সাথে যোগাযোগ করুন');
+      }
       return;
     }
+    myTeacherIsAdmin = false;
     return ref.set({ madrasaId, email: user.email || '', createdAt: Date.now() }, { merge: true });
   }).catch(err => { console.error('ensureTeacherDoc failed:', err); showDiagBanner('ensureTeacherDoc এরর: ' + err.message); });
 }
@@ -623,12 +643,13 @@ function logout() {
   if (studentsUnsub) { studentsUnsub(); studentsUnsub = null; }
   if (settingsUnsub) { settingsUnsub(); settingsUnsub = null; }
   stopStudentContactsListener();
+  stopTeachersListener();
   stopUnreadListeners();
 
   if (role === 'teacher' && auth.currentUser && auth.currentUser.providerData.length > 0) auth.signOut();
   localStorage.removeItem('role');
   localStorage.removeItem('myStudentId');
-  role = null; myStudentId = null;
+  role = null; myStudentId = null; myTeacherIsAdmin = false;
   showRoleSelect();
 }
 
@@ -694,7 +715,10 @@ function closeMoreMenu() {
 function renderTeacherNav(activeKey) {
   const nav = document.getElementById('bottomNav');
   nav.style.display = 'block';
-  nav.innerHTML = buildNavHtml(teacherPrimaryTabs, teacherMoreTabs, 'teacherTab', activeKey);
+  // "শিক্ষকগণ" (multi-admin management) is only shown to admin teachers —
+  // filtered out of the "আরও" menu entirely for non-admin teacher accounts.
+  const visibleMoreTabs = myTeacherIsAdmin ? teacherMoreTabs : teacherMoreTabs.filter(t => t.key !== 'teachers');
+  nav.innerHTML = buildNavHtml(teacherPrimaryTabs, visibleMoreTabs, 'teacherTab', activeKey);
 }
 
 function renderStudentNav(activeKey) {
@@ -761,6 +785,11 @@ function stopStudentContactsListener() {
   studentContactsCache = {};
 }
 
+// ================= TEACHERS (শিক্ষকগণ — multi-admin management, teacher-admin-only) =================
+function stopTeachersListener() {
+  if (teachersUnsub) { teachersUnsub(); teachersUnsub = null; }
+}
+
 function teacherTab(tab) {
   renderTeacherNav(tab);
   if (tab === 'students') renderStudentsScreen();
@@ -773,6 +802,7 @@ function teacherTab(tab) {
   if (tab === 'notices') renderNoticesScreen(true);
   if (tab === 'diary') renderDiaryScreen(true);
   if (tab === 'suggestions') renderSuggestionsScreen(true);
+  if (tab === 'teachers') { if (myTeacherIsAdmin) renderTeachersScreen(); else teacherTab('students'); }
   if (tab === 'settings') renderSettingsScreen();
 }
 
@@ -1982,6 +2012,146 @@ function submitSuggestion() {
 function deleteSuggestion(id) {
   if (!confirm('এই পরামর্শ মুছতে চান?')) return;
   db.collection('suggestions').doc(id).delete();
+}
+
+// ================= শিক্ষকগণ (MULTI-ADMIN TEACHER MANAGEMENT) =================
+// Only visible/usable for teacher accounts whose teachers/{uid} doc has
+// isAdmin:true (see myTeacherIsAdmin, resolved in ensureTeacherDoc above,
+// and enforced server-side in firestore.rules — this screen only ever
+// being rendered client-side for an admin is a UX convenience, NOT the
+// real security boundary).
+//
+// "যোগ করুন" (add) creates a brand-new Firebase Auth email/password
+// account for the new teacher. This has to be done through a SECOND,
+// throwaway Firebase app instance — calling
+// createUserWithEmailAndPassword on the normal `auth` object would
+// sign the admin OUT of their own account and sign them into the new
+// teacher's account instead (a well-known Firebase behavior). The
+// secondary app instance is deleted again right after, so it never
+// lingers.
+//
+// "নিষ্ক্রিয় করুন" (deactivate) does NOT delete the teacher's Firebase
+// Auth account (that requires the Admin SDK / a Cloud Function, which
+// needs the paid Blaze plan — deliberately avoided so far in this
+// project). Instead it sets active:false on their teachers/{uid} doc.
+// firestore.rules' isTeacherAuth() now also checks this active flag, so
+// a deactivated teacher instantly loses ALL access everywhere in the
+// app (students, attendance, results, etc.) the moment this is set —
+// not just from this "শিক্ষকগণ" screen.
+function renderTeachersScreen() {
+  setScreen(`
+    <div class="card">
+      <h2>নতুন শিক্ষক অ্যাকাউন্ট যোগ করুন</h2>
+      <label>ইমেইল</label><input id="newTeacherEmail" type="email" placeholder="teacher@example.com">
+      <label>পাসওয়ার্ড</label><input id="newTeacherPassword" type="password" placeholder="কমপক্ষে ৬ অক্ষর">
+      <label style="display:flex;align-items:center;gap:6px;margin-top:6px;">
+        <input id="newTeacherIsAdmin" type="checkbox" style="width:auto;"> অ্যাডমিন অধিকার দিন (তিনিও শিক্ষক যোগ/অপসারণ করতে পারবেন)
+      </label>
+      <p id="newTeacherError" class="muted" style="color:#dc2626;"></p>
+      <button onclick="addTeacherAccount()">যোগ করুন</button>
+    </div>
+    <div class="card">
+      <h2>শিক্ষকগণ</h2>
+      <div id="teachersListWrap">লোড হচ্ছে...</div>
+    </div>
+  `);
+  listenTeachersList();
+}
+
+function listenTeachersList() {
+  if (teachersUnsub) { teachersUnsub(); teachersUnsub = null; }
+  teachersUnsub = db.collection('teachers').where('madrasaId', '==', madrasaId)
+    .onSnapshot(snap => {
+      const wrap = document.getElementById('teachersListWrap');
+      if (!wrap) return;
+      if (snap.empty) { wrap.innerHTML = '<p class="muted">কোনো শিক্ষক পাওয়া যায়নি</p>'; return; }
+      const myUid = auth.currentUser ? auth.currentUser.uid : null;
+      const docs = [...snap.docs].sort((a, b) => (a.data().createdAt || 0) - (b.data().createdAt || 0));
+      wrap.innerHTML = docs.map(d => {
+        const t = d.data();
+        const isMe = d.id === myUid;
+        const isAdminT = t.isAdmin === true;
+        const isActiveT = t.active !== false;
+        return `<div class="student-row" style="display:block;">
+          <div style="display:flex;justify-content:space-between;align-items:center;">
+            <span>${t.email || d.id}${isMe ? ' <span class="muted">(আপনি)</span>' : ''}</span>
+            <span class="badge ${isActiveT ? 'present' : 'absent'}">${isActiveT ? 'সক্রিয়' : 'নিষ্ক্রিয়'}</span>
+          </div>
+          <div class="muted" style="margin-top:2px;">${isAdminT ? '⭐ অ্যাডমিন' : 'সাধারণ শিক্ষক'}</div>
+          ${!isMe ? `
+            <div style="margin-top:6px;">
+              <button class="small secondary" onclick="toggleTeacherAdmin('${d.id}', ${isAdminT})">${isAdminT ? 'অ্যাডমিন বাতিল করুন' : 'অ্যাডমিন করুন'}</button>
+              <button class="small ${isActiveT ? 'danger' : ''}" onclick="toggleTeacherActive('${d.id}', ${isActiveT})">${isActiveT ? 'নিষ্ক্রিয় করুন' : 'পুনরায় সক্রিয় করুন'}</button>
+            </div>
+          ` : '<p class="muted" style="margin-top:6px;">নিজের অ্যাকাউন্ট এখান থেকে পরিবর্তন করা যাবে না</p>'}
+        </div>`;
+      }).join('');
+    }, err => {
+      const wrap = document.getElementById('teachersListWrap');
+      if (wrap) wrap.innerHTML = '<p class="muted">লোড করতে সমস্যা হয়েছে: ' + err.message + '</p>';
+      if (err.code !== 'permission-denied') showDiagBanner('শিক্ষক তালিকা লোড এরর: ' + err.message);
+    });
+}
+
+function addTeacherAccount() {
+  const email = document.getElementById('newTeacherEmail').value.trim();
+  const password = document.getElementById('newTeacherPassword').value;
+  const isAdminNew = document.getElementById('newTeacherIsAdmin').checked;
+  const errEl = document.getElementById('newTeacherError');
+  if (errEl) errEl.textContent = '';
+  if (!email || !password) { if (errEl) errEl.textContent = 'ইমেইল ও পাসওয়ার্ড দিন'; return; }
+  if (password.length < 6) { if (errEl) errEl.textContent = 'পাসওয়ার্ড কমপক্ষে ৬ অক্ষরের হতে হবে'; return; }
+
+  let secondaryApp;
+  try {
+    // Unique app name each time so repeated add attempts never collide with
+    // a still-initializing previous instance.
+    secondaryApp = firebase.initializeApp(firebase.apps[0].options, 'TeacherCreate_' + Date.now());
+  } catch (e) {
+    if (errEl) errEl.textContent = 'শুরু করা যায়নি: ' + e.message;
+    return;
+  }
+  const secondaryAuth = secondaryApp.auth();
+
+  secondaryAuth.createUserWithEmailAndPassword(email, password)
+    .then(cred => {
+      const newUid = cred.user.uid;
+      return db.collection('teachers').doc(newUid).set({
+        madrasaId, email, isAdmin: !!isAdminNew, active: true, createdAt: Date.now()
+      }).then(() => secondaryAuth.signOut().catch(() => {}));
+    })
+    .then(() => {
+      secondaryApp.delete().catch(() => {});
+      document.getElementById('newTeacherEmail').value = '';
+      document.getElementById('newTeacherPassword').value = '';
+      document.getElementById('newTeacherIsAdmin').checked = false;
+      alert('শিক্ষক অ্যাকাউন্ট তৈরি করা হয়েছে');
+    })
+    .catch(e => {
+      const msg = e.code === 'auth/email-already-in-use' ? 'এই ইমেইল দিয়ে আগে থেকেই অ্যাকাউন্ট আছে'
+        : e.code === 'auth/invalid-email' ? 'ইমেইলটি সঠিক নয়'
+        : e.code === 'auth/weak-password' ? 'পাসওয়ার্ড দুর্বল, আরেকটু শক্তিশালী দিন'
+        : 'অ্যাকাউন্ট তৈরি ব্যর্থ: ' + e.message;
+      if (errEl) errEl.textContent = msg;
+      showDiagBanner('শিক্ষক তৈরি ব্যর্থ: ' + e.message);
+      try { secondaryApp.delete(); } catch (_e) {}
+    });
+}
+
+function toggleTeacherAdmin(uid, currentlyAdmin) {
+  if (auth.currentUser && uid === auth.currentUser.uid) { alert('নিজের অ্যাডমিন স্ট্যাটাস এখান থেকে পরিবর্তন করা যাবে না'); return; }
+  db.collection('teachers').doc(uid).set({ isAdmin: !currentlyAdmin }, { merge: true })
+    .catch(e => { alert('আপডেট ব্যর্থ: ' + e.message); showDiagBanner('অ্যাডমিন স্ট্যাটাস আপডেট ব্যর্থ: ' + e.message); });
+}
+
+function toggleTeacherActive(uid, currentlyActive) {
+  if (auth.currentUser && uid === auth.currentUser.uid) { alert('নিজেকে নিষ্ক্রিয় করা যাবে না'); return; }
+  const confirmMsg = currentlyActive
+    ? 'এই শিক্ষককে নিষ্ক্রিয় করতে চান? তিনি সাথে সাথে অ্যাপে প্রবেশাধিকার হারাবেন।'
+    : 'এই শিক্ষককে পুনরায় সক্রিয় করতে চান?';
+  if (!confirm(confirmMsg)) return;
+  db.collection('teachers').doc(uid).set({ active: !currentlyActive }, { merge: true })
+    .catch(e => { alert('আপডেট ব্যর্থ: ' + e.message); showDiagBanner('সক্রিয়/নিষ্ক্রিয় আপডেট ব্যর্থ: ' + e.message); });
 }
 
 // ================= FEES / বেতন =================
