@@ -99,8 +99,17 @@ service cloud.firestore {
         get(/databases/$(database)/documents/student_pins/$(request.resource.data.studentId)).data.pin == request.resource.data.pin;
     }
 
+    // Attendance: one doc per student per date (docId = studentId_date).
+    // For most students on a given day, this doc doesn't exist yet until
+    // the teacher marks them — so, same as fees_monthly below, `resource`
+    // is null on that read and `resource == null` must be allowed through
+    // first (there's no data to protect on a doc that doesn't exist). Without
+    // this, reading resource.data.madrasaId on a null resource made the
+    // whole read fail as permission-denied, which is what caused the
+    // উপস্থিতি tab's student cards to get stuck on "লোড হচ্ছে..." forever.
     match /attendance/{docId} {
-      allow read: if (isTeacherAuth() && resource.data.madrasaId == myMadrasaId()) ||
+      allow read: if resource == null ||
+        (isTeacherAuth() && resource.data.madrasaId == myMadrasaId()) ||
         (isStudentAuth() && resource.data.studentId == mySessionStudentId());
       allow write: if (isTeacherAuth() && request.resource.data.madrasaId == myMadrasaId()) ||
         (isStudentAuth() && request.resource.data.studentId == mySessionStudentId());

@@ -963,12 +963,42 @@ function renderAttendanceList() {
   const students = studentsByClass(attClassFilter);
   if (students.length === 0) { list.innerHTML = '<p class="muted">শিক্ষার্থী তালিকা খালি</p>'; return; }
   list.innerHTML = students.map(s => `<div class="card" id="att_${s.id}">লোড হচ্ছে...</div>`).join('');
-  students.forEach(s => {
-    db.collection('attendance').doc(s.id + '_' + date).get().then(doc => {
+  students.forEach(s => loadAttendanceCell(s, date));
+}
+
+// Loads (or reloads) a single student's attendance card. Pulled out of
+// renderAttendanceList so a failed card can retry itself without having to
+// re-fetch every other student too.
+//
+// IMPORTANT: this always resolves the card to a definite end state — either
+// the real controls, or a visible "লোড ব্যর্থ" + রিট্রাই button. It never
+// leaves a card silently stuck on "লোড হচ্ছে..." the way the old code did
+// when db.collection('attendance').doc(...).get() rejected (e.g. on a
+// permission-denied for a student whose attendance doc doesn't exist yet
+// for this date) and the .catch() did nothing to the DOM.
+function loadAttendanceCell(s, date) {
+  const cell = document.getElementById('att_' + s.id);
+  if (cell) cell.innerHTML = 'লোড হচ্ছে...';
+
+  // Belt-and-suspenders timeout: if Firestore never settles the promise at
+  // all (e.g. stuck offline with no cached data), don't leave the card
+  // stuck forever either — show the same retry state after 15s.
+  let settled = false;
+  const timeoutId = setTimeout(() => {
+    if (settled) return;
+    settled = true;
+    renderAttendanceCellError(s, date, { message: 'সময় শেষ (নেটওয়ার্ক ধীর হতে পারে)' });
+  }, 15000);
+
+  db.collection('attendance').doc(s.id + '_' + date).get()
+    .then(doc => {
+      if (settled) return;
+      settled = true;
+      clearTimeout(timeoutId);
       const d = doc.exists ? doc.data() : {};
-      const cell = document.getElementById('att_' + s.id);
-      if (!cell) return;
-      cell.innerHTML = `
+      const liveCell = document.getElementById('att_' + s.id);
+      if (!liveCell) return;
+      liveCell.innerHTML = `
         <b>${s.name}</b> <span class="muted">(${s.className || '-'})</span>
         <div class="row" style="margin-top:6px;">
           <button class="small ${d.status==='present'?'':'secondary'}" onclick="setAttendance('${s.id}','${date}','present')">উপস্থিত</button>
@@ -979,8 +1009,34 @@ function renderAttendanceList() {
         <label>অনুপস্থিতির কারণ (যদি থাকে)</label>
         <input value="${d.reason||''}" onchange="updateAttField('${s.id}','${date}','reason',this.value)">
       `;
-    }).catch(e => { if (e.code !== 'permission-denied') showDiagBanner('অ্যাটেন্ডেন্স লোড ব্যর্থ: ' + e.message); });
-  });
+    })
+    .catch(e => {
+      if (settled) return;
+      settled = true;
+      clearTimeout(timeoutId);
+      renderAttendanceCellError(s, date, e);
+      // Show every load failure here (not just non-permission-denied ones)
+      // since this is a foreground screen the teacher is actively looking
+      // at, not a background listener — silently hiding it is what made
+      // the card look stuck for no visible reason.
+      showDiagBanner('অ্যাটেন্ডেন্স লোড ব্যর্থ (' + s.name + '): ' + (e.code || '') + ' ' + e.message);
+    });
+}
+
+function renderAttendanceCellError(s, date, e) {
+  const cell = document.getElementById('att_' + s.id);
+  if (!cell) return;
+  cell.innerHTML = `
+    <b>${s.name}</b> <span class="muted">(${s.className || '-'})</span>
+    <p class="muted" style="color:#dc2626;margin:6px 0;">লোড করতে সমস্যা হয়েছে${e && e.message ? ' (' + e.message + ')' : ''}</p>
+    <button class="small secondary" onclick="retryAttendanceCell('${s.id}','${date}')">আবার চেষ্টা করুন</button>
+  `;
+}
+
+function retryAttendanceCell(studentId, date) {
+  const s = studentsCache.find(st => st.id === studentId);
+  if (!s) return;
+  loadAttendanceCell(s, date);
 }
 
 function setAttendance(studentId, date, status) {
@@ -2012,7 +2068,17 @@ function loadMonthlyFeesTeacher() {
         </div>
         ${d.paidDate ? `<div class="muted" style="margin-top:4px;">পরিশোধের তারিখ: ${d.paidDate}</div>` : ''}
       `;
-    }).catch(e => { if (e.code !== 'permission-denied') showDiagBanner('বেতন লোড ব্যর্থ: ' + e.message); });
+    }).catch(e => {
+      const cell = document.getElementById('fee_' + s.id);
+      if (cell) {
+        cell.innerHTML = `
+          <b>${s.name}</b> <span class="muted">(${s.className || '-'})</span>
+          <p class="muted" style="color:#dc2626;margin:6px 0;">লোড করতে সমস্যা হয়েছে${e && e.message ? ' (' + e.message + ')' : ''}</p>
+          <button class="small secondary" onclick="loadMonthlyFeesTeacher()">আবার চেষ্টা করুন</button>
+        `;
+      }
+      showDiagBanner('বেতন লোড ব্যর্থ (' + s.name + '): ' + (e.code || '') + ' ' + e.message);
+    });
   });
 }
 
