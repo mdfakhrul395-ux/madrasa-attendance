@@ -18,7 +18,7 @@ service cloud.firestore {
     function isTeacherAuth() {
       return request.auth != null && request.auth.token.firebase.sign_in_provider == 'password' &&
         (!exists(/databases/$(database)/documents/teachers/$(request.auth.uid)) ||
-         get(/databases/$(database)/documents/teachers/$(request.auth.uid)).data.active != false);
+         get(/databases/$(database)/documents/teachers/$(request.auth.uid)).data.get('active', true) != false);
     }
     function isStudentAuth() {
       return request.auth != null && request.auth.token.firebase.sign_in_provider == 'anonymous';
@@ -44,7 +44,7 @@ service cloud.firestore {
     // gate adding/removing other teacher accounts and toggling admin status.
     function isRequesterAdmin() {
       return isTeacherAuth() &&
-        get(/databases/$(database)/documents/teachers/$(request.auth.uid)).data.isAdmin == true;
+        get(/databases/$(database)/documents/teachers/$(request.auth.uid)).data.get('isAdmin', false) == true;
     }
 
     // Maps a teacher's Firebase Auth uid to the madrasa (tenant) they belong
@@ -76,8 +76,8 @@ service cloud.firestore {
 
       allow create: if isTeacherAuth() && (
         (request.auth.uid == uid &&
-          (request.resource.data.isAdmin == false || !('isAdmin' in request.resource.data)) &&
-          (request.resource.data.active == true || !('active' in request.resource.data))) ||
+          request.resource.data.get('isAdmin', false) == false &&
+          request.resource.data.get('active', true) == true) ||
         (isRequesterAdmin() && request.resource.data.madrasaId == myMadrasaId())
       );
 
@@ -85,8 +85,8 @@ service cloud.firestore {
         (isRequesterAdmin() && resource.data.madrasaId == myMadrasaId()) ||
         (request.auth.uid == uid &&
           request.resource.data.madrasaId == resource.data.madrasaId &&
-          request.resource.data.isAdmin == resource.data.isAdmin &&
-          request.resource.data.active == resource.data.active)
+          request.resource.data.get('isAdmin', false) == resource.data.get('isAdmin', false) &&
+          request.resource.data.get('active', true) == resource.data.get('active', true))
       );
 
       allow delete: if false; // deactivate (active:false) instead of deleting — see comment above isTeacherAuth()
