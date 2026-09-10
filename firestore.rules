@@ -17,7 +17,8 @@ service cloud.firestore {
     // deactivates one.
     function isTeacherAuth() {
       return request.auth != null && request.auth.token.firebase.sign_in_provider == 'password' &&
-        get(/databases/$(database)/documents/teachers/$(request.auth.uid)).data.active != false;
+        (!exists(/databases/$(database)/documents/teachers/$(request.auth.uid)) ||
+         get(/databases/$(database)/documents/teachers/$(request.auth.uid)).data.active != false);
     }
     function isStudentAuth() {
       return request.auth != null && request.auth.token.firebase.sign_in_provider == 'anonymous';
@@ -164,8 +165,16 @@ service cloud.firestore {
     // whole read fail as permission-denied, which is what caused the
     // উপস্থিতি tab's student cards to get stuck on "লোড হচ্ছে..." forever.
     match /attendance/{docId} {
-      allow read: if resource == null ||
+      // Split into get vs list: a get() on a not-yet-created attendance doc
+      // needs the `resource == null` branch (there's no data to protect on
+      // a doc that doesn't exist yet), but that branch never applies to a
+      // list/query request (every returned document has data) — keeping it
+      // out of the list rule keeps the query simple enough for Firestore to
+      // authorize against the where('madrasaId','==',...) filter.
+      allow get: if resource == null ||
         (isTeacherAuth() && resource.data.madrasaId == myMadrasaId()) ||
+        (isStudentAuth() && resource.data.studentId == mySessionStudentId());
+      allow list: if (isTeacherAuth() && resource.data.madrasaId == myMadrasaId()) ||
         (isStudentAuth() && resource.data.studentId == mySessionStudentId());
       allow write: if (isTeacherAuth() && request.resource.data.madrasaId == myMadrasaId()) ||
         (isStudentAuth() && request.resource.data.studentId == mySessionStudentId());
@@ -210,8 +219,10 @@ service cloud.firestore {
     // through on read — there is no data to protect on a doc that doesn't
     // exist yet.
     match /fees_monthly/{docId} {
-      allow read: if resource == null ||
+      allow get: if resource == null ||
         (isTeacherAuth() && resource.data.madrasaId == myMadrasaId()) ||
+        (isStudentAuth() && resource.data.studentId == mySessionStudentId());
+      allow list: if (isTeacherAuth() && resource.data.madrasaId == myMadrasaId()) ||
         (isStudentAuth() && resource.data.studentId == mySessionStudentId());
       allow create, update: if isTeacherAuth() && request.resource.data.madrasaId == myMadrasaId();
       allow delete: if isTeacherAuth() && resource.data.madrasaId == myMadrasaId();
