@@ -14,6 +14,16 @@
 // to).
 let madrasaId = localStorage.getItem('madrasaId');
 
+// ================= SELF-SIGNUP GUARD =================
+// While a brand-new madrasa signup is in progress (submitSignup below),
+// the normal auth.onAuthStateChanged flow must NOT also try to resolve/
+// create a teacher doc for the freshly created account — submitSignup()
+// owns that entire sequence itself (create auth account -> create teacher
+// doc with a brand-new madrasaId -> create madrasas/{id} doc). Without this
+// guard, onAuthStateChanged fires the instant the new account is created
+// and races ensureTeacherDoc() against submitSignup()'s own writes.
+let signupInProgress = false;
+
 // ================= DIAGNOSTIC BANNER (temporary, for debugging on mobile) =================
 // Shows any Firestore/auth error directly on screen, since there's no way to
 // open browser dev tools on a phone. Remove this block once the issue is fixed.
@@ -128,6 +138,8 @@ window.addEventListener('DOMContentLoaded', () => {
     .catch(() => setSync(false));
 
   auth.onAuthStateChanged(user => {
+    if (signupInProgress) return; // submitSignup() owns the flow while this is true
+
     if (!user) {
       // Everyone (teacher or student) needs to be signed in (at least anonymously)
       // before Firestore rules will allow reading student/attendance/result data.
@@ -522,6 +534,7 @@ function showRoleSelect() {
       <p class="muted">আপনি কে?</p>
       <button onclick="pickRole('teacher')">👨‍🏫 শিক্ষক</button>
       <button class="secondary" onclick="pickRole('student')" style="margin-top:8px;">🎓 শিক্ষার্থী</button>
+      <p style="margin-top:16px;"><a href="#" onclick="showSignupScreen();return false;">নতুন মাদ্রাসা? এখানে নিবন্ধন করুন</a></p>
     </div>
   `);
   hideNav();
@@ -548,6 +561,7 @@ function showTeacherLogin() {
       <p id="loginError" class="muted" style="color:#dc2626;"></p>
       <button onclick="teacherLogin()">লগইন করুন</button>
       <button class="secondary" onclick="logout()" style="margin-top:8px;">ফিরে যান</button>
+      <p style="margin-top:16px;text-align:center;"><a href="#" onclick="showSignupScreen();return false;">নতুন মাদ্রাসা? এখানে নিবন্ধন করুন</a></p>
     </div>
   `);
   hideNav();
@@ -570,6 +584,99 @@ function teacherLogin() {
         ? 'ইমেইল বা পাসওয়ার্ড সঠিক নয়'
         : 'লগইন ব্যর্থ: ' + err.message;
       showDiagBanner('Login ব্যর্থ: ' + err.message);
+    });
+}
+
+// ================= SELF-SIGNUP (নতুন মাদ্রাসা নিবন্ধন) =================
+// Lets a brand-new madrasa create its own account with NO manual Firebase
+// Console steps: they get their own madrasaId, their own admin teacher
+// account, and their own empty madrasas/{id} settings doc — all in one go.
+//
+// Sequencing matters here (see firestore.rules): the teacher doc must be
+// created FIRST (it's allowed to self-create as isAdmin:true only for a
+// madrasaId that has no madrasas/{id} doc yet — proving this is really a
+// new tenant, not an attempt to self-promote into an existing one). Once
+// that teacher doc exists, myMadrasaId() can resolve for this account, and
+// only then is the madrasas/{id} settings doc allowed to be created.
+function showSignupScreen() {
+  setScreen(`
+    <div class="card" style="margin-top:30px;">
+      <h2>নতুন মাদ্রাসা নিবন্ধন করুন</h2>
+      <p class="muted">নিজের মাদ্রাসার জন্য একটি নতুন, আলাদা অ্যাকাউন্ট তৈরি হবে — আপনার ডেটা অন্য কোনো মাদ্রাসার সাথে মিশবে না।</p>
+      <label>মাদ্রাসার নাম</label><input id="signupMadrasaName" placeholder="যেমন: দারুল উলুম মাদ্রাসা">
+      <label>আপনার নাম (অ্যাডমিন)</label><input id="signupAdminName" placeholder="আপনার নাম">
+      <label>ইমেইল</label><input id="signupEmail" type="email" placeholder="আপনার ইমেইল">
+      <label>পাসওয়ার্ড</label><input id="signupPassword" type="password" placeholder="কমপক্ষে ৬ অক্ষর">
+      <p id="signupError" class="muted" style="color:#dc2626;"></p>
+      <button onclick="submitSignup()">নিবন্ধন করুন</button>
+      <button class="secondary" onclick="showTeacherLogin()" style="margin-top:8px;">আগে থেকে অ্যাকাউন্ট আছে? লগইন করুন</button>
+    </div>
+  `);
+  hideNav();
+}
+
+function submitSignup() {
+  const madrasaName = document.getElementById('signupMadrasaName').value.trim();
+  const adminName = document.getElementById('signupAdminName').value.trim();
+  const email = document.getElementById('signupEmail').value.trim();
+  const password = document.getElementById('signupPassword').value;
+  const errEl = document.getElementById('signupError');
+  if (errEl) errEl.textContent = '';
+
+  if (!madrasaName) { if (errEl) errEl.textContent = 'মাদ্রাসার নাম দিন'; return; }
+  if (!email || !password) { if (errEl) errEl.textContent = 'ইমেইল ও পাসওয়ার্ড দিন'; return; }
+  if (password.length < 6) { if (errEl) errEl.textContent = 'পাসওয়ার্ড কমপক্ষে ৬ অক্ষরের হতে হবে'; return; }
+
+  const btn = event && event.target;
+  if (btn) { btn.disabled = true; btn.textContent = 'নিবন্ধন করা হচ্ছে...'; }
+
+  // A short random id is enough here — collisions are astronomically
+  // unlikely, and firestore.rules' self-signup branch double-checks the
+  // madrasas/{id} doc doesn't already exist before allowing the write
+  // anyway, so even a collision would just fail safely rather than
+  // overwrite someone else's data.
+  const newMadrasaId = 'm_' + Date.now().toString(36) + '_' + Math.random().toString(36).slice(2, 8);
+
+  signupInProgress = true;
+
+  auth.createUserWithEmailAndPassword(email, password)
+    .then(cred => {
+      const uid = cred.user.uid;
+      // Step 1: create the teacher doc FIRST, as isAdmin:true, for the
+      // brand-new madrasaId (allowed by firestore.rules' self-signup branch
+      // since no madrasas/{newMadrasaId} doc exists yet).
+      return db.collection('teachers').doc(uid).set({
+        madrasaId: newMadrasaId, email, name: adminName, isAdmin: true, active: true, createdAt: Date.now()
+      }).then(() => {
+        // Step 2: now that this account's teacher doc exists, myMadrasaId()
+        // resolves correctly, so the madrasas/{id} settings doc can be
+        // created too.
+        return db.collection('madrasas').doc(newMadrasaId).set({
+          madrasaName, createdAt: Date.now()
+        });
+      });
+    })
+    .then(() => {
+      madrasaId = newMadrasaId;
+      localStorage.setItem('madrasaId', madrasaId);
+      role = 'teacher';
+      localStorage.setItem('role', 'teacher');
+      myTeacherIsAdmin = true;
+      signupInProgress = false;
+      listenStudents();
+      listenSettings();
+      listenStudentContacts();
+      showTeacherApp();
+    })
+    .catch(e => {
+      signupInProgress = false;
+      if (btn) { btn.disabled = false; btn.textContent = 'নিবন্ধন করুন'; }
+      const msg = e.code === 'auth/email-already-in-use' ? 'এই ইমেইল দিয়ে আগে থেকেই অ্যাকাউন্ট আছে, লগইন করুন'
+        : e.code === 'auth/invalid-email' ? 'ইমেইলটি সঠিক নয়'
+        : e.code === 'auth/weak-password' ? 'পাসওয়ার্ড দুর্বল, আরেকটু শক্তিশালী দিন'
+        : 'নিবন্ধন ব্যর্থ: ' + e.message;
+      if (errEl) errEl.textContent = msg;
+      showDiagBanner('মাদ্রাসা নিবন্ধন ব্যর্থ: ' + e.message);
     });
 }
 

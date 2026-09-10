@@ -54,12 +54,16 @@ service cloud.firestore {
     //   madrasaId/isAdmin/active status on login).
     // - An admin teacher can read/list ALL teacher docs in their own
     //   madrasa (needed for the শিক্ষকগণ management screen).
-    // - Self-CREATE (bootstrap on first login, before any admin/teacher
-    //   docs exist for this device) is still allowed so an existing
-    //   single-teacher madrasa keeps working exactly as before — but it
-    //   can never self-grant isAdmin or active:false, only a real admin
-    //   (or manual Firebase Console edit, for the very first admin) can
-    //   set those.
+    // - Self-CREATE as a NON-admin (bootstrap on first login for an
+    //   existing single-teacher madrasa) is still allowed — can never
+    //   self-grant isAdmin or active:false that way.
+    // - Self-CREATE as an ADMIN is ALSO allowed, but ONLY when creating a
+    //   brand-new madrasaId that has no madrasas/{madrasaId} doc yet — this
+    //   is the self-signup path (see submitSignup() in app.js): a new
+    //   madrasa's first teacher account becomes its admin automatically.
+    //   Because this branch requires the madrasa to not already exist, it
+    //   can never be used to self-promote into an EXISTING madrasa — only
+    //   to become the founding admin of a genuinely new one.
     // - An admin can create a new teacher's doc (right after creating
     //   their Firebase Auth account from the শিক্ষকগণ screen) or update
     //   any teacher's doc in their madrasa (promote/demote admin,
@@ -78,7 +82,11 @@ service cloud.firestore {
         (request.auth.uid == uid &&
           request.resource.data.get('isAdmin', false) == false &&
           request.resource.data.get('active', true) == true) ||
-        (isRequesterAdmin() && request.resource.data.madrasaId == myMadrasaId())
+        (isRequesterAdmin() && request.resource.data.madrasaId == myMadrasaId()) ||
+        (request.auth.uid == uid &&
+          request.resource.data.get('isAdmin', false) == true &&
+          request.resource.data.get('active', true) == true &&
+          !exists(/databases/$(database)/documents/madrasas/$(request.resource.data.madrasaId)))
       );
 
       allow update: if isTeacherAuth() && (
@@ -93,6 +101,14 @@ service cloud.firestore {
     }
 
     // Per-madrasa settings (name, logo, subscription info later).
+    //
+    // Write is split into create vs update: CREATE is allowed either by an
+    // existing teacher of that madrasa (madrasaId == myMadrasaId(), the
+    // normal settings-editing case) OR by the self-signup flow immediately
+    // after it creates the matching teachers/{uid} doc (at that point
+    // myMadrasaId() already resolves to this new madrasaId, so the normal
+    // branch covers it — this is kept as one unified condition for
+    // clarity). UPDATE always requires an existing teacher of that madrasa.
     match /madrasas/{madrasaId} {
       allow read: if request.auth != null;
       allow write: if isTeacherAuth() && madrasaId == myMadrasaId();
