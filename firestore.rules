@@ -35,10 +35,22 @@ service cloud.firestore {
         (isTeacherAuth() && resource.data.madrasaId == myMadrasaId() && isRequesterAdmin())
       );
 
+      // *** SECURITY FIX ***: the old first branch here let ANY signed-in
+      // teacher account self-create a teachers/{uid} doc with ANY
+      // madrasaId at all, as long as isAdmin/active stayed at their
+      // defaults — there was no check that madrasaId belonged to them.
+      // That meant anyone could sign up their own email/password account
+      // and then simply write teachers/{their-uid} with madrasaId set to
+      // ANY existing madrasa (not just 'madrasa-001') to become a
+      // (non-admin) teacher of that madrasa — full read/write access to
+      // its students, results, fees, attendance, and the ability to reset
+      // student PINs. That branch was a leftover from before this app had
+      // an admin (শিক্ষকগণ) screen and self-signup, and is no longer
+      // needed by any real flow: existing teacher docs already exist,
+      // self-signup uses the isAdmin:true branch below, and every other
+      // new teacher account is created by an admin via the শিক্ষকগণ
+      // screen (the isRequesterAdmin() branch). It has been removed.
       allow create: if isTeacherAuth() && (
-        (request.auth.uid == uid &&
-          request.resource.data.get('isAdmin', false) == false &&
-          request.resource.data.get('active', true) == true) ||
         (isRequesterAdmin() && request.resource.data.madrasaId == myMadrasaId()) ||
         (request.auth.uid == uid &&
           request.resource.data.get('isAdmin', false) == true &&
