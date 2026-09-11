@@ -3,18 +3,6 @@ rules_version = '2';
 service cloud.firestore {
   match /databases/{database}/documents {
 
-    // Teacher = signed in with email/password AND not deactivated.
-    // Student = signed in anonymously.
-    //
-    // The `active != false` check is what makes "নিষ্ক্রিয় করুন" (deactivate)
-    // in the শিক্ষকগণ screen instantly revoke a teacher's access EVERYWHERE
-    // in the app (students, attendance, results, notices, diary, fees,
-    // etc.) — every single rule in this file that grants teacher access
-    // goes through isTeacherAuth(), so this one check covers all of them.
-    // A doc with no `active` field at all (every teacher created before
-    // this update) is treated as active — `undefined != false` is true —
-    // so nothing changes for existing accounts until an admin explicitly
-    // deactivates one.
     function isTeacherAuth() {
       return request.auth != null && request.auth.token.firebase.sign_in_provider == 'password' &&
         (!exists(/databases/$(database)/documents/teachers/$(request.auth.uid)) ||
@@ -30,61 +18,17 @@ service cloud.firestore {
       return get(/databases/$(database)/documents/students/$(mySessionStudentId())).data.className;
     }
 
-    // Which madrasa (tenant) the current signed-in user belongs to.
-    // Teacher accounts look this up from /teachers/{uid}; student (anonymous)
-    // accounts look this up from their own /sessions/{uid} doc.
     function myMadrasaId() {
       return isTeacherAuth()
         ? get(/databases/$(database)/documents/teachers/$(request.auth.uid)).data.madrasaId
         : get(/databases/$(database)/documents/sessions/$(request.auth.uid)).data.madrasaId;
     }
 
-    // Whether the current signed-in teacher has isAdmin:true on their own
-    // teachers/{uid} doc — used by the শিক্ষকগণ (multi-admin) feature to
-    // gate adding/removing other teacher accounts and toggling admin status.
     function isRequesterAdmin() {
       return isTeacherAuth() &&
         get(/databases/$(database)/documents/teachers/$(request.auth.uid)).data.get('isAdmin', false) == true;
     }
 
-    // Maps a teacher's Firebase Auth uid to the madrasa (tenant) they belong
-    // to, plus their isAdmin/active status.
-    //
-    // - Any signed-in teacher can read their OWN doc (to resolve their
-    //   madrasaId/isAdmin/active status on login).
-    // - An admin teacher can read/list ALL teacher docs in their own
-    //   madrasa (needed for the শিক্ষকগণ management screen).
-    // - Self-CREATE as a NON-admin (bootstrap on first login for an
-    //   existing single-teacher madrasa) is still allowed — can never
-    //   self-grant isAdmin or active:false that way.
-    // - Self-CREATE as an ADMIN is ALSO allowed, but ONLY when creating a
-    //   brand-new madrasaId that has no madrasas/{madrasaId} doc yet — this
-    //   is the self-signup path (see submitSignup() in app.js): a new
-    //   madrasa's first teacher account becomes its admin automatically.
-    //   Because this branch requires the madrasa to not already exist, it
-    //   can never be used to self-promote into an EXISTING madrasa — only
-    //   to become the founding admin of a genuinely new one.
-    //
-    //   *** SECURITY FIX ***: the reserved legacy id 'madrasa-001' (the
-    //   original single-tenant madrasa's id, hardcoded as the default in
-    //   app.js for any device that never opened a ?m= signup link) is now
-    //   explicitly excluded from this self-signup branch. Without this
-    //   line, ANYONE on the internet who read the public app.js source
-    //   (or just opened the browser console on the live site) could call
-    //   this API directly with madrasaId:'madrasa-001' and, if the
-    //   madrasas/madrasa-001 settings doc happened not to exist yet, become
-    //   an admin teacher of the real, original madrasa — with full access
-    //   to view/edit/delete every real student, result, fee, and PIN. This
-    //   line closes that hole regardless of whether the madrasas/madrasa-001
-    //   doc exists or not.
-    // - An admin can create a new teacher's doc (right after creating
-    //   their Firebase Auth account from the শিক্ষকগণ screen) or update
-    //   any teacher's doc in their madrasa (promote/demote admin,
-    //   activate/deactivate).
-    // - A non-admin teacher may still update their own doc (e.g. re-save
-    //   their email), but may never change their own isAdmin or active
-    //   fields that way — only an admin, via the branch above, can do
-    //   that.
     match /teachers/{uid} {
       allow read: if request.auth != null && (
         request.auth.uid == uid ||
@@ -111,62 +55,44 @@ service cloud.firestore {
           request.resource.data.get('active', true) == resource.data.get('active', true))
       );
 
-      allow delete: if false; // deactivate (active:false) instead of deleting — see comment above isTeacherAuth()
+      allow delete: if false;
     }
 
     // Per-madrasa settings (name, logo, subscription info later).
+    //
+    // *** SECURITY FIX ***: previously `allow read` covered BOTH get() and
+    // list() with no scoping — meaning any signed-in user could run
+    // db.collection('madrasas').get() with no filter and pull down every
+    // madrasa's name and logo in one shot (a full customer/tenant
+    // directory). The app itself never needs this: it only ever does
+    // db.collection('madrasas').doc(madrasaId).get() for its OWN
+    // madrasaId. So `list` is now fully disabled and `get` (by a specific,
+    // already-known id) stays allowed — zero effect on how the app works,
+    // but nobody can enumerate the full list of madrasas anymore.
     match /madrasas/{madrasaId} {
-      allow read: if request.auth != null;
+      allow get: if request.auth != null;
+      allow list: if false;
       allow write: if isTeacherAuth() && madrasaId == myMadrasaId();
     }
 
-    // Student directory. Read stays open to any signed-in user (teacher or
-    // anonymous) because the student-name picker screen needs to list names
-    // before a student has logged in / has a session yet. This means, for
-    // now, any device can technically list student names/rolls/classes
-    // (non-sensitive fields only — PINs and phone numbers are NOT here,
-    // see student_pins/student_contacts below) across madrasas via direct
-    // API calls. Tightening this further requires a public, pre-login way
-    // to identify a device's madrasa (e.g. a per-madrasa access code) —
-    // a reasonable future hardening pass once there are multiple real,
-    // paying tenants and this becomes worth the added complexity.
+    // Student directory — see README for the residual risk analysis and
+    // why this one is NOT fully closed in this update.
     match /students/{studentId} {
       allow read: if request.auth != null;
       allow write: if isTeacherAuth() && request.resource.data.madrasaId == myMadrasaId();
     }
 
-    // Student PIN secrets — kept in their own collection so they are never
-    // exposed by the open `students` read rule above. No client, not even
-    // the student who owns it, can ever read this collection directly.
-    // Firestore rules match a PIN server-side (via get()) only at the
-    // moment a student's login session is created/renewed, in the
-    // `sessions` rule below. Only a teacher of the matching madrasa may
-    // set or change a student's PIN.
     match /student_pins/{studentId} {
       allow read: if false;
       allow write: if isTeacherAuth() &&
         get(/databases/$(database)/documents/students/$(studentId)).data.madrasaId == myMadrasaId();
     }
 
-    // Student phone number / WhatsApp flag — kept in their own collection,
-    // separate from the open-read `students` collection above, so this data
-    // is only ever readable by a teacher of the same madrasa (never by
-    // students, never by other madrasas' devices). Students never need to
-    // read this themselves.
     match /student_contacts/{studentId} {
       allow read: if isTeacherAuth() && resource.data.madrasaId == myMadrasaId();
       allow write: if isTeacherAuth() && request.resource.data.madrasaId == myMadrasaId();
     }
 
-    // Student login session: proves (Firebase Auth uid -> studentId) once a
-    // correct PIN has been supplied. The write must include the student's
-    // real, current PIN as `pin` in the same request — this rule checks it
-    // against student_pins/{studentId} via get(); if it doesn't match (or
-    // the student has no PIN set yet), the whole write fails with
-    // "permission-denied" and the app shows "ভুল PIN". The submitted `pin`
-    // value ends up stored on the session doc itself, but that's harmless:
-    // this doc can only ever be read by the same signed-in uid (see allow
-    // read below), so it never reaches anyone else.
     match /sessions/{uid} {
       allow read: if request.auth != null && request.auth.uid == uid;
       allow write: if isStudentAuth() && request.auth.uid == uid &&
@@ -174,7 +100,6 @@ service cloud.firestore {
         get(/databases/$(database)/documents/student_pins/$(request.resource.data.studentId)).data.pin == request.resource.data.pin;
     }
 
-    // Attendance: one doc per student per date (docId = studentId_date).
     match /attendance/{docId} {
       allow get: if resource == null ||
         (isTeacherAuth() && resource.data.madrasaId == myMadrasaId()) ||
