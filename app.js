@@ -24,10 +24,18 @@ let madrasaId = localStorage.getItem('madrasaId');
 // and races ensureTeacherDoc() against submitSignup()'s own writes.
 let signupInProgress = false;
 
-// ================= DIAGNOSTIC BANNER (temporary, for debugging on mobile) =================
-// Shows any Firestore/auth error directly on screen, since there's no way to
-// open browser dev tools on a phone. Remove this block once the issue is fixed.
+// ================= DIAGNOSTIC BANNER (debug-mode only) =================
+// Shows any Firestore/auth error directly on screen — but ONLY when debug
+// mode is turned on (see the "ডিবাগ মোড" checkbox in সেটিংস). Every part of
+// the app reports errors through this one function, so gating it here means
+// ordinary users never see raw technical error text anywhere in the app;
+// the message is still always logged to the browser console (visible via
+// remote debugging) so nothing is lost for troubleshooting later.
+let debugMode = localStorage.getItem('debugMode') === '1';
+
 function showDiagBanner(msg) {
+  console.error('[diag]', msg);
+  if (!debugMode) return;
   let el = document.getElementById('diagBanner');
   if (!el) {
     el = document.createElement('div');
@@ -403,7 +411,19 @@ function renderSettingsScreen() {
       <button onclick="saveSettings()" style="margin-top:10px;">সংরক্ষণ করুন</button>
       ${s.logoDataUrl ? `<button class="small danger" onclick="removeLogo()" style="margin-top:8px;">লোগো মুছুন</button>` : ''}
     </div>
+    <div class="card">
+      <h2>ডিবাগ মোড</h2>
+      <p class="muted">চালু থাকলে অ্যাপে কোনো টেকনিক্যাল এরর হলে স্ক্রিনে লাল ব্যানারে দেখাবে — সমস্যা খুঁজে বের করতে সাহায্য করার জন্য। সাধারণ ব্যবহারের জন্য এটি বন্ধ রাখাই ভালো।</p>
+      <label style="display:flex;align-items:center;gap:6px;margin-top:6px;">
+        <input id="debugModeToggle" type="checkbox" style="width:auto;" ${debugMode ? 'checked' : ''} onchange="toggleDebugMode(this.checked)"> ডিবাগ মোড চালু করুন (শুধু এই ডিভাইসে)
+      </label>
+    </div>
   `);
+}
+
+function toggleDebugMode(on) {
+  debugMode = !!on;
+  localStorage.setItem('debugMode', debugMode ? '1' : '0');
 }
 
 function saveSettings() {
