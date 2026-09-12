@@ -94,6 +94,7 @@ let reportStudentId = '';
 // marksheet entry state (teacher side, in-progress subject rows before save)
 let currentMarksheetSubjects = [];
 let lastResultsIsTeacher = true;
+let lastUsedSubjectFullMarks = 100; // remembers last "পূর্ণ নম্বর" entered, for faster repeated entry
 
 // app settings (madrasa name & logo)
 let appSettings = {};
@@ -1377,6 +1378,7 @@ function renderResultsScreen(isTeacher) {
         <div id="resultsFilterWrap"></div>
         <label>শিক্ষার্থী</label><select id="resStudent">${opts || '<option value="">কোনো শিক্ষার্থী নেই</option>'}</select>
         <label>পরীক্ষার নাম</label><input id="resExam" placeholder="যেমন: অর্ধবার্ষিক পরীক্ষা ২০২৬">
+        <label>শিক্ষাবর্ষ</label><input id="resAcademicYear" placeholder="যেমন: ২০২৬" value="${new Date().getFullYear()}">
         <hr style="border:none;border-top:1px solid #eee;margin:10px 0;">
         <label>বিষয়ের নাম</label><input id="resSubjectName" placeholder="যেমন: আরবি">
         <label>পূর্ণ নম্বর</label><input id="resSubjectFull" type="number" value="100">
@@ -1393,6 +1395,7 @@ function renderResultsScreen(isTeacher) {
     const filterWrap = document.getElementById('resultsFilterWrap');
     if (filterWrap) filterWrap.innerHTML = classFilterDropdownHtml(resultsClassFilter, 'onResultsClassFilterChange');
     renderSubjectRows();
+    attachResultsFastEntryHandlers();
   }
 
   let q = db.collection('results');
@@ -1452,19 +1455,43 @@ function onResultsClassFilterChange(value) {
   renderResultsScreen(true);
 }
 
+// Faster subject entry: pressing Enter in the "প্রাপ্ত নম্বর" (marks
+// obtained) field adds the subject row immediately, instead of forcing the
+// teacher to reach for the "+ বিষয় যোগ করুন" button after every subject.
+function attachResultsFastEntryHandlers() {
+  const obtainedEl = document.getElementById('resSubjectObtained');
+  if (obtainedEl) {
+    obtainedEl.onkeydown = (e) => { if (e.key === 'Enter') { e.preventDefault(); addSubjectRow(); } };
+  }
+  const nameEl = document.getElementById('resSubjectName');
+  if (nameEl) {
+    nameEl.onkeydown = (e) => { if (e.key === 'Enter') { e.preventDefault(); document.getElementById('resSubjectObtained').focus(); } };
+  }
+}
+
 function addSubjectRow() {
-  const name = document.getElementById('resSubjectName').value.trim();
-  const full = Number(document.getElementById('resSubjectFull').value);
-  const obtained = Number(document.getElementById('resSubjectObtained').value);
+  const nameEl = document.getElementById('resSubjectName');
+  const fullEl = document.getElementById('resSubjectFull');
+  const obtainedEl = document.getElementById('resSubjectObtained');
+  const name = nameEl.value.trim();
+  const full = Number(fullEl.value);
+  const obtained = Number(obtainedEl.value);
   if (!name) return alert('বিষয়ের নাম লিখুন');
   if (!full || full <= 0) return alert('পূর্ণ নম্বর সঠিকভাবে দিন');
-  if (document.getElementById('resSubjectObtained').value === '' || isNaN(obtained)) return alert('প্রাপ্ত নম্বর দিন');
+  if (obtainedEl.value === '' || isNaN(obtained)) return alert('প্রাপ্ত নম্বর দিন');
   if (obtained > full) return alert('প্রাপ্ত নম্বর পূর্ণ নম্বরের চেয়ে বেশি হতে পারে না');
   currentMarksheetSubjects.push({ name, full, obtained });
-  document.getElementById('resSubjectName').value = '';
-  document.getElementById('resSubjectFull').value = '100';
-  document.getElementById('resSubjectObtained').value = '';
+
+  // Remember this full-marks value so the next subject row starts
+  // pre-filled with it (most exams use the same full marks for every
+  // subject, e.g. 100 or 200) — saves re-typing it every time.
+  lastUsedSubjectFullMarks = full;
+
+  nameEl.value = '';
+  fullEl.value = String(lastUsedSubjectFullMarks);
+  obtainedEl.value = '';
   renderSubjectRows();
+  nameEl.focus();
 }
 
 function removeSubjectRow(index) {
@@ -1490,6 +1517,7 @@ function renderSubjectRows() {
 function saveMarksheet() {
   const studentId = document.getElementById('resStudent').value;
   const examName = document.getElementById('resExam').value.trim();
+  const academicYear = document.getElementById('resAcademicYear').value.trim();
   if (!studentId) return alert('শিক্ষার্থী নির্বাচন করুন');
   if (!examName) return alert('পরীক্ষার নাম লিখুন');
   if (currentMarksheetSubjects.length === 0) return alert('অন্তত একটি বিষয় যোগ করুন');
@@ -1499,10 +1527,16 @@ function saveMarksheet() {
   const percentage = totalFull > 0 ? (totalObtained / totalFull) * 100 : 0;
   const { grade, gpa } = gradeFromPercent(percentage);
 
-  db.collection('results').doc(studentId + '_' + examName).set({
+  // Doc id includes academicYear (when given) so the same exam name reused
+  // in a different year creates a new marksheet instead of overwriting an
+  // older year's result for this student.
+  const docId = studentId + '_' + examName + (academicYear ? '_' + academicYear : '');
+
+  db.collection('results').doc(docId).set({
     madrasaId,
     studentId,
     examName,
+    academicYear: academicYear || '',
     subjects: currentMarksheetSubjects,
     totalObtained,
     totalFull,
@@ -1529,47 +1563,100 @@ function deleteMarksheet(docId) {
   db.collection('results').doc(docId).delete();
 }
 
+// Small helper: pick a colour for a grade badge in the redesigned marksheet
+// (green tones for A+/A, blue for A-/B, orange for C/D, red for F).
+function gradeColor(grade) {
+  if (grade === 'A+' || grade === 'A') return { bg: '#dcfce7', fg: '#166534' };
+  if (grade === 'A-' || grade === 'B') return { bg: '#dbeafe', fg: '#1e40af' };
+  if (grade === 'C' || grade === 'D') return { bg: '#ffedd5', fg: '#9a3412' };
+  return { bg: '#fee2e2', fg: '#991b1b' };
+}
+
 function viewMarksheet(studentId, docId) {
   db.collection('results').doc(docId).get().then(doc => {
     if (!doc.exists) return alert('মার্কশিট খুঁজে পাওয়া যায়নি');
     const r = doc.data();
     const student = studentsCache.find(s => s.id === studentId) || {};
     const hasSubjects = Array.isArray(r.subjects) && r.subjects.length > 0;
+    const instName = (appSettings && appSettings.madrasaName) ? appSettings.madrasaName : 'শিক্ষা প্রতিষ্ঠান';
+    const logoHtml = (appSettings && appSettings.logoDataUrl)
+      ? `<img src="${appSettings.logoDataUrl}" style="width:52px;height:52px;border-radius:10px;object-fit:cover;margin-right:10px;" alt="logo">`
+      : '';
 
-    const rows = hasSubjects ? r.subjects.map(s => `
-      <tr>
-        <td style="padding:6px;border:1px solid #ddd;">${s.name}</td>
-        <td style="padding:6px;border:1px solid #ddd;text-align:center;">${s.full}</td>
-        <td style="padding:6px;border:1px solid #ddd;text-align:center;">${s.obtained}</td>
+    const rows = hasSubjects ? r.subjects.map((s, i) => {
+      const subjPct = s.full > 0 ? (s.obtained / s.full) * 100 : 0;
+      const subjGrade = gradeFromPercent(subjPct);
+      const subjGc = gradeColor(subjGrade.grade);
+      return `
+      <tr style="background:${i % 2 === 0 ? '#fff' : '#fafafa'};">
+        <td style="padding:8px 10px;border:1px solid #e5e7eb;">${s.name}</td>
+        <td style="padding:8px 10px;border:1px solid #e5e7eb;text-align:center;">${s.full}</td>
+        <td style="padding:8px 10px;border:1px solid #e5e7eb;text-align:center;">${s.obtained}</td>
+        <td style="padding:8px 10px;border:1px solid #e5e7eb;text-align:center;"><span style="background:${subjGc.bg};color:${subjGc.fg};border-radius:6px;padding:2px 8px;font-weight:bold;">${subjGrade.grade}</span></td>
+        <td style="padding:8px 10px;border:1px solid #e5e7eb;text-align:center;">${subjGrade.gpa}</td>
       </tr>
-    `).join('') : `<tr><td colspan="3" style="padding:6px;border:1px solid #ddd;text-align:center;" class="muted">বিষয়ভিত্তিক তথ্য নেই (পুরাতন রেজাল্ট)</td></tr>`;
+    `;
+    }).join('') : `<tr><td colspan="5" style="padding:8px 10px;border:1px solid #e5e7eb;text-align:center;" class="muted">বিষয়ভিত্তিক তথ্য নেই (পুরাতন রেজাল্ট)</td></tr>`;
 
     const totalRow = hasSubjects ? `
-      <tr>
-        <td style="padding:6px;border:1px solid #ddd;"><b>মোট</b></td>
-        <td style="padding:6px;border:1px solid #ddd;text-align:center;"><b>${r.totalFull}</b></td>
-        <td style="padding:6px;border:1px solid #ddd;text-align:center;"><b>${r.totalObtained}</b></td>
+      <tr style="background:#f3f4f6;">
+        <td style="padding:8px 10px;border:1px solid #e5e7eb;"><b>মোট</b></td>
+        <td style="padding:8px 10px;border:1px solid #e5e7eb;text-align:center;"><b>${r.totalFull}</b></td>
+        <td style="padding:8px 10px;border:1px solid #e5e7eb;text-align:center;"><b>${r.totalObtained}</b></td>
+        <td style="padding:8px 10px;border:1px solid #e5e7eb;text-align:center;"><b>${r.grade}</b></td>
+        <td style="padding:8px 10px;border:1px solid #e5e7eb;text-align:center;"><b>${r.gpa}</b></td>
       </tr>
     ` : '';
+
+    const gc = gradeColor(r.grade);
+    const statBoxes = hasSubjects ? `
+      <div style="display:flex;gap:10px;margin-top:14px;flex-wrap:wrap;">
+        <div style="flex:1;min-width:90px;background:#eef2ff;border-radius:10px;padding:10px;text-align:center;">
+          <div class="muted" style="font-size:11px;">শতাংশ</div>
+          <div style="font-size:18px;font-weight:bold;color:#3730a3;">${r.percentage}%</div>
+        </div>
+        <div style="flex:1;min-width:90px;background:${gc.bg};border-radius:10px;padding:10px;text-align:center;">
+          <div class="muted" style="font-size:11px;">গ্রেড</div>
+          <div style="font-size:18px;font-weight:bold;color:${gc.fg};">${r.grade}</div>
+        </div>
+        ${r.gpa ? `
+        <div style="flex:1;min-width:90px;background:#fef9c3;border-radius:10px;padding:10px;text-align:center;">
+          <div class="muted" style="font-size:11px;">GPA</div>
+          <div style="font-size:18px;font-weight:bold;color:#854d0e;">${r.gpa}</div>
+        </div>` : ''}
+      </div>
+    ` : `<p style="margin-top:10px;"><b>প্রাপ্ত নম্বর:</b> ${r.marks !== undefined ? r.marks : '-'}</p>`;
 
     setScreen(`
       <style id="marksheetPrintStyle">
         @media print {
-          #bottomNav, .no-print { display: none !important; }
+          #bottomNav, #topBar, .no-print { display: none !important; }
+          #marksheetPrintArea { box-shadow: none !important; border: 1px solid #ccc !important; }
         }
       </style>
-      <div class="card" id="marksheetPrintArea">
-        <h2 style="text-align:center;margin-bottom:2px;">মার্কশিট</h2>
-        <p class="muted" style="text-align:center;margin-top:0;">${r.examName}</p>
-        <hr style="border:none;border-top:1px solid #eee;margin:10px 0;">
-        <p><b>নাম:</b> ${student.name || '-'}</p>
-        <p><b>রোল:</b> ${student.roll || '-'} &nbsp;&nbsp; <b>শ্রেণি:</b> ${student.className || '-'}</p>
-        <table style="width:100%;border-collapse:collapse;margin-top:10px;">
+      <div class="card" id="marksheetPrintArea" style="position:relative;border-top:5px solid #4f46e5;">
+        ${r.academicYear ? `<div style="position:absolute;top:10px;right:14px;background:#eef2ff;color:#3730a3;font-size:12px;font-weight:bold;padding:3px 10px;border-radius:20px;">শিক্ষাবর্ষ: ${r.academicYear}</div>` : ''}
+        <div style="display:flex;align-items:center;justify-content:center;margin-top:4px;">
+          ${logoHtml}
+          <div style="text-align:center;">
+            <div style="font-size:19px;font-weight:bold;">${instName}</div>
+            <div class="muted" style="font-size:13px;margin-top:2px;">${r.examName}</div>
+          </div>
+        </div>
+        <hr style="border:none;border-top:1px solid #eee;margin:12px 0;">
+        <div style="display:flex;justify-content:space-between;flex-wrap:wrap;gap:4px;font-size:14px;">
+          <span><b>নাম:</b> ${student.name || '-'}</span>
+          <span><b>রোল:</b> ${student.roll || '-'}</span>
+          <span><b>শ্রেণি:</b> ${student.className || '-'}</span>
+        </div>
+        <table style="width:100%;border-collapse:collapse;margin-top:12px;">
           <thead>
-            <tr>
-              <th style="padding:6px;border:1px solid #ddd;text-align:left;">বিষয়</th>
-              <th style="padding:6px;border:1px solid #ddd;">পূর্ণ নম্বর</th>
-              <th style="padding:6px;border:1px solid #ddd;">প্রাপ্ত নম্বর</th>
+            <tr style="background:#eef2ff;">
+              <th style="padding:8px 10px;border:1px solid #e5e7eb;text-align:left;">বিষয়</th>
+              <th style="padding:8px 10px;border:1px solid #e5e7eb;">পূর্ণ নম্বর</th>
+              <th style="padding:8px 10px;border:1px solid #e5e7eb;">প্রাপ্ত নম্বর</th>
+              <th style="padding:8px 10px;border:1px solid #e5e7eb;">গ্রেড</th>
+              <th style="padding:8px 10px;border:1px solid #e5e7eb;">GPA</th>
             </tr>
           </thead>
           <tbody>
@@ -1577,11 +1664,8 @@ function viewMarksheet(studentId, docId) {
             ${totalRow}
           </tbody>
         </table>
-        ${hasSubjects ? `
-          <p style="margin-top:10px;"><b>শতাংশ:</b> ${r.percentage}%</p>
-          <p><b>গ্রেড:</b> ${r.grade} ${r.gpa ? '(GPA ' + r.gpa + ')' : ''}</p>
-        ` : `<p style="margin-top:10px;"><b>প্রাপ্ত নম্বর:</b> ${r.marks !== undefined ? r.marks : '-'}</p>`}
-        <p class="muted" style="margin-top:10px;">তারিখ: ${r.date || '-'}</p>
+        ${statBoxes}
+        <p class="muted" style="margin-top:12px;text-align:center;">প্রকাশের তারিখ: ${r.date || '-'}</p>
         <div class="no-print" style="margin-top:14px;">
           <button onclick="printMarksheet()">🖨️ প্রিন্ট করুন</button>
           <button class="secondary" onclick="renderResultsScreen(lastResultsIsTeacher)">ফিরে যান</button>
