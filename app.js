@@ -2499,7 +2499,7 @@ function loadMonthlyFeesTeacher() {
           <button class="small ${status==='paid'?'':'secondary'}" onclick="setFeeStatus('${s.id}','${month}','paid')">পরিশোধিত</button>
           <button class="small ${status==='due'?'danger':'secondary'}" onclick="setFeeStatus('${s.id}','${month}','due')">বকেয়া</button>
         </div>
-        ${d.paidDate ? `<div class="muted" style="margin-top:4px;">পরিশোধের তারিখ: ${d.paidDate}</div>` : ''}
+        <div class="muted fee-paid-date-line" style="margin-top:4px;${d.paidDate ? '' : 'display:none;'}">পরিশোধের তারিখ: ${d.paidDate || ''}</div>
       `;
     }).catch(e => {
       const cell = document.getElementById('fee_' + s.id);
@@ -2521,14 +2521,16 @@ function updateFeeAmount(studentId, month, value) {
   }, { merge: true }).catch(e => showDiagBanner('বেতন সংরক্ষণ ব্যর্থ: ' + e.message));
 }
 
+// Updates ONLY the clicked student's own fee card in place (buttons +
+// paid-date line) instead of reloading every student's card via
+// loadMonthlyFeesTeacher(), which used to make the whole বেতন list flash
+// "লোড হচ্ছে..." and reload on every single tap — the same class of bug
+// already fixed for the attendance present/absent buttons.
 function setFeeStatus(studentId, month, status) {
   const data = { studentId, month, madrasaId, status };
   if (status === 'paid') data.paidDate = new Date().toISOString().slice(0,10);
   db.collection('fees_monthly').doc(studentId + '_' + month).set(data, { merge: true })
-    .then(() => {
-      updateFeeButtonsUI(studentId, status);
-      loadMonthlyFeesTeacher(); // refresh to show/hide the paid-date line correctly
-    })
+    .then(() => updateFeeCellUI(studentId, status, data.paidDate))
     .catch(e => showDiagBanner('বেতন স্ট্যাটাস আপডেট ব্যর্থ: ' + e.message));
 }
 
@@ -2538,6 +2540,23 @@ function updateFeeButtonsUI(studentId, status) {
   const buttons = cell.querySelectorAll('.row button');
   if (buttons[0]) buttons[0].className = 'small' + (status === 'paid' ? '' : ' secondary');
   if (buttons[1]) buttons[1].className = 'small' + (status === 'due' ? ' danger' : ' secondary');
+}
+
+// Updates just one student's fee card (buttons + paid-date line) without
+// touching/reloading anyone else's card.
+function updateFeeCellUI(studentId, status, paidDate) {
+  updateFeeButtonsUI(studentId, status);
+  const cell = document.getElementById('fee_' + studentId);
+  if (!cell) return;
+  const dateLine = cell.querySelector('.fee-paid-date-line');
+  if (!dateLine) return;
+  if (status === 'paid' && paidDate) {
+    dateLine.textContent = 'পরিশোধের তারিখ: ' + paidDate;
+    dateLine.style.display = '';
+  } else {
+    dateLine.textContent = '';
+    dateLine.style.display = 'none';
+  }
 }
 
 // ---- Monthly fee (student's own view) ----
