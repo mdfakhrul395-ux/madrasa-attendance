@@ -1430,6 +1430,8 @@ function renderResultsScreen(isTeacher) {
         ? `${r.totalObtained}/${r.totalFull} &nbsp; <span class="badge">${r.grade}</span>`
         : (r.marks !== undefined ? `${r.marks}` : '');
       const isPublished = r.published === true;
+      const safeDocId = String(d.id).replace(/\\/g, '\\\\').replace(/'/g, "\\'");
+      const safeStudentId = String(r.studentId).replace(/\\/g, '\\\\').replace(/'/g, "\\'");
       return `<div class="student-row" style="display:block;">
         <div style="display:flex;justify-content:space-between;align-items:center;">
           <span>${nameLine ? nameLine + ' - ' : ''}${r.examName}</span>
@@ -1437,9 +1439,9 @@ function renderResultsScreen(isTeacher) {
         </div>
         ${isTeacher ? `<div class="muted" style="margin-top:2px;">${isPublished ? '✅ প্রকাশিত (শিক্ষার্থী দেখতে পারবে)' : '🔒 অপ্রকাশিত (শুধু শিক্ষক দেখতে পারবে)'}</div>` : ''}
         <div style="margin-top:6px;">
-          <button class="small secondary" onclick="viewMarksheet('${r.studentId}','${d.id}')">মার্কশিট দেখুন</button>
-          ${isTeacher ? `<button class="small ${isPublished ? 'secondary' : ''}" onclick="togglePublish('${d.id}', ${isPublished})">${isPublished ? 'স্থগিত করুন' : 'প্রকাশ করুন'}</button>` : ''}
-          ${isTeacher ? `<button class="small danger" onclick="deleteMarksheet('${d.id}')">মুছুন</button>` : ''}
+          <button class="small secondary" onclick="viewMarksheet('${safeStudentId}','${safeDocId}')">মার্কশিট দেখুন</button>
+          ${isTeacher ? `<button class="small ${isPublished ? 'secondary' : ''}" onclick="togglePublish('${safeDocId}', ${isPublished})">${isPublished ? 'স্থগিত করুন' : 'প্রকাশ করুন'}</button>` : ''}
+          ${isTeacher ? `<button class="small danger" onclick="deleteMarksheet('${safeDocId}')">মুছুন</button>` : ''}
         </div>
       </div>`;
     }).join('');
@@ -1560,7 +1562,8 @@ function togglePublish(docId, currentlyPublished) {
 
 function deleteMarksheet(docId) {
   if (!confirm('এই মার্কশিট মুছতে চান?')) return;
-  db.collection('results').doc(docId).delete();
+  db.collection('results').doc(docId).delete()
+    .catch(e => { alert('মুছতে ব্যর্থ: ' + e.message); showDiagBanner('মার্কশিট মুছতে ব্যর্থ: ' + e.message); });
 }
 
 // Small helper: pick a colour for a grade badge in the redesigned marksheet
