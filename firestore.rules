@@ -35,21 +35,6 @@ service cloud.firestore {
         (isTeacherAuth() && resource.data.madrasaId == myMadrasaId() && isRequesterAdmin())
       );
 
-      // *** SECURITY FIX ***: the old first branch here let ANY signed-in
-      // teacher account self-create a teachers/{uid} doc with ANY
-      // madrasaId at all, as long as isAdmin/active stayed at their
-      // defaults — there was no check that madrasaId belonged to them.
-      // That meant anyone could sign up their own email/password account
-      // and then simply write teachers/{their-uid} with madrasaId set to
-      // ANY existing madrasa (not just 'madrasa-001') to become a
-      // (non-admin) teacher of that madrasa — full read/write access to
-      // its students, results, fees, attendance, and the ability to reset
-      // student PINs. That branch was a leftover from before this app had
-      // an admin (শিক্ষকগণ) screen and self-signup, and is no longer
-      // needed by any real flow: existing teacher docs already exist,
-      // self-signup uses the isAdmin:true branch below, and every other
-      // new teacher account is created by an admin via the শিক্ষকগণ
-      // screen (the isRequesterAdmin() branch). It has been removed.
       allow create: if isTeacherAuth() && (
         (isRequesterAdmin() && request.resource.data.madrasaId == myMadrasaId()) ||
         (request.auth.uid == uid &&
@@ -70,25 +55,12 @@ service cloud.firestore {
       allow delete: if false;
     }
 
-    // Per-madrasa settings (name, logo, subscription info later).
-    //
-    // *** SECURITY FIX ***: previously `allow read` covered BOTH get() and
-    // list() with no scoping — meaning any signed-in user could run
-    // db.collection('madrasas').get() with no filter and pull down every
-    // madrasa's name and logo in one shot (a full customer/tenant
-    // directory). The app itself never needs this: it only ever does
-    // db.collection('madrasas').doc(madrasaId).get() for its OWN
-    // madrasaId. So `list` is now fully disabled and `get` (by a specific,
-    // already-known id) stays allowed — zero effect on how the app works,
-    // but nobody can enumerate the full list of madrasas anymore.
     match /madrasas/{madrasaId} {
       allow get: if request.auth != null;
       allow list: if false;
       allow write: if isTeacherAuth() && madrasaId == myMadrasaId();
     }
 
-    // Student directory — see README for the residual risk analysis and
-    // why this one is NOT fully closed in this update.
     match /students/{studentId} {
       allow read: if request.auth != null;
       allow write: if isTeacherAuth() && request.resource.data.madrasaId == myMadrasaId();
@@ -112,14 +84,46 @@ service cloud.firestore {
         get(/databases/$(database)/documents/student_pins/$(request.resource.data.studentId)).data.pin == request.resource.data.pin;
     }
 
+    // *** UPDATED: "বের হওয়ার সময়" (timeLeftHome) LOCK ***
+    // Requirement: only the student themself may ever set timeLeftHome, and
+    // once it is set on a given attendance doc, NO ONE (not the teacher, not
+    // even the student again) may change it.
+    //
+    // The attendance doc is shared: teacher writes status/reason via
+    // setAttendance()/updateAttField(), student writes timeLeftHome via
+    // submitMyTimeLeft() — both use set(..., {merge:true}) on the SAME doc
+    // (id = studentId_date), so the write rule has to look at the full
+    // resulting document (request.resource.data) versus what existed before
+    // (resource.data) and reject any write that touches timeLeftHome in a
+    // way the writer isn't allowed to.
+    //
+    // get/list (read) rules are unchanged from before.
     match /attendance/{docId} {
       allow get: if resource == null ||
         (isTeacherAuth() && resource.data.madrasaId == myMadrasaId()) ||
         (isStudentAuth() && resource.data.studentId == mySessionStudentId());
       allow list: if (isTeacherAuth() && resource.data.madrasaId == myMadrasaId()) ||
         (isStudentAuth() && resource.data.studentId == mySessionStudentId());
-      allow write: if (isTeacherAuth() && request.resource.data.madrasaId == myMadrasaId()) ||
-        (isStudentAuth() && request.resource.data.studentId == mySessionStudentId());
+
+      // Teacher: may create/update the doc (status, reason, madrasaId,
+      // studentId, date) but the resulting timeLeftHome value must be
+      // exactly whatever it already was before this write (null if it
+      // wasn't set yet) — a teacher can never introduce or change it.
+      allow write: if isTeacherAuth() && request.resource.data.madrasaId == myMadrasaId() &&
+        request.resource.data.get('timeLeftHome', null) ==
+          (resource == null ? null : resource.data.get('timeLeftHome', null));
+
+      // Student: may only ever set timeLeftHome for their OWN attendance
+      // doc, and only while it is not already set (resource doc missing,
+      // or existing timeLeftHome is null/empty) — once set, this branch's
+      // first condition fails and the write is denied for everyone,
+      // including the student themself. Also can't touch status/reason.
+      allow write: if isStudentAuth() && request.resource.data.studentId == mySessionStudentId() &&
+        (resource == null || !resource.data.get('timeLeftHome', null)) &&
+        request.resource.data.get('status', null) ==
+          (resource == null ? null : resource.data.get('status', null)) &&
+        request.resource.data.get('reason', null) ==
+          (resource == null ? null : resource.data.get('reason', null));
     }
 
     match /leaves/{docId} {

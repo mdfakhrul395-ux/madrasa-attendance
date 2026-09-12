@@ -1134,6 +1134,12 @@ function renderAttendanceList() {
 // when db.collection('attendance').doc(...).get() rejected (e.g. on a
 // permission-denied for a student whose attendance doc doesn't exist yet
 // for this date) and the .catch() did nothing to the DOM.
+//
+// NOTE ON "বাসা থেকে বের হওয়ার সময়" (time left home): this is now READ-ONLY
+// on the teacher's screen. Only the student themself can set it (see
+// renderMyAttendance/submitMyTimeLeft below), and once set it can never be
+// changed by anyone — enforced server-side in firestore.rules, not just
+// hidden here in the UI.
 function loadAttendanceCell(s, date) {
   const cell = document.getElementById('att_' + s.id);
   if (cell) cell.innerHTML = 'লোড হচ্ছে...';
@@ -1162,8 +1168,10 @@ function loadAttendanceCell(s, date) {
           <button class="small ${d.status==='present'?'':'secondary'}" onclick="setAttendance('${s.id}','${date}','present')">উপস্থিত</button>
           <button class="small ${d.status==='absent'?'danger':'secondary'}" onclick="setAttendance('${s.id}','${date}','absent')">অনুপস্থিত</button>
         </div>
-        <label>বাসা থেকে বের হওয়ার সময়</label>
-        <input type="time" value="${d.timeLeftHome||''}" onchange="updateAttField('${s.id}','${date}','timeLeftHome',this.value)">
+        <div class="muted" style="margin-top:8px;">
+          বাসা থেকে বের হওয়ার সময়: <b>${d.timeLeftHome ? d.timeLeftHome : 'এখনো শিক্ষার্থী নিজে সেট করেনি'}</b>
+          <div style="font-size:11px;">(শুধু শিক্ষার্থী নিজে এটি একবার সেট করতে পারে, শিক্ষক পরিবর্তন করতে পারবেন না)</div>
+        </div>
         <label>অনুপস্থিতির কারণ (যদি থাকে)</label>
         <input value="${d.reason||''}" onchange="updateAttField('${s.id}','${date}','reason',this.value)">
       `;
@@ -1221,22 +1229,23 @@ function updateAttField(studentId, date, field, value) {
 }
 
 // ---- Student's own attendance view ----
+// "বাসা থেকে বের হওয়ার সময়" can ONLY be entered by the student themself,
+// and only ONCE per day — after it's saved, it becomes a locked, read-only
+// value (nobody, including the student or any teacher, can change it
+// afterward). This is enforced server-side in firestore.rules; the UI here
+// just reflects that by showing an input only when nothing is saved yet.
 function renderMyAttendance() {
   const today = new Date().toISOString().slice(0,10);
   setScreen(`
     <div class="card">
       <h2>আজ বাসা থেকে বের হওয়ার সময়</h2>
-      <input type="time" id="myTimeLeft" onchange="submitMyTimeLeft()">
+      <div id="myTimeLeftWrap">লোড হচ্ছে...</div>
       <p class="muted" style="margin-top:6px;">তারিখ: ${today}</p>
     </div>
     <div class="card"><h2>আমার সাম্প্রতিক উপস্থিতি</h2><div id="myAttWrap">লোড হচ্ছে...</div></div>
   `);
 
-  // pre-fill today's time if already set
-  db.collection('attendance').doc(myStudentId + '_' + today).get().then(doc => {
-    const el = document.getElementById('myTimeLeft');
-    if (el && doc.exists && doc.data().timeLeftHome) el.value = doc.data().timeLeftHome;
-  });
+  loadMyTimeLeftBox(today);
 
   db.collection('attendance').where('studentId', '==', myStudentId)
     .onSnapshot(snap => {
@@ -1259,13 +1268,54 @@ function renderMyAttendance() {
     });
 }
 
+function loadMyTimeLeftBox(today) {
+  const wrap = document.getElementById('myTimeLeftWrap');
+  if (!wrap) return;
+  db.collection('attendance').doc(myStudentId + '_' + today).get()
+    .then(doc => {
+      const liveWrap = document.getElementById('myTimeLeftWrap');
+      if (!liveWrap) return;
+      const existing = doc.exists ? doc.data().timeLeftHome : null;
+      if (existing) {
+        liveWrap.innerHTML = `
+          <p style="font-size:18px;"><b>${existing}</b></p>
+          <p class="muted" style="font-size:12px;">একবার সেট করার পর এটি আর পরিবর্তন করা যাবে না।</p>
+        `;
+      } else {
+        liveWrap.innerHTML = `
+          <input type="time" id="myTimeLeft">
+          <button onclick="submitMyTimeLeft()" style="margin-top:8px;">সংরক্ষণ করুন</button>
+          <p class="muted" style="font-size:12px;margin-top:6px;">একবার সংরক্ষণ করলে আর পরিবর্তন করা যাবে না, তাই সঠিক সময় দিন।</p>
+        `;
+      }
+    })
+    .catch(e => {
+      const liveWrap = document.getElementById('myTimeLeftWrap');
+      if (liveWrap) liveWrap.innerHTML = '<p class="muted">লোড করতে সমস্যা হয়েছে: ' + e.message + '</p>';
+      showDiagBanner('বের হওয়ার সময় লোড এরর: ' + e.message);
+    });
+}
+
 function submitMyTimeLeft() {
   const today = new Date().toISOString().slice(0,10);
-  const value = document.getElementById('myTimeLeft').value;
-  if (!value) return;
+  const input = document.getElementById('myTimeLeft');
+  const value = input ? input.value : '';
+  if (!value) return alert('সময় নির্বাচন করুন');
+  const btn = event && event.target;
+  if (btn) { btn.disabled = true; btn.textContent = 'সংরক্ষণ করা হচ্ছে...'; }
   db.collection('attendance').doc(myStudentId + '_' + today).set({
     studentId: myStudentId, date: today, madrasaId, timeLeftHome: value
-  }, { merge: true }).catch(e => showDiagBanner('বের হওয়ার সময় সংরক্ষণ ব্যর্থ: ' + e.message));
+  }, { merge: true })
+    .then(() => loadMyTimeLeftBox(today))
+    .catch(e => {
+      if (btn) { btn.disabled = false; btn.textContent = 'সংরক্ষণ করুন'; }
+      if (e.code === 'permission-denied') {
+        alert('এটি ইতিমধ্যে সেট করা হয়ে গেছে, আর পরিবর্তন করা যাবে না।');
+        loadMyTimeLeftBox(today);
+      } else {
+        showDiagBanner('বের হওয়ার সময় সংরক্ষণ ব্যর্থ: ' + e.message);
+      }
+    });
 }
 
 // ---- Leaves ----
@@ -1634,7 +1684,6 @@ function viewMarksheet(studentId, docId) {
       <style id="marksheetPrintStyle">
         @media print {
           #bottomNav, #topBar, .no-print { display: none !important; }
-          #marksheetPrintArea { box-shadow: none !important; border: 1px solid #ccc !important; }
         }
       </style>
       <div class="card" id="marksheetPrintArea" style="position:relative;border-top:5px solid #4f46e5;">
