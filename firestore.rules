@@ -111,11 +111,6 @@ service cloud.firestore {
       allow update, delete: if isTeacherAuth() && resource.data.madrasaId == myMadrasaId();
     }
 
-    // *** FIXED: results delete was broken ***
-    // Old rule used a single `allow write` guarded by request.resource.data,
-    // but request.resource is null on delete() calls, so every delete
-    // failed as permission-denied. Split into create/update (uses
-    // request.resource.data) and a separate delete (uses resource.data).
     match /results/{docId} {
       allow read: if (isTeacherAuth() && resource.data.madrasaId == myMadrasaId()) ||
         (isStudentAuth() && resource.data.studentId == mySessionStudentId());
@@ -128,10 +123,17 @@ service cloud.firestore {
       allow write: if isTeacherAuth() && request.resource.data.madrasaId == myMadrasaId();
     }
 
+    // *** FIXED: diary delete was broken ***
+    // Old rule used a single `allow write` guarded by request.resource.data,
+    // but request.resource is null on delete() calls, so every delete
+    // failed as permission-denied (same class of bug already fixed earlier
+    // for students/attendance/results). Split into create/update (uses
+    // request.resource.data) and a separate delete (uses resource.data).
     match /diary/{docId} {
       allow read: if (isTeacherAuth() && resource.data.madrasaId == myMadrasaId()) ||
         (isStudentAuth() && resource.data.madrasaId == myMadrasaId() && resource.data.className == myClassName());
-      allow write: if isTeacherAuth() && request.resource.data.madrasaId == myMadrasaId();
+      allow create, update: if isTeacherAuth() && request.resource.data.madrasaId == myMadrasaId();
+      allow delete: if isTeacherAuth() && resource.data.madrasaId == myMadrasaId();
     }
 
     match /suggestions/{docId} {

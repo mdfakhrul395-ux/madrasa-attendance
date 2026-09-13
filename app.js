@@ -2055,16 +2055,34 @@ function deleteNotice(id) {
 
 const DIARY_MAX_FILE_BYTES = 700 * 1024; // ~700KB raw file limit (base64 inflates it, Firestore doc cap is 1MB)
 
-// Fixed subject list matching the paper lesson register (কুরআন,
-// আরবি, বাংলা, ইংরেজি, গণিত, সমাজ/বিজ্ঞান, আকাঈদ/ফিকহ, হাদিস/মাসয়ালা,
-// কালিমা/দোয়া, সাধারণ জ্ঞান/অঙ্কন) — the same fields show up every day, the
-// teacher only fills in whichever subjects had a lesson/homework that day.
-// বার (day name) and তারিখ (date) are auto-derived from the date picker,
-// not typed by hand each time.
-const DIARY_SUBJECTS = [
+// Subjects, split into individual fields. Each group below used to be ONE
+// combined field (e.g. "কুরআন/তরীকায়ে তা'লীম" as a single line, forcing the
+// teacher to write about both together) — now every subject is its own
+// optional field, so the teacher can fill in just one of a pair (e.g. only
+// "কুরআন") and leave the other blank if that's all that was covered that
+// day. Fields are grouped visually (side-by-side) so the layout still
+// matches the paper register at a glance.
+const DIARY_SUBJECT_GROUPS = [
+  { subjects: ["কুরআন", "তরীকায়ে তা'লীম"] },
+  { subjects: ['আরবি ১ম', 'আরবি লিখা'] },
+  { subjects: ['আরবি ২য় পত্র'] },
+  { subjects: ['বাংলা ১ম পত্র', 'বাংলা ২য় পত্র'] },
+  { subjects: ['ইংরেজি ১ম পত্র', 'ইংরেজি ২য় পত্র'] },
+  { subjects: ['গণিত', 'জ্যামিতি'] },
+  { subjects: ['সমাজ', 'বিজ্ঞান'] },
+  { subjects: ['আকাঈদ', 'ফিকহ'] },
+  { subjects: ['হাদিস', 'মাসয়ালা'] },
+  { subjects: ['কালিমা', 'দোয়া'] },
+  { subjects: ['সাধারণ জ্ঞান', 'অঙ্কন'] }
+];
+const DIARY_SUBJECTS = DIARY_SUBJECT_GROUPS.reduce((acc, g) => acc.concat(g.subjects), []);
+
+// Old combined subject names, from before this split — kept ONLY so diary
+// entries saved before this update still display correctly. Never used for
+// new entries.
+const LEGACY_DIARY_SUBJECTS = [
   "কুরআন/তরীকায়ে তা'লীম",
   'আরবি ১ম/আরবি লিখা',
-  'আরবি ২য় পত্র',
   'বাংলা ১ম/২য় পত্র',
   'ইংরেজি ১ম/২য় পত্র',
   'গণিত/জ্যামিতি',
@@ -2093,10 +2111,19 @@ function onDiaryDateChange(value) {
 }
 
 function renderDiarySubjectFieldsHtml() {
-  return DIARY_SUBJECTS.map((subj, i) => `
-    <label>${subj}</label>
-    <input type="text" id="diarySubj_${i}" placeholder="আজকের পড়া/হোমওয়ার্ক">
-  `).join('');
+  let idx = 0;
+  return DIARY_SUBJECT_GROUPS.map(group => {
+    const fieldsHtml = group.subjects.map(subj => {
+      const html = `
+        <div style="flex:1;min-width:0;">
+          <label style="font-size:12px;">${subj}</label>
+          <input type="text" id="diarySubj_${idx}" placeholder="আজকের পড়া/হোমওয়ার্ক">
+        </div>`;
+      idx += 1;
+      return html;
+    }).join('');
+    return `<div style="display:flex;gap:8px;margin-top:8px;">${fieldsHtml}</div>`;
+  }).join('');
 }
 
 function renderDiaryScreen(isTeacher) {
@@ -2113,6 +2140,7 @@ function renderDiaryScreen(isTeacher) {
         <label>শ্রেণি</label>
         <select id="diaryClass">${classOpts || '<option value="">কোনো শ্রেণি পাওয়া যায়নি, আগে শিক্ষার্থী যোগ করুন</option>'}</select>
         <hr style="border:none;border-top:1px solid #eee;margin:10px 0;">
+        <p class="muted" style="margin-bottom:0;">যে কোনো একটি বিষয়ে লিখলেই হবে, বাকিগুলো খালি রাখতে পারেন।</p>
         ${renderDiarySubjectFieldsHtml()}
         <label>ফাইল সংযুক্ত করুন (ঐচ্ছিক, সর্বোচ্চ ~৭০০KB)</label>
         <input type="file" id="diaryFile">
@@ -2170,12 +2198,17 @@ function renderDiaryScreen(isTeacher) {
         }
       }
 
-      // Subject-wise register rows (new format). Falls back to the old
-      // single free-text field for entries saved before this update (which
-      // have no `subjects` object at all).
+      // Subject-wise register rows. Checks the new split subject list
+      // first, then the legacy combined names (for entries saved before
+      // this update), then anything else present on the doc as a safety
+      // net — so old entries keep displaying correctly without needing any
+      // data migration.
       let subjectsHtml;
       if (r.subjects && typeof r.subjects === 'object' && Object.keys(r.subjects).length > 0) {
-        const filledSubjects = DIARY_SUBJECTS.filter(subj => (r.subjects[subj] || '').trim());
+        const knownOrder = DIARY_SUBJECTS.concat(LEGACY_DIARY_SUBJECTS);
+        const filledKnown = knownOrder.filter(subj => (r.subjects[subj] || '').trim());
+        const filledExtra = Object.keys(r.subjects).filter(k => !knownOrder.includes(k) && (r.subjects[k] || '').trim());
+        const filledSubjects = filledKnown.concat(filledExtra);
         subjectsHtml = filledSubjects.length > 0
           ? `<table style="width:100%;border-collapse:collapse;margin-top:6px;">
               ${filledSubjects.map(subj => `
@@ -2267,7 +2300,8 @@ function addDiaryEntry() {
 
 function deleteDiaryEntry(id) {
   if (!confirm('এই ডায়েরি এন্ট্রি মুছতে চান?')) return;
-  db.collection('diary').doc(id).delete();
+  db.collection('diary').doc(id).delete()
+    .catch(e => { alert('মুছতে ব্যর্থ: ' + e.message); showDiagBanner('ডায়েরী মুছতে ব্যর্থ: ' + e.message); });
 }
 
 // ---- Suggestion box (পরামর্শ বক্স, শিক্ষার্থীর নাম-সহ) ----
