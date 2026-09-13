@@ -2051,76 +2051,26 @@ function deleteNotice(id) {
   db.collection('notices').doc(id).delete();
 }
 
-// ---- Diary (শিক্ষকের দৈনিক পাঠের বিবরণ — বিষয়ভিত্তিক, শ্রেণি অনুযায়ী, ফাইল সংযুক্তি সহ) ----
-//
-// One diary entry per (className, date) — matches the paper "পাঠের বিবরণ"
-// register: a fixed list of subjects, each with its own row, plus the day
-// (বার) and date auto-filled instead of typed. The doc id is deterministic
-// (see diaryDocId) so re-opening the same date+class loads the existing
-// entry for editing instead of creating a duplicate.
-//
-// Backward compatible: older entries saved before this change only have a
-// plain `text` field (no `subjects` object) — renderDiaryScreen's list view
-// below still displays those correctly.
+// ---- Diary (শিক্ষকের ডায়েরি/হোমওয়ার্ক এন্ট্রি, শ্রেণি অনুযায়ী, ফাইল সংযুক্তি সহ) ----
 
 const DIARY_MAX_FILE_BYTES = 700 * 1024; // ~700KB raw file limit (base64 inflates it, Firestore doc cap is 1MB)
-
-const DIARY_SUBJECTS = [
-  { key: 'quran',   label: "কুরআন/তরীকায়ে তা'লীম" },
-  { key: 'arabi1',  label: 'আরবি ১ম/আরবি লিখা' },
-  { key: 'arabi2',  label: 'আরবি ২য় পত্র' },
-  { key: 'bangla',  label: 'বাংলা ১ম/২য় পত্র' },
-  { key: 'english', label: 'ইংরেজি ১ম/২য় পত্র' },
-  { key: 'math',    label: 'গণিত/জ্যামিতি' },
-  { key: 'samaj',   label: 'সমাজ/বিজ্ঞান' },
-  { key: 'aqida',   label: 'আকাঈদ/ফিকহ' },
-  { key: 'hadis',   label: 'হাদিস/মাসয়ালা' },
-  { key: 'kalima',  label: 'কালিমা/দোয়া' },
-  { key: 'gyan',    label: 'সাধারণ জ্ঞান/অঙ্কন' }
-];
-
-function bnWeekdayName(dateStr) {
-  if (!dateStr) return '';
-  const d = new Date(dateStr + 'T00:00:00');
-  if (isNaN(d.getTime())) return '';
-  const names = ['রবিবার', 'সোমবার', 'মঙ্গলবার', 'বুধবার', 'বৃহস্পতিবার', 'শুক্রবার', 'শনিবার'];
-  return names[d.getDay()] || '';
-}
-
-function diaryDocId(className, date) {
-  return (className || '').replace(/\//g, '-') + '_' + date;
-}
 
 function renderDiaryScreen(isTeacher) {
   let html = '';
   if (isTeacher) {
     const classes = getClassList();
     const classOpts = classes.map(c => `<option value="${c}">${c}</option>`).join('');
-    const todayStr = new Date().toISOString().slice(0,10);
-    const subjectFieldsHtml = DIARY_SUBJECTS.map(s => `
-      <label>${s.label}</label>
-      <textarea class="diary-subject-input" data-key="${s.key}" rows="2" placeholder="আজকের পড়া লিখুন"></textarea>
-    `).join('');
     html += `
       <div class="card">
-        <h2>ডায়েরি এন্ট্রি</h2>
-        <div style="display:flex;gap:10px;align-items:flex-end;flex-wrap:wrap;">
-          <div style="flex:1;min-width:140px;">
-            <label>তারিখ</label><input type="date" id="diaryDate" value="${todayStr}" onchange="onDiaryDateOrClassChange()">
-          </div>
-          <div style="padding-bottom:8px;">
-            <span class="muted">বার: </span><b id="diaryDayName">${bnWeekdayName(todayStr)}</b>
-          </div>
-        </div>
+        <h2>নতুন ডায়েরি এন্ট্রি</h2>
+        <label>তারিখ</label><input type="date" id="diaryDate" value="${new Date().toISOString().slice(0,10)}">
         <label>শ্রেণি</label>
-        <select id="diaryClass" onchange="onDiaryDateOrClassChange()">${classOpts || '<option value="">কোনো শ্রেণি পাওয়া যায়নি, আগে শিক্ষার্থী যোগ করুন</option>'}</select>
-        <p id="diaryPrefillNote" class="muted" style="color:#2563eb;"></p>
-        <hr style="border:none;border-top:1px solid #eee;margin:10px 0;">
-        <div id="diarySubjectFieldsWrap">${subjectFieldsHtml}</div>
+        <select id="diaryClass">${classOpts || '<option value="">কোনো শ্রেণি পাওয়া যায়নি, আগে শিক্ষার্থী যোগ করুন</option>'}</select>
+        <label>লেখা</label><textarea id="diaryText" rows="4" placeholder="হোমওয়ার্ক / ডায়েরি লিখুন"></textarea>
         <label>ফাইল সংযুক্ত করুন (ঐচ্ছিক, সর্বোচ্চ ~৭০০KB)</label>
         <input type="file" id="diaryFile">
         <p id="diaryError" class="muted" style="color:#dc2626;"></p>
-        <button onclick="saveDiaryEntry()">সংরক্ষণ করুন</button>
+        <button onclick="addDiaryEntry()">এন্ট্রি যোগ করুন</button>
       </div>
       <div class="card">
         <h2>ডায়েরি তালিকা</h2>
@@ -2135,7 +2085,6 @@ function renderDiaryScreen(isTeacher) {
   if (isTeacher) {
     const filterWrap = document.getElementById('diaryFilterWrap');
     if (filterWrap) filterWrap.innerHTML = classFilterDropdownHtml(diaryClassFilter, 'onDiaryClassFilterChange');
-    onDiaryDateOrClassChange(); // prefill today's default class, if an entry already exists
   }
 
   let diaryQuery;
@@ -2165,18 +2114,578 @@ function renderDiaryScreen(isTeacher) {
 
     wrap.innerHTML = docs.map(d => {
       const r = d.data();
-      let bodyHtml;
-      if (r.subjects && typeof r.subjects === 'object') {
-        const rows = DIARY_SUBJECTS.filter(s => (r.subjects[s.key] || '').trim()).map(s => `
-          <div style="display:flex;gap:8px;padding:4px 0;border-bottom:1px dashed #eee;">
-            <div style="flex:0 0 42%;font-weight:bold;font-size:13px;">${s.label}</div>
-            <div style="flex:1;font-size:13px;">${r.subjects[s.key].replace(/\n/g, '<br>')}</div>
-          </div>
-        `).join('');
-        bodyHtml = rows || '<p class="muted">কোনো বিষয়ে পড়া লেখা নেই</p>';
-      } else {
-        // Backward-compat: entries saved before this update only have plain text.
-        bodyHtml = `<div>${(r.text || '').replace(/\n/g, '<br>')}</div>`;
-      }
       let attachmentHtml = '';
-      if (r.
+      if (r.attachmentDataUrl) {
+        if ((r.attachmentType || '').startsWith('image/')) {
+          attachmentHtml = `<div style="margin-top:6px;"><img src="${r.attachmentDataUrl}" style="max-width:100%;border-radius:8px;" alt="attachment"></div>`;
+        } else {
+          attachmentHtml = `<div style="margin-top:6px;"><a href="${r.attachmentDataUrl}" download="${r.attachmentName || 'file'}">📎 ${r.attachmentName || 'ফাইল ডাউনলোড করুন'}</a></div>`;
+        }
+      }
+      return `<div class="student-row" style="display:block;">
+        <div style="display:flex;justify-content:space-between;">
+          <b>${r.className || '-'}</b>
+          <span class="muted">${r.date || ''}</span>
+        </div>
+        <div style="margin-top:4px;">${(r.text || '').replace(/\n/g, '<br>')}</div>
+        ${attachmentHtml}
+        ${isTeacher ? `<button class="small danger" onclick="deleteDiaryEntry('${d.id}')" style="margin-top:6px;">মুছুন</button>` : ''}
+      </div>`;
+    }).join('');
+  }, err => {
+    const wrap = document.getElementById('diaryWrap');
+    if (wrap) wrap.innerHTML = '<p class="muted">লোড করতে সমস্যা হয়েছে: ' + err.message + '</p>';
+    if (err.code !== 'permission-denied') showDiagBanner('ডায়েরী লোড এরর: ' + err.message);
+  });
+}
+
+function onDiaryClassFilterChange(value) {
+  diaryClassFilter = value;
+  renderDiaryScreen(true);
+}
+
+function addDiaryEntry() {
+  const date = document.getElementById('diaryDate').value;
+  const className = document.getElementById('diaryClass').value;
+  const text = document.getElementById('diaryText').value.trim();
+  const fileInput = document.getElementById('diaryFile');
+  const errEl = document.getElementById('diaryError');
+  if (errEl) errEl.textContent = '';
+
+  if (!className) { if (errEl) errEl.textContent = 'শ্রেণি নির্বাচন করুন'; return; }
+  if (!text) { if (errEl) errEl.textContent = 'লেখা দিন'; return; }
+
+  const file = fileInput && fileInput.files && fileInput.files[0];
+
+  const saveEntry = (attachmentDataUrl, attachmentName, attachmentType) => {
+    db.collection('diary').add({
+      madrasaId, date, className, text,
+      attachmentDataUrl: attachmentDataUrl || '',
+      attachmentName: attachmentName || '',
+      attachmentType: attachmentType || '',
+      createdAt: Date.now()
+    }).then(() => {
+      document.getElementById('diaryText').value = '';
+      if (fileInput) fileInput.value = '';
+    }).catch(e => { if (errEl) errEl.textContent = 'সংরক্ষণ ব্যর্থ: ' + e.message; showDiagBanner('ডায়েরী সংরক্ষণ ব্যর্থ: ' + e.message); });
+  };
+
+  if (!file) { saveEntry(); return; }
+
+  if (file.size > DIARY_MAX_FILE_BYTES) {
+    if (errEl) errEl.textContent = 'ফাইলটি অনেক বড়, সর্বোচ্চ ৭০০KB পর্যন্ত ফাইল দেওয়া যাবে';
+    return;
+  }
+
+  const reader = new FileReader();
+  reader.onload = () => saveEntry(reader.result, file.name, file.type);
+  reader.onerror = () => { if (errEl) errEl.textContent = 'ফাইল পড়তে সমস্যা হয়েছে'; };
+  reader.readAsDataURL(file);
+}
+
+function deleteDiaryEntry(id) {
+  if (!confirm('এই ডায়েরি এন্ট্রি মুছতে চান?')) return;
+  db.collection('diary').doc(id).delete();
+}
+
+// ---- Suggestion box (পরামর্শ বক্স, শিক্ষার্থীর নাম-সহ) ----
+
+function renderSuggestionsScreen(isTeacher) {
+  let html = '';
+  if (!isTeacher) {
+    html += `
+      <div class="card">
+        <h2>পরামর্শ পাঠান</h2>
+        <label>আপনার পরামর্শ লিখুন</label>
+        <textarea id="suggestionText" rows="4" placeholder="আপনার পরামর্শ / মতামত লিখুন"></textarea>
+        <p id="suggestionError" class="muted" style="color:#dc2626;"></p>
+        <button onclick="submitSuggestion()">পাঠান</button>
+      </div>`;
+  }
+  html += `<div class="card">
+    <h2>${isTeacher ? 'সকল পরামর্শ' : 'আমার পাঠানো পরামর্শ'}</h2>
+    ${isTeacher ? '<div id="suggestionsFilterWrap"></div>' : ''}
+    <div id="suggestionsWrap">লোড হচ্ছে...</div>
+  </div>`;
+  setScreen(html);
+
+  if (isTeacher) {
+    const filterWrap = document.getElementById('suggestionsFilterWrap');
+    if (filterWrap) filterWrap.innerHTML = classFilterDropdownHtml(suggestionsClassFilter, 'onSuggestionsClassFilterChange');
+  }
+
+  let q = db.collection('suggestions');
+  if (isTeacher) q = q.where('madrasaId', '==', madrasaId).orderBy('createdAt', 'desc');
+  else q = q.where('studentId', '==', myStudentId);
+
+  q.onSnapshot(snap => {
+    const wrap = document.getElementById('suggestionsWrap');
+    if (!wrap) return;
+    if (snap.empty) { wrap.innerHTML = '<p class="muted">কোনো পরামর্শ নেই</p>'; return; }
+    let docs = snap.docs;
+    if (!isTeacher) docs = [...docs].sort((a,b) => (b.data().createdAt||0) - (a.data().createdAt||0));
+
+    if (isTeacher && suggestionsClassFilter !== 'all') {
+      docs = docs.filter(d => {
+        const student = studentsCache.find(s => s.id === d.data().studentId);
+        return student && student.className === suggestionsClassFilter;
+      });
+    }
+
+    if (docs.length === 0) { wrap.innerHTML = '<p class="muted">এই শ্রেণিতে কোনো পরামর্শ নেই</p>'; return; }
+
+    wrap.innerHTML = docs.map(d => {
+      const r = d.data();
+      const student = studentsCache.find(s => s.id === r.studentId);
+      const date = r.createdAt ? new Date(r.createdAt).toLocaleDateString('bn-BD') : '';
+      return `<div class="student-row" style="display:block;">
+        <div style="display:flex;justify-content:space-between;">
+          <b>${isTeacher ? (student ? student.name + (student.className ? ' (' + student.className + ')' : '') : 'অজানা') : 'আপনার পরামর্শ'}</b>
+          <span class="muted">${date}</span>
+        </div>
+        <div style="margin-top:4px;">${r.text}</div>
+        ${isTeacher ? `<button class="small danger" onclick="deleteSuggestion('${d.id}')" style="margin-top:6px;">মুছুন</button>` : ''}
+      </div>`;
+    }).join('');
+  }, err => {
+    const wrap = document.getElementById('suggestionsWrap');
+    if (wrap) wrap.innerHTML = '<p class="muted">লোড করতে সমস্যা হয়েছে: ' + err.message + '</p>';
+    if (err.code !== 'permission-denied') showDiagBanner('পরামর্শ লোড এরর: ' + err.message);
+  });
+}
+
+function onSuggestionsClassFilterChange(value) {
+  suggestionsClassFilter = value;
+  renderSuggestionsScreen(true);
+}
+
+function submitSuggestion() {
+  const text = document.getElementById('suggestionText').value.trim();
+  const errEl = document.getElementById('suggestionError');
+  if (errEl) errEl.textContent = '';
+  if (!text) { if (errEl) errEl.textContent = 'পরামর্শ লিখুন'; return; }
+  db.collection('suggestions').add({ madrasaId, studentId: myStudentId, text, createdAt: Date.now() })
+    .then(() => {
+      document.getElementById('suggestionText').value = '';
+      alert('আপনার পরামর্শ পাঠানো হয়েছে');
+    })
+    .catch(e => { if (errEl) errEl.textContent = 'পাঠাতে ব্যর্থ: ' + e.message; showDiagBanner('পরামর্শ পাঠাতে ব্যর্থ: ' + e.message); });
+}
+
+function deleteSuggestion(id) {
+  if (!confirm('এই পরামর্শ মুছতে চান?')) return;
+  db.collection('suggestions').doc(id).delete();
+}
+
+// ================= শিক্ষকগণ (MULTI-ADMIN TEACHER MANAGEMENT) =================
+// Only visible/usable for teacher accounts whose teachers/{uid} doc has
+// isAdmin:true (see myTeacherIsAdmin, resolved in ensureTeacherDoc above,
+// and enforced server-side in firestore.rules — this screen only ever
+// being rendered client-side for an admin is a UX convenience, NOT the
+// real security boundary).
+//
+// "যোগ করুন" (add) creates a brand-new Firebase Auth email/password
+// account for the new teacher. This has to be done through a SECOND,
+// throwaway Firebase app instance — calling
+// createUserWithEmailAndPassword on the normal `auth` object would
+// sign the admin OUT of their own account and sign them into the new
+// teacher's account instead (a well-known Firebase behavior). The
+// secondary app instance is deleted again right after, so it never
+// lingers.
+//
+// "নিষ্ক্রিয় করুন" (deactivate) does NOT delete the teacher's Firebase
+// Auth account (that requires the Admin SDK / a Cloud Function, which
+// needs the paid Blaze plan — deliberately avoided so far in this
+// project). Instead it sets active:false on their teachers/{uid} doc.
+// firestore.rules' isTeacherAuth() now also checks this active flag, so
+// a deactivated teacher instantly loses ALL access everywhere in the
+// app (students, attendance, results, etc.) the moment this is set —
+// not just from this "শিক্ষকগণ" screen.
+function renderTeachersScreen() {
+  setScreen(`
+    <div class="card">
+      <h2>নতুন শিক্ষক অ্যাকাউন্ট যোগ করুন</h2>
+      <label>ইমেইল</label><input id="newTeacherEmail" type="email" placeholder="teacher@example.com">
+      <label>পাসওয়ার্ড</label><input id="newTeacherPassword" type="password" placeholder="কমপক্ষে ৬ অক্ষর">
+      <label style="display:flex;align-items:center;gap:6px;margin-top:6px;">
+        <input id="newTeacherIsAdmin" type="checkbox" style="width:auto;"> অ্যাডমিন অধিকার দিন (তিনিও শিক্ষক যোগ/অপসারণ করতে পারবেন)
+      </label>
+      <p id="newTeacherError" class="muted" style="color:#dc2626;"></p>
+      <button onclick="addTeacherAccount()">যোগ করুন</button>
+    </div>
+    <div class="card">
+      <h2>শিক্ষকগণ</h2>
+      <div id="teachersListWrap">লোড হচ্ছে...</div>
+    </div>
+  `);
+  listenTeachersList();
+}
+
+function listenTeachersList() {
+  if (teachersUnsub) { teachersUnsub(); teachersUnsub = null; }
+  teachersUnsub = db.collection('teachers').where('madrasaId', '==', madrasaId)
+    .onSnapshot(snap => {
+      const wrap = document.getElementById('teachersListWrap');
+      if (!wrap) return;
+      if (snap.empty) { wrap.innerHTML = '<p class="muted">কোনো শিক্ষক পাওয়া যায়নি</p>'; return; }
+      const myUid = auth.currentUser ? auth.currentUser.uid : null;
+      const docs = [...snap.docs].sort((a, b) => (a.data().createdAt || 0) - (b.data().createdAt || 0));
+      wrap.innerHTML = docs.map(d => {
+        const t = d.data();
+        const isMe = d.id === myUid;
+        const isAdminT = t.isAdmin === true;
+        const isActiveT = t.active !== false;
+        return `<div class="student-row" style="display:block;">
+          <div style="display:flex;justify-content:space-between;align-items:center;">
+            <span>${t.email || d.id}${isMe ? ' <span class="muted">(আপনি)</span>' : ''}</span>
+            <span class="badge ${isActiveT ? 'present' : 'absent'}">${isActiveT ? 'সক্রিয়' : 'নিষ্ক্রিয়'}</span>
+          </div>
+          <div class="muted" style="margin-top:2px;">${isAdminT ? '⭐ অ্যাডমিন' : 'সাধারণ শিক্ষক'}</div>
+          ${!isMe ? `
+            <div style="margin-top:6px;">
+              <button class="small secondary" onclick="toggleTeacherAdmin('${d.id}', ${isAdminT})">${isAdminT ? 'অ্যাডমিন বাতিল করুন' : 'অ্যাডমিন করুন'}</button>
+              <button class="small ${isActiveT ? 'danger' : ''}" onclick="toggleTeacherActive('${d.id}', ${isActiveT})">${isActiveT ? 'নিষ্ক্রিয় করুন' : 'পুনরায় সক্রিয় করুন'}</button>
+            </div>
+          ` : '<p class="muted" style="margin-top:6px;">নিজের অ্যাকাউন্ট এখান থেকে পরিবর্তন করা যাবে না</p>'}
+        </div>`;
+      }).join('');
+    }, err => {
+      const wrap = document.getElementById('teachersListWrap');
+      if (wrap) wrap.innerHTML = '<p class="muted">লোড করতে সমস্যা হয়েছে: ' + err.message + '</p>';
+      if (err.code !== 'permission-denied') showDiagBanner('শিক্ষক তালিকা লোড এরর: ' + err.message);
+    });
+}
+
+function addTeacherAccount() {
+  const email = document.getElementById('newTeacherEmail').value.trim();
+  const password = document.getElementById('newTeacherPassword').value;
+  const isAdminNew = document.getElementById('newTeacherIsAdmin').checked;
+  const errEl = document.getElementById('newTeacherError');
+  if (errEl) errEl.textContent = '';
+  if (!email || !password) { if (errEl) errEl.textContent = 'ইমেইল ও পাসওয়ার্ড দিন'; return; }
+  if (password.length < 6) { if (errEl) errEl.textContent = 'পাসওয়ার্ড কমপক্ষে ৬ অক্ষরের হতে হবে'; return; }
+
+  let secondaryApp;
+  try {
+    // Unique app name each time so repeated add attempts never collide with
+    // a still-initializing previous instance.
+    secondaryApp = firebase.initializeApp(firebase.apps[0].options, 'TeacherCreate_' + Date.now());
+  } catch (e) {
+    if (errEl) errEl.textContent = 'শুরু করা যায়নি: ' + e.message;
+    return;
+  }
+  const secondaryAuth = secondaryApp.auth();
+
+  secondaryAuth.createUserWithEmailAndPassword(email, password)
+    .then(cred => {
+      const newUid = cred.user.uid;
+      return db.collection('teachers').doc(newUid).set({
+        madrasaId, email, isAdmin: !!isAdminNew, active: true, createdAt: Date.now()
+      }).then(() => secondaryAuth.signOut().catch(() => {}));
+    })
+    .then(() => {
+      secondaryApp.delete().catch(() => {});
+      document.getElementById('newTeacherEmail').value = '';
+      document.getElementById('newTeacherPassword').value = '';
+      document.getElementById('newTeacherIsAdmin').checked = false;
+      alert('শিক্ষক অ্যাকাউন্ট তৈরি করা হয়েছে');
+    })
+    .catch(e => {
+      const msg = e.code === 'auth/email-already-in-use' ? 'এই ইমেইল দিয়ে আগে থেকেই অ্যাকাউন্ট আছে'
+        : e.code === 'auth/invalid-email' ? 'ইমেইলটি সঠিক নয়'
+        : e.code === 'auth/weak-password' ? 'পাসওয়ার্ড দুর্বল, আরেকটু শক্তিশালী দিন'
+        : 'অ্যাকাউন্ট তৈরি ব্যর্থ: ' + e.message;
+      if (errEl) errEl.textContent = msg;
+      showDiagBanner('শিক্ষক তৈরি ব্যর্থ: ' + e.message);
+      try { secondaryApp.delete(); } catch (_e) {}
+    });
+}
+
+function toggleTeacherAdmin(uid, currentlyAdmin) {
+  if (auth.currentUser && uid === auth.currentUser.uid) { alert('নিজের অ্যাডমিন স্ট্যাটাস এখান থেকে পরিবর্তন করা যাবে না'); return; }
+  db.collection('teachers').doc(uid).set({ isAdmin: !currentlyAdmin }, { merge: true })
+    .catch(e => { alert('আপডেট ব্যর্থ: ' + e.message); showDiagBanner('অ্যাডমিন স্ট্যাটাস আপডেট ব্যর্থ: ' + e.message); });
+}
+
+function toggleTeacherActive(uid, currentlyActive) {
+  if (auth.currentUser && uid === auth.currentUser.uid) { alert('নিজেকে নিষ্ক্রিয় করা যাবে না'); return; }
+  const confirmMsg = currentlyActive
+    ? 'এই শিক্ষককে নিষ্ক্রিয় করতে চান? তিনি সাথে সাথে অ্যাপে প্রবেশাধিকার হারাবেন।'
+    : 'এই শিক্ষককে পুনরায় সক্রিয় করতে চান?';
+  if (!confirm(confirmMsg)) return;
+  db.collection('teachers').doc(uid).set({ active: !currentlyActive }, { merge: true })
+    .catch(e => { alert('আপডেট ব্যর্থ: ' + e.message); showDiagBanner('সক্রিয়/নিষ্ক্রিয় আপডেট ব্যর্থ: ' + e.message); });
+}
+
+// ================= FEES / বেতন =================
+// Two kinds of fee are tracked:
+//  - monthly (মাসিক বেতন): one paid/due entry per student per month, marked
+//    the same way attendance is (doc id = studentId_YYYY-MM, in fees_monthly)
+//  - onetime (ভর্তি/পরীক্ষা ফি): ad-hoc charges of any custom name/amount,
+//    each its own doc in fees_onetime, toggled paid/due individually
+//
+// Students can see only their own fee/due status; teachers see and manage
+// everyone's, filterable by class like the rest of the app.
+
+function renderFeesScreen(isTeacher) {
+  currentFeesIsTeacher = isTeacher;
+  setScreen(`
+    <div class="card">
+      <h2>বেতন / ফি</h2>
+      <div class="row" style="margin-bottom:10px;">
+        <button class="small ${feesMode==='monthly' ? '' : 'secondary'}" onclick="switchFeesMode('monthly')">মাসিক বেতন</button>
+        <button class="small ${feesMode==='onetime' ? '' : 'secondary'}" onclick="switchFeesMode('onetime')">ভর্তি/পরীক্ষা ফি</button>
+      </div>
+      <div id="feesControlsWrap"></div>
+    </div>
+    <div id="feesResultWrap"></div>
+  `);
+  if (feesMode === 'monthly') renderMonthlyFeesControls(isTeacher);
+  else renderOnetimeFeesControls(isTeacher);
+}
+
+function switchFeesMode(mode) {
+  feesMode = mode;
+  renderFeesScreen(currentFeesIsTeacher);
+}
+
+function onFeesClassFilterChange(value) {
+  feesClassFilter = value;
+  if (feesMode === 'monthly') loadMonthlyFeesTeacher();
+  else loadOnetimeFeesTeacher();
+}
+
+// ---- Monthly fee (মাসিক বেতন) ----
+function renderMonthlyFeesControls(isTeacher) {
+  const controlsWrap = document.getElementById('feesControlsWrap');
+  if (!controlsWrap) return;
+  if (isTeacher) {
+    controlsWrap.innerHTML = `
+      <label>মাস</label>
+      <input type="month" id="feesMonthInput" value="${feesMonth}" onchange="onFeesMonthChange(this.value)">
+      <div id="feesClassFilterWrap"></div>
+    `;
+    document.getElementById('feesClassFilterWrap').innerHTML = classFilterDropdownHtml(feesClassFilter, 'onFeesClassFilterChange');
+    loadMonthlyFeesTeacher();
+  } else {
+    controlsWrap.innerHTML = '';
+    loadMonthlyFeesStudent();
+  }
+}
+
+function onFeesMonthChange(value) {
+  feesMonth = value;
+  loadMonthlyFeesTeacher();
+}
+
+function loadMonthlyFeesTeacher() {
+  const resultWrap = document.getElementById('feesResultWrap');
+  if (!resultWrap) return;
+  const students = studentsByClass(feesClassFilter);
+  if (students.length === 0) { resultWrap.innerHTML = '<div class="card"><p class="muted">কোনো শিক্ষার্থী নেই</p></div>'; return; }
+  resultWrap.innerHTML = students.map(s => `<div class="card" id="fee_${s.id}">লোড হচ্ছে...</div>`).join('');
+  const month = feesMonth;
+  students.forEach(s => {
+    db.collection('fees_monthly').doc(s.id + '_' + month).get().then(doc => {
+      const d = doc.exists ? doc.data() : {};
+      const cell = document.getElementById('fee_' + s.id);
+      if (!cell) return;
+      const status = d.status || 'due';
+      cell.innerHTML = `
+        <b>${s.name}</b> <span class="muted">(${s.className || '-'})</span>
+        <label>বেতনের পরিমাণ</label>
+        <input type="number" value="${d.amount || ''}" onchange="updateFeeAmount('${s.id}','${month}',this.value)">
+        <div class="row" style="margin-top:6px;">
+          <button class="small ${status==='paid'?'':'secondary'}" onclick="setFeeStatus('${s.id}','${month}','paid')">পরিশোধিত</button>
+          <button class="small ${status==='due'?'danger':'secondary'}" onclick="setFeeStatus('${s.id}','${month}','due')">বকেয়া</button>
+        </div>
+        <div class="muted fee-paid-date-line" style="margin-top:4px;${d.paidDate ? '' : 'display:none;'}">পরিশোধের তারিখ: ${d.paidDate || ''}</div>
+      `;
+    }).catch(e => {
+      const cell = document.getElementById('fee_' + s.id);
+      if (cell) {
+        cell.innerHTML = `
+          <b>${s.name}</b> <span class="muted">(${s.className || '-'})</span>
+          <p class="muted" style="color:#dc2626;margin:6px 0;">লোড করতে সমস্যা হয়েছে${e && e.message ? ' (' + e.message + ')' : ''}</p>
+          <button class="small secondary" onclick="loadMonthlyFeesTeacher()">আবার চেষ্টা করুন</button>
+        `;
+      }
+      showDiagBanner('বেতন লোড ব্যর্থ (' + s.name + '): ' + (e.code || '') + ' ' + e.message);
+    });
+  });
+}
+
+function updateFeeAmount(studentId, month, value) {
+  db.collection('fees_monthly').doc(studentId + '_' + month).set({
+    studentId, month, madrasaId, amount: Number(value) || 0
+  }, { merge: true }).catch(e => showDiagBanner('বেতন সংরক্ষণ ব্যর্থ: ' + e.message));
+}
+
+// Updates ONLY the clicked student's own fee card in place (buttons +
+// paid-date line) instead of reloading every student's card via
+// loadMonthlyFeesTeacher(), which used to make the whole বেতন list flash
+// "লোড হচ্ছে..." and reload on every single tap — the same class of bug
+// already fixed for the attendance present/absent buttons.
+function setFeeStatus(studentId, month, status) {
+  const data = { studentId, month, madrasaId, status };
+  if (status === 'paid') data.paidDate = new Date().toISOString().slice(0,10);
+  db.collection('fees_monthly').doc(studentId + '_' + month).set(data, { merge: true })
+    .then(() => updateFeeCellUI(studentId, status, data.paidDate))
+    .catch(e => showDiagBanner('বেতন স্ট্যাটাস আপডেট ব্যর্থ: ' + e.message));
+}
+
+function updateFeeButtonsUI(studentId, status) {
+  const cell = document.getElementById('fee_' + studentId);
+  if (!cell) return;
+  const buttons = cell.querySelectorAll('.row button');
+  if (buttons[0]) buttons[0].className = 'small' + (status === 'paid' ? '' : ' secondary');
+  if (buttons[1]) buttons[1].className = 'small' + (status === 'due' ? ' danger' : ' secondary');
+}
+
+// Updates just one student's fee card (buttons + paid-date line) without
+// touching/reloading anyone else's card.
+function updateFeeCellUI(studentId, status, paidDate) {
+  updateFeeButtonsUI(studentId, status);
+  const cell = document.getElementById('fee_' + studentId);
+  if (!cell) return;
+  const dateLine = cell.querySelector('.fee-paid-date-line');
+  if (!dateLine) return;
+  if (status === 'paid' && paidDate) {
+    dateLine.textContent = 'পরিশোধের তারিখ: ' + paidDate;
+    dateLine.style.display = '';
+  } else {
+    dateLine.textContent = '';
+    dateLine.style.display = 'none';
+  }
+}
+
+// ---- Monthly fee (student's own view) ----
+function loadMonthlyFeesStudent() {
+  const resultWrap = document.getElementById('feesResultWrap');
+  if (!resultWrap) return;
+  resultWrap.innerHTML = '<div class="card"><p class="muted">লোড হচ্ছে...</p></div>';
+  db.collection('fees_monthly').where('studentId', '==', myStudentId)
+    .onSnapshot(snap => {
+      if (snap.empty) { resultWrap.innerHTML = '<div class="card"><p class="muted">কোনো তথ্য নেই</p></div>'; return; }
+      const rows = snap.docs.map(d => d.data()).sort((a,b) => (b.month||'').localeCompare(a.month||''));
+      resultWrap.innerHTML = `<div class="card">${rows.map(r => `
+        <div class="student-row">
+          <span>${r.month}</span>
+          <span class="badge ${r.status==='paid'?'present':'absent'}">${r.status==='paid'?'পরিশোধিত':'বকেয়া'}</span>
+        </div>
+        <div class="muted">পরিমাণ: ${r.amount || 0} টাকা${r.paidDate ? ' | পরিশোধের তারিখ: ' + r.paidDate : ''}</div>
+      `).join('<hr style="border:none;border-top:1px solid #eee;margin:6px 0;">')}</div>`;
+    }, err => {
+      resultWrap.innerHTML = '<div class="card"><p class="muted">লোড করতে সমস্যা হয়েছে: ' + err.message + '</p></div>';
+      showDiagBanner('আমার বেতন লোড এরর: ' + err.message);
+    });
+}
+
+// ---- One-time fee (ভর্তি/পরীক্ষা ফি ইত্যাদি, teacher) ----
+function renderOnetimeFeesControls(isTeacher) {
+  const controlsWrap = document.getElementById('feesControlsWrap');
+  if (!controlsWrap) return;
+  if (isTeacher) {
+    const students = studentsByClass(feesClassFilter);
+    const opts = students.map(s => `<option value="${s.id}">${s.name} (${s.roll || ''})</option>`).join('');
+    controlsWrap.innerHTML = `
+      <div id="feesClassFilterWrap"></div>
+      <h2 style="margin-top:10px;">নতুন ফি যোগ করুন</h2>
+      <label>শিক্ষার্থী</label><select id="onetimeStudent">${opts || '<option value="">কোনো শিক্ষার্থী নেই</option>'}</select>
+      <label>ফি এর ধরন</label><input id="onetimeFeeType" placeholder="যেমন: ভর্তি ফি, পরীক্ষার ফি">
+      <label>পরিমাণ</label><input id="onetimeAmount" type="number">
+      <p id="onetimeError" class="muted" style="color:#dc2626;"></p>
+      <button onclick="addOnetimeFee()" style="margin-top:8px;">যোগ করুন</button>
+    `;
+    document.getElementById('feesClassFilterWrap').innerHTML = classFilterDropdownHtml(feesClassFilter, 'onFeesClassFilterChange');
+    loadOnetimeFeesTeacher();
+  } else {
+    controlsWrap.innerHTML = '';
+    loadOnetimeFeesStudent();
+  }
+}
+
+function addOnetimeFee() {
+  const studentId = document.getElementById('onetimeStudent').value;
+  const feeType = document.getElementById('onetimeFeeType').value.trim();
+  const amount = Number(document.getElementById('onetimeAmount').value);
+  const errEl = document.getElementById('onetimeError');
+  if (errEl) errEl.textContent = '';
+  if (!studentId) { if (errEl) errEl.textContent = 'শিক্ষার্থী নির্বাচন করুন'; return; }
+  if (!feeType) { if (errEl) errEl.textContent = 'ফি এর ধরন লিখুন'; return; }
+  if (!amount || amount <= 0) { if (errEl) errEl.textContent = 'সঠিক পরিমাণ দিন'; return; }
+  db.collection('fees_onetime').add({
+    madrasaId, studentId, feeType, amount, status: 'due', date: new Date().toISOString().slice(0,10), createdAt: Date.now()
+  }).then(() => {
+    document.getElementById('onetimeFeeType').value = '';
+    document.getElementById('onetimeAmount').value = '';
+  }).catch(e => { if (errEl) errEl.textContent = 'সংরক্ষণ ব্যর্থ: ' + e.message; showDiagBanner('ফি যোগ ব্যর্থ: ' + e.message); });
+}
+
+function loadOnetimeFeesTeacher() {
+  const resultWrap = document.getElementById('feesResultWrap');
+  if (!resultWrap) return;
+  db.collection('fees_onetime').where('madrasaId', '==', madrasaId).orderBy('createdAt', 'desc')
+    .onSnapshot(snap => {
+      let docs = snap.docs;
+      if (feesClassFilter !== 'all') {
+        docs = docs.filter(d => {
+          const student = studentsCache.find(s => s.id === d.data().studentId);
+          return student && student.className === feesClassFilter;
+        });
+      }
+      if (docs.length === 0) { resultWrap.innerHTML = '<div class="card"><p class="muted">কোনো ফি এন্ট্রি নেই</p></div>'; return; }
+      resultWrap.innerHTML = docs.map(d => {
+        const r = d.data();
+        const student = studentsCache.find(s => s.id === r.studentId);
+        const isPaid = r.status === 'paid';
+        return `<div class="student-row" style="display:block;">
+          <div style="display:flex;justify-content:space-between;">
+            <span>${student ? student.name + (student.className ? ' (' + student.className + ')' : '') : 'অজানা'} - ${r.feeType}</span>
+            <span class="badge ${isPaid ? 'present' : 'absent'}">${isPaid ? 'পরিশোধিত' : 'বকেয়া'}</span>
+          </div>
+          <div class="muted">পরিমাণ: ${r.amount} টাকা | তারিখ: ${r.date}</div>
+          <div style="margin-top:6px;">
+            <button class="small ${isPaid ? 'secondary' : ''}" onclick="toggleOnetimeFeeStatus('${d.id}', ${isPaid})">${isPaid ? 'বকেয়া করুন' : 'পরিশোধিত চিহ্নিত করুন'}</button>
+            <button class="small danger" onclick="deleteOnetimeFee('${d.id}')">মুছুন</button>
+          </div>
+        </div>`;
+      }).join('');
+    }, err => {
+      resultWrap.innerHTML = '<div class="card"><p class="muted">লোড করতে সমস্যা হয়েছে: ' + err.message + '</p></div>';
+      if (err.code !== 'permission-denied') showDiagBanner('ফি লোড এরর: ' + err.message);
+    });
+}
+
+function toggleOnetimeFeeStatus(docId, currentlyPaid) {
+  db.collection('fees_onetime').doc(docId).set({ status: currentlyPaid ? 'due' : 'paid' }, { merge: true })
+    .catch(e => showDiagBanner('ফি স্ট্যাটাস আপডেট ব্যর্থ: ' + e.message));
+}
+
+function deleteOnetimeFee(docId) {
+  if (!confirm('এই ফি এন্ট্রি মুছতে চান?')) return;
+  db.collection('fees_onetime').doc(docId).delete();
+}
+
+// ---- One-time fee (student's own view) ----
+function loadOnetimeFeesStudent() {
+  const resultWrap = document.getElementById('feesResultWrap');
+  if (!resultWrap) return;
+  resultWrap.innerHTML = '<div class="card"><p class="muted">লোড হচ্ছে...</p></div>';
+  db.collection('fees_onetime').where('studentId', '==', myStudentId)
+    .onSnapshot(snap => {
+      if (snap.empty) { resultWrap.innerHTML = '<div class="card"><p class="muted">কোনো ফি তথ্য নেই</p></div>'; return; }
+      const rows = snap.docs.map(d => d.data()).sort((a,b) => (b.createdAt||0) - (a.createdAt||0));
+      resultWrap.innerHTML = `<div class="card">${rows.map(r => {
+        const isPaid = r.status === 'paid';
+        return `<div class="student-row">
+          <span>${r.feeType}</span>
+          <span class="badge ${isPaid ? 'present' : 'absent'}">${isPaid ? 'পরিশোধিত' : 'বকেয়া'}</span>
+        </div>
+        <div class="muted">পরিমাণ: ${r.amount} টাকা | তারিখ: ${r.date}</div>`;
+      }).join('<hr style="border:none;border-top:1px solid #eee;margin:6px 0;">')}</div>`;
+    }, err => {
+      resultWrap.innerHTML = '<div class="card"><p class="muted">লোড করতে সমস্যা হয়েছে: ' + err.message + '</p></div>';
+      showDiagBanner('আমার ফি লোড এরর: ' + err.message);
+    });
+}
