@@ -2051,22 +2051,69 @@ function deleteNotice(id) {
   db.collection('notices').doc(id).delete();
 }
 
-// ---- Diary (শিক্ষকের ডায়েরি/হোমওয়ার্ক এন্ট্রি, শ্রেণি অনুযায়ী, ফাইল সংযুক্তি সহ) ----
+// ---- Diary (শিক্ষকের ডায়েরি/হোমওয়ার্ক এন্ট্রি, কাগজের রেজিস্টার অনুযায়ী বিষয়ভিত্তিক ফরম্যাট, শ্রেণি অনুযায়ী, ফাইল সংযুক্তি সহ) ----
 
 const DIARY_MAX_FILE_BYTES = 700 * 1024; // ~700KB raw file limit (base64 inflates it, Firestore doc cap is 1MB)
+
+// Fixed subject list matching the paper lesson register (কুরআন,
+// আরবি, বাংলা, ইংরেজি, গণিত, সমাজ/বিজ্ঞান, আকাঈদ/ফিকহ, হাদিস/মাসয়ালা,
+// কালিমা/দোয়া, সাধারণ জ্ঞান/অঙ্কন) — the same fields show up every day, the
+// teacher only fills in whichever subjects had a lesson/homework that day.
+// বার (day name) and তারিখ (date) are auto-derived from the date picker,
+// not typed by hand each time.
+const DIARY_SUBJECTS = [
+  "কুরআন/তরীকায়ে তা'লীম",
+  'আরবি ১ম/আরবি লিখা',
+  'আরবি ২য় পত্র',
+  'বাংলা ১ম/২য় পত্র',
+  'ইংরেজি ১ম/২য় পত্র',
+  'গণিত/জ্যামিতি',
+  'সমাজ/বিজ্ঞান',
+  'আকাঈদ/ফিকহ',
+  'হাদিস/মাসয়ালা',
+  'কালিমা/দোয়া',
+  'সাধারণ জ্ঞান/অঙ্কন'
+];
+
+const BANGLA_WEEKDAYS = ['রবিবার', 'সোমবার', 'মঙ্গলবার', 'বুধবার', 'বৃহস্পতিবার', 'শুক্রবার', 'শনিবার'];
+
+function banglaWeekdayFromDate(dateStr) {
+  if (!dateStr) return '';
+  // Parse as local date parts (not via `new Date(dateStr)`, which reads
+  // 'YYYY-MM-DD' as UTC midnight and can shift a day backward/forward
+  // depending on the device's timezone).
+  const parts = dateStr.split('-').map(Number);
+  const d = new Date(parts[0], parts[1] - 1, parts[2]);
+  return BANGLA_WEEKDAYS[d.getDay()] || '';
+}
+
+function onDiaryDateChange(value) {
+  const dayEl = document.getElementById('diaryDayDisplay');
+  if (dayEl) dayEl.textContent = banglaWeekdayFromDate(value);
+}
+
+function renderDiarySubjectFieldsHtml() {
+  return DIARY_SUBJECTS.map((subj, i) => `
+    <label>${subj}</label>
+    <input type="text" id="diarySubj_${i}" placeholder="আজকের পড়া/হোমওয়ার্ক">
+  `).join('');
+}
 
 function renderDiaryScreen(isTeacher) {
   let html = '';
   if (isTeacher) {
     const classes = getClassList();
     const classOpts = classes.map(c => `<option value="${c}">${c}</option>`).join('');
+    const today = new Date().toISOString().slice(0,10);
     html += `
       <div class="card">
         <h2>নতুন ডায়েরি এন্ট্রি</h2>
-        <label>তারিখ</label><input type="date" id="diaryDate" value="${new Date().toISOString().slice(0,10)}">
+        <label>তারিখ</label><input type="date" id="diaryDate" value="${today}" onchange="onDiaryDateChange(this.value)">
+        <p class="muted" style="margin-top:2px;">বার: <b id="diaryDayDisplay">${banglaWeekdayFromDate(today)}</b></p>
         <label>শ্রেণি</label>
         <select id="diaryClass">${classOpts || '<option value="">কোনো শ্রেণি পাওয়া যায়নি, আগে শিক্ষার্থী যোগ করুন</option>'}</select>
-        <label>লেখা</label><textarea id="diaryText" rows="4" placeholder="হোমওয়ার্ক / ডায়েরি লিখুন"></textarea>
+        <hr style="border:none;border-top:1px solid #eee;margin:10px 0;">
+        ${renderDiarySubjectFieldsHtml()}
         <label>ফাইল সংযুক্ত করুন (ঐচ্ছিক, সর্বোচ্চ ~৭০০KB)</label>
         <input type="file" id="diaryFile">
         <p id="diaryError" class="muted" style="color:#dc2626;"></p>
@@ -2122,12 +2169,33 @@ function renderDiaryScreen(isTeacher) {
           attachmentHtml = `<div style="margin-top:6px;"><a href="${r.attachmentDataUrl}" download="${r.attachmentName || 'file'}">📎 ${r.attachmentName || 'ফাইল ডাউনলোড করুন'}</a></div>`;
         }
       }
+
+      // Subject-wise register rows (new format). Falls back to the old
+      // single free-text field for entries saved before this update (which
+      // have no `subjects` object at all).
+      let subjectsHtml;
+      if (r.subjects && typeof r.subjects === 'object' && Object.keys(r.subjects).length > 0) {
+        const filledSubjects = DIARY_SUBJECTS.filter(subj => (r.subjects[subj] || '').trim());
+        subjectsHtml = filledSubjects.length > 0
+          ? `<table style="width:100%;border-collapse:collapse;margin-top:6px;">
+              ${filledSubjects.map(subj => `
+                <tr>
+                  <td style="padding:4px 6px;border:1px solid #e5e7eb;font-weight:bold;width:40%;vertical-align:top;">${subj}</td>
+                  <td style="padding:4px 6px;border:1px solid #e5e7eb;">${(r.subjects[subj] || '').replace(/\n/g, '<br>')}</td>
+                </tr>
+              `).join('')}
+            </table>`
+          : '<p class="muted">কোনো বিষয়ে এন্ট্রি দেওয়া হয়নি</p>';
+      } else {
+        subjectsHtml = `<div style="margin-top:4px;">${(r.text || '').replace(/\n/g, '<br>')}</div>`;
+      }
+
       return `<div class="student-row" style="display:block;">
         <div style="display:flex;justify-content:space-between;">
           <b>${r.className || '-'}</b>
-          <span class="muted">${r.date || ''}</span>
+          <span class="muted">${r.dayName ? r.dayName + ', ' : ''}${r.date || ''}</span>
         </div>
-        <div style="margin-top:4px;">${(r.text || '').replace(/\n/g, '<br>')}</div>
+        ${subjectsHtml}
         ${attachmentHtml}
         ${isTeacher ? `<button class="small danger" onclick="deleteDiaryEntry('${d.id}')" style="margin-top:6px;">মুছুন</button>` : ''}
       </div>`;
@@ -2147,25 +2215,39 @@ function onDiaryClassFilterChange(value) {
 function addDiaryEntry() {
   const date = document.getElementById('diaryDate').value;
   const className = document.getElementById('diaryClass').value;
-  const text = document.getElementById('diaryText').value.trim();
   const fileInput = document.getElementById('diaryFile');
   const errEl = document.getElementById('diaryError');
   if (errEl) errEl.textContent = '';
 
   if (!className) { if (errEl) errEl.textContent = 'শ্রেণি নির্বাচন করুন'; return; }
-  if (!text) { if (errEl) errEl.textContent = 'লেখা দিন'; return; }
 
+  const subjects = {};
+  DIARY_SUBJECTS.forEach((subj, i) => {
+    const el = document.getElementById('diarySubj_' + i);
+    const val = el ? el.value.trim() : '';
+    if (val) subjects[subj] = val;
+  });
+
+  if (Object.keys(subjects).length === 0) {
+    if (errEl) errEl.textContent = 'অন্তত একটি বিষয়ে কিছু লিখুন';
+    return;
+  }
+
+  const dayName = banglaWeekdayFromDate(date);
   const file = fileInput && fileInput.files && fileInput.files[0];
 
   const saveEntry = (attachmentDataUrl, attachmentName, attachmentType) => {
     db.collection('diary').add({
-      madrasaId, date, className, text,
+      madrasaId, date, dayName, className, subjects,
       attachmentDataUrl: attachmentDataUrl || '',
       attachmentName: attachmentName || '',
       attachmentType: attachmentType || '',
       createdAt: Date.now()
     }).then(() => {
-      document.getElementById('diaryText').value = '';
+      DIARY_SUBJECTS.forEach((subj, i) => {
+        const el = document.getElementById('diarySubj_' + i);
+        if (el) el.value = '';
+      });
       if (fileInput) fileInput.value = '';
     }).catch(e => { if (errEl) errEl.textContent = 'সংরক্ষণ ব্যর্থ: ' + e.message; showDiagBanner('ডায়েরী সংরক্ষণ ব্যর্থ: ' + e.message); });
   };
