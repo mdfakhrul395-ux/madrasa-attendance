@@ -1485,6 +1485,82 @@ function computeMarksheetTotals(subjects) {
   };
 }
 
+// ================= মেধাক্রম (MERIT RANK) =================
+// Recomputes and stores each student's rank among all students of the SAME
+// exam + academic year + class, based on GPA (highest GPA = rank ১).
+//
+// This MUST run on a teacher's device, not a student's: firestore.rules
+// only lets a student read their own results docs, so a student's device
+// could never gather every classmate's marks to work out a rank itself.
+// Instead the teacher's device (which can read every result in its own
+// madrasa) computes the rank for the whole group and writes it as a plain
+// `meritRank` / `meritTotal` field directly onto each result doc — the
+// student just displays whatever value is already stored there.
+//
+// Competition ranking is used: students tied on GPA share the same rank,
+// and the next distinct GPA skips ahead by the number tied above it
+// (e.g. ১, ১, ৩, ৪ — not ১, ১, ২, ৩).
+function recomputeMeritRanks(examName, academicYear) {
+  if (!examName) return Promise.resolve();
+  return db.collection('results')
+    .where('madrasaId', '==', madrasaId)
+    .where('examName', '==', examName)
+    .get()
+    .then(snap => {
+      const groups = {}; // className -> [{ id, gpa }]
+      snap.docs.forEach(d => {
+        const r = d.data();
+        if ((r.academicYear || '') !== (academicYear || '')) return;
+        if (!Array.isArray(r.subjects) || r.subjects.length === 0) return;
+        const student = studentsCache.find(s => s.id === r.studentId);
+        const className = student ? student.className : null;
+        if (!className) return;
+        const { gpa } = computeMarksheetTotals(r.subjects);
+        if (!groups[className]) groups[className] = [];
+        groups[className].push({ id: d.id, gpa: Number(gpa) });
+      });
+
+      const batch = db.batch();
+      let hasWrites = false;
+      Object.keys(groups).forEach(className => {
+        const list = groups[className].slice().sort((a, b) => b.gpa - a.gpa);
+        let rank = 0, lastGpa = null, seen = 0;
+        list.forEach(item => {
+          seen += 1;
+          if (item.gpa !== lastGpa) { rank = seen; lastGpa = item.gpa; }
+          batch.update(db.collection('results').doc(item.id), { meritRank: rank, meritTotal: list.length });
+          hasWrites = true;
+        });
+      });
+      return hasWrites ? batch.commit() : Promise.resolve();
+    })
+    .catch(e => showDiagBanner('মেধাক্রম হিসাব ব্যর্থ: ' + e.message));
+}
+
+// One-off helper (button in রেজাল্ট tab) to backfill/refresh meritRank on
+// EVERY marksheet in this madrasa, grouped by exam+academicYear — needed
+// once so older marksheets (saved before this feature existed) also get a
+// মেধাক্রম value, and safe to re-run any time.
+function recomputeAllMeritRanks() {
+  db.collection('results').where('madrasaId', '==', madrasaId).get().then(snap => {
+    const combos = {};
+    snap.docs.forEach(d => {
+      const r = d.data();
+      if (!r.examName) return;
+      const key = r.examName + '||' + (r.academicYear || '');
+      combos[key] = { examName: r.examName, academicYear: r.academicYear || '' };
+    });
+    const keys = Object.keys(combos);
+    let chain = Promise.resolve();
+    keys.forEach(key => {
+      const { examName, academicYear } = combos[key];
+      chain = chain.then(() => recomputeMeritRanks(examName, academicYear));
+    });
+    return chain;
+  }).then(() => alert('মেধাক্রম হালনাগাদ করা হয়েছে'))
+    .catch(e => showDiagBanner('মেধাক্রম হালনাগাদ ব্যর্থ: ' + e.message));
+}
+
 function renderResultsScreen(isTeacher) {
   lastResultsIsTeacher = isTeacher;
   let html = '';
@@ -1507,7 +1583,13 @@ function renderResultsScreen(isTeacher) {
         <button onclick="saveMarksheet()" style="margin-top:10px;">মার্কশিট সংরক্ষণ করুন</button>
       </div>`;
   }
-  html += `<div class="card"><h2>${isTeacher ? 'সকল মার্কশিট' : 'আমার রেজাল্ট'}</h2><div id="resultsWrap">লোড হচ্ছে...</div></div>`;
+  html += `<div class="card">
+    <div style="display:flex;justify-content:space-between;align-items:center;">
+      <h2 style="margin:0;">${isTeacher ? 'সকল মার্কশিট' : 'আমার রেজাল্ট'}</h2>
+      ${isTeacher ? `<button class="small secondary" onclick="recomputeAllMeritRanks()">মেধাক্রম হালনাগাদ করুন</button>` : ''}
+    </div>
+    <div id="resultsWrap">লোড হচ্ছে...</div>
+  </div>`;
   setScreen(html);
 
   if (isTeacher) {
@@ -1546,8 +1628,9 @@ function renderResultsScreen(isTeacher) {
       const nameLine = isTeacher ? (student ? student.name + (student.className ? ' (' + student.className + ')' : '') : 'অজানা') : '';
       const hasMarksheet = Array.isArray(r.subjects) && r.subjects.length > 0;
       if (hasMarksheet) Object.assign(r, computeMarksheetTotals(r.subjects));
+      const rankBadge = r.meritRank ? ` &nbsp; <span class="badge">মেধাক্রম ${r.meritRank}</span>` : '';
       const summary = hasMarksheet
-        ? `${r.totalObtained}/${r.totalFull} &nbsp; <span class="badge">${r.grade}</span>`
+        ? `${r.totalObtained}/${r.totalFull} &nbsp; <span class="badge">${r.grade}</span>${rankBadge}`
         : (r.marks !== undefined ? `${r.marks}` : '');
       const isPublished = r.published === true;
       const safeDocId = String(d.id).replace(/\\/g, '\\\\').replace(/'/g, "\\'");
@@ -1669,6 +1752,9 @@ function saveMarksheet() {
     document.getElementById('resExam').value = '';
     renderSubjectRows();
     alert('মার্কশিট সংরক্ষণ করা হয়েছে (এখনো অপ্রকাশিত — শিক্ষার্থী দেখতে পাবে না যতক্ষণ না আপনি "প্রকাশ করুন" চাপবেন)');
+    // Recompute মেধাক্রম for this exam+class group so the new marksheet is
+    // reflected in everyone's rank right away.
+    recomputeMeritRanks(examName, academicYear);
   }).catch(e => { alert('সংরক্ষণ ব্যর্থ: ' + e.message); showDiagBanner('মার্কশিট সংরক্ষণ ব্যর্থ: ' + e.message); });
 }
 
@@ -1679,7 +1765,20 @@ function togglePublish(docId, currentlyPublished) {
 
 function deleteMarksheet(docId) {
   if (!confirm('এই মার্কশিট মুছতে চান?')) return;
-  db.collection('results').doc(docId).delete()
+  let deletedExamName = '', deletedAcademicYear = '';
+  db.collection('results').doc(docId).get()
+    .then(doc => {
+      if (doc.exists) {
+        deletedExamName = doc.data().examName || '';
+        deletedAcademicYear = doc.data().academicYear || '';
+      }
+      return db.collection('results').doc(docId).delete();
+    })
+    .then(() => {
+      // Recompute মেধাক্রম for the group this marksheet belonged to, so
+      // remaining students' ranks shift up correctly.
+      if (deletedExamName) recomputeMeritRanks(deletedExamName, deletedAcademicYear);
+    })
     .catch(e => { alert('মুছতে ব্যর্থ: ' + e.message); showDiagBanner('মার্কশিট মুছতে ব্যর্থ: ' + e.message); });
 }
 
@@ -1744,6 +1843,11 @@ function viewMarksheet(studentId, docId) {
         <div style="flex:1;min-width:90px;background:#fef9c3;border-radius:10px;padding:10px;text-align:center;">
           <div class="muted" style="font-size:11px;">GPA</div>
           <div style="font-size:18px;font-weight:bold;color:#854d0e;">${r.gpa}</div>
+        </div>` : ''}
+        ${r.meritRank ? `
+        <div style="flex:1;min-width:90px;background:#fce7f3;border-radius:10px;padding:10px;text-align:center;">
+          <div class="muted" style="font-size:11px;">মেধাক্রম</div>
+          <div style="font-size:18px;font-weight:bold;color:#9d174d;">${r.meritRank}${r.meritTotal ? ' / ' + r.meritTotal : ''}</div>
         </div>` : ''}
       </div>
     ` : `<p style="margin-top:10px;"><b>প্রাপ্ত নম্বর:</b> ${r.marks !== undefined ? r.marks : '-'}</p>`;
