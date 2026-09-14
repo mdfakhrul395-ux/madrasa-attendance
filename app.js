@@ -24,6 +24,21 @@ let madrasaId = localStorage.getItem('madrasaId');
 // and races ensureTeacherDoc() against submitSignup()'s own writes.
 let signupInProgress = false;
 
+// ================= SUPER ADMIN (single hardcoded owner account) =================
+// The one account that can see the list of ALL self-signed-up madrasas
+// (every other admin, no matter how many madrasas exist, can never see
+// this) and deactivate/reactivate any madrasa's registration. Deliberately
+// hardcoded to one specific email rather than a Firestore flag, so it can
+// never be granted/escalated by anyone through the app itself — the only
+// way to change who this is is to edit and redeploy this file.
+const SUPER_ADMIN_EMAIL = 'mdfakhrul395@gmail.com';
+let isSuperAdminUser = false;
+let madrasasUnsub = null;
+
+function stopMadrasasListener() {
+  if (madrasasUnsub) { madrasasUnsub(); madrasasUnsub = null; }
+}
+
 // ================= DIAGNOSTIC BANNER (debug-mode only) =================
 // Shows any Firestore/auth error directly on screen — but ONLY when debug
 // mode is turned on (see the "ডিবাগ মোড" checkbox in সেটিংস). Every part of
@@ -125,6 +140,7 @@ const teacherMoreTabs = [
   { key: 'diary', label: 'ডায়েরী', icon: '\u{1F4D3}' },
   { key: 'suggestions', label: 'পরামর্শ', icon: '\u{1F4AC}' },
   { key: 'teachers', label: 'শিক্ষকগণ', icon: '\u{1F465}' },
+  { key: 'super_admin', label: 'সুপার অ্যাডমিন', icon: '\u{1F6E1}\uFE0F' },
   { key: 'settings', label: 'সেটিংস', icon: '\u2699\uFE0F' }
 ];
 
@@ -208,7 +224,13 @@ function setSync(ok) {
 // block all of their reads/writes everywhere (see isTeacherAuth() in
 // firestore.rules), this just also surfaces a clear banner instead of a
 // silent wall of permission-denied errors.
+//
+// isSuperAdminUser is resolved here too (purely from the signed-in
+// account's email — never stored in Firestore, never toggleable from any
+// screen) so the "সুপার অ্যাডমিন" tab only ever appears for that one
+// hardcoded account.
 function ensureTeacherDoc(user) {
+  isSuperAdminUser = (user.email === SUPER_ADMIN_EMAIL);
   const ref = db.collection('teachers').doc(user.uid);
   return ref.get().then(doc => {
     if (doc.exists && doc.data().madrasaId) {
@@ -683,6 +705,7 @@ function submitSignup() {
       role = 'teacher';
       localStorage.setItem('role', 'teacher');
       myTeacherIsAdmin = true;
+      isSuperAdminUser = (email === SUPER_ADMIN_EMAIL);
       signupInProgress = false;
       listenStudents();
       listenSettings();
@@ -772,12 +795,13 @@ function logout() {
   if (settingsUnsub) { settingsUnsub(); settingsUnsub = null; }
   stopStudentContactsListener();
   stopTeachersListener();
+  stopMadrasasListener();
   stopUnreadListeners();
 
   if (role === 'teacher' && auth.currentUser && auth.currentUser.providerData.length > 0) auth.signOut();
   localStorage.removeItem('role');
   localStorage.removeItem('myStudentId');
-  role = null; myStudentId = null; myTeacherIsAdmin = false;
+  role = null; myStudentId = null; myTeacherIsAdmin = false; isSuperAdminUser = false;
   showRoleSelect();
 }
 
@@ -843,9 +867,14 @@ function closeMoreMenu() {
 function renderTeacherNav(activeKey) {
   const nav = document.getElementById('bottomNav');
   nav.style.display = 'block';
-  // "শিক্ষকগণ" (multi-admin management) is only shown to admin teachers —
-  // filtered out of the "আরও" menu entirely for non-admin teacher accounts.
-  const visibleMoreTabs = myTeacherIsAdmin ? teacherMoreTabs : teacherMoreTabs.filter(t => t.key !== 'teachers');
+  // "শিক্ষকগণ" (multi-admin management) is only shown to admin teachers, and
+  // "সুপার অ্যাডমিন" only to the one hardcoded owner account — both filtered
+  // out of the "আরও" menu entirely for everyone else.
+  const visibleMoreTabs = teacherMoreTabs.filter(t => {
+    if (t.key === 'teachers') return myTeacherIsAdmin;
+    if (t.key === 'super_admin') return isSuperAdminUser;
+    return true;
+  });
   nav.innerHTML = buildNavHtml(teacherPrimaryTabs, visibleMoreTabs, 'teacherTab', activeKey);
 }
 
@@ -931,6 +960,7 @@ function teacherTab(tab) {
   if (tab === 'diary') renderDiaryScreen(true);
   if (tab === 'suggestions') renderSuggestionsScreen(true);
   if (tab === 'teachers') { if (myTeacherIsAdmin) renderTeachersScreen(); else teacherTab('students'); }
+  if (tab === 'super_admin') { if (isSuperAdminUser) renderSuperAdminScreen(); else teacherTab('students'); }
   if (tab === 'settings') renderSettingsScreen();
 }
 
@@ -1416,6 +1446,45 @@ function gradeFromPercent(percent) {
   return { grade: 'F', gpa: '0.00' };
 }
 
+// Reverse-lookup: turns an averaged GPA number back into a letter grade
+// using the same tier boundaries as gradeFromPercent (in GPA terms).
+function gradeFromAvgGpa(avgGpa) {
+  if (avgGpa >= 5) return 'A+';
+  if (avgGpa >= 4) return 'A';
+  if (avgGpa >= 3.5) return 'A-';
+  if (avgGpa >= 3) return 'B';
+  if (avgGpa >= 2) return 'C';
+  if (avgGpa >= 1) return 'D';
+  return 'F';
+}
+
+// The overall "মোট" GPA/grade for a marksheet must be the AVERAGE of each
+// subject's own GPA — not a grade looked up from the overall percentage.
+// Those two methods can disagree (e.g. several subjects near a grade
+// boundary can average to a different tier than the combined percentage
+// falls into), and the average-of-subject-GPA method is the correct one.
+// Used both when saving a new marksheet and when displaying any marksheet
+// (old or new) so existing saved marksheets self-correct on display too,
+// with no separate data migration needed.
+function computeMarksheetTotals(subjects) {
+  const totalObtained = subjects.reduce((sum, s) => sum + s.obtained, 0);
+  const totalFull = subjects.reduce((sum, s) => sum + s.full, 0);
+  const percentage = totalFull > 0 ? (totalObtained / totalFull) * 100 : 0;
+  const subjectGpas = subjects.map(s => {
+    const pct = s.full > 0 ? (s.obtained / s.full) * 100 : 0;
+    return Number(gradeFromPercent(pct).gpa);
+  });
+  const avgGpa = subjectGpas.length > 0
+    ? subjectGpas.reduce((a, b) => a + b, 0) / subjectGpas.length
+    : 0;
+  return {
+    totalObtained, totalFull,
+    percentage: Math.round(percentage * 100) / 100,
+    grade: gradeFromAvgGpa(avgGpa),
+    gpa: avgGpa.toFixed(2)
+  };
+}
+
 function renderResultsScreen(isTeacher) {
   lastResultsIsTeacher = isTeacher;
   let html = '';
@@ -1476,6 +1545,7 @@ function renderResultsScreen(isTeacher) {
       const student = studentsCache.find(s => s.id === r.studentId);
       const nameLine = isTeacher ? (student ? student.name + (student.className ? ' (' + student.className + ')' : '') : 'অজানা') : '';
       const hasMarksheet = Array.isArray(r.subjects) && r.subjects.length > 0;
+      if (hasMarksheet) Object.assign(r, computeMarksheetTotals(r.subjects));
       const summary = hasMarksheet
         ? `${r.totalObtained}/${r.totalFull} &nbsp; <span class="badge">${r.grade}</span>`
         : (r.marks !== undefined ? `${r.marks}` : '');
@@ -1574,10 +1644,7 @@ function saveMarksheet() {
   if (!examName) return alert('পরীক্ষার নাম লিখুন');
   if (currentMarksheetSubjects.length === 0) return alert('অন্তত একটি বিষয় যোগ করুন');
 
-  const totalObtained = currentMarksheetSubjects.reduce((sum, s) => sum + s.obtained, 0);
-  const totalFull = currentMarksheetSubjects.reduce((sum, s) => sum + s.full, 0);
-  const percentage = totalFull > 0 ? (totalObtained / totalFull) * 100 : 0;
-  const { grade, gpa } = gradeFromPercent(percentage);
+  const { totalObtained, totalFull, percentage, grade, gpa } = computeMarksheetTotals(currentMarksheetSubjects);
 
   // Doc id includes academicYear (when given) so the same exam name reused
   // in a different year creates a new marksheet instead of overwriting an
@@ -1631,6 +1698,7 @@ function viewMarksheet(studentId, docId) {
     const r = doc.data();
     const student = studentsCache.find(s => s.id === studentId) || {};
     const hasSubjects = Array.isArray(r.subjects) && r.subjects.length > 0;
+    if (hasSubjects) Object.assign(r, computeMarksheetTotals(r.subjects));
     const instName = (appSettings && appSettings.madrasaName) ? appSettings.madrasaName : 'শিক্ষা প্রতিষ্ঠান';
     const logoHtml = (appSettings && appSettings.logoDataUrl)
       ? `<img src="${appSettings.logoDataUrl}" style="width:52px;height:52px;border-radius:10px;object-fit:cover;margin-right:10px;" alt="logo">`
@@ -2531,6 +2599,73 @@ function toggleTeacherActive(uid, currentlyActive) {
   if (!confirm(confirmMsg)) return;
   db.collection('teachers').doc(uid).set({ active: !currentlyActive }, { merge: true })
     .catch(e => { alert('আপডেট ব্যর্থ: ' + e.message); showDiagBanner('সক্রিয়/নিষ্ক্রিয় আপডেট ব্যর্থ: ' + e.message); });
+}
+
+// ================= সুপার অ্যাডমিন (SUPER ADMIN — all-madrasas panel) =================
+// Only ever rendered/reachable for the one hardcoded SUPER_ADMIN_EMAIL
+// account (see ensureTeacherDoc/submitSignup where isSuperAdminUser is
+// resolved, and renderTeacherNav/teacherTab where non-super-admin access is
+// blocked client-side). The REAL security boundary is firestore.rules: the
+// madrasas collection's `allow list` is restricted to isSuperAdmin()
+// (checked via request.auth.token.email), so no other admin — no matter
+// how many madrasas they run — can ever list this collection, even by
+// calling Firestore directly.
+//
+// Deactivating a madrasa here sets active:false on its madrasas/{id} doc.
+// firestore.rules' isTeacherAuth() and isStudentAuth() both check this (via
+// isMadrasaActive()), so every teacher AND every student of that madrasa
+// instantly loses all access app-wide — the same instant-cutoff pattern
+// already used for a single deactivated teacher account.
+function renderSuperAdminScreen() {
+  setScreen(`
+    <div class="card">
+      <h2>সুপার অ্যাডমিন — সকল মাদ্রাসা</h2>
+      <p class="muted">এই তালিকা শুধু আপনার (${SUPER_ADMIN_EMAIL}) অ্যাকাউন্ট দেখতে পাচ্ছে। অন্য কোনো মাদ্রাসার অ্যাডমিনও এটি দেখতে বা এতে প্রবেশ করতে পারবে না।</p>
+      <div id="madrasasListWrap">লোড হচ্ছে...</div>
+    </div>
+  `);
+  listenMadrasasList();
+}
+
+function listenMadrasasList() {
+  stopMadrasasListener();
+  madrasasUnsub = db.collection('madrasas').orderBy('createdAt', 'desc').onSnapshot(snap => {
+    const wrap = document.getElementById('madrasasListWrap');
+    if (!wrap) return;
+    if (snap.empty) { wrap.innerHTML = '<p class="muted">কোনো মাদ্রাসা পাওয়া যায়নি</p>'; return; }
+    wrap.innerHTML = snap.docs.map(d => {
+      const m = d.data();
+      const isActiveM = m.active !== false;
+      const dateStr = m.createdAt ? new Date(m.createdAt).toLocaleDateString('bn-BD') : '-';
+      const isCurrent = d.id === madrasaId;
+      return `<div class="student-row" style="display:block;">
+        <div style="display:flex;justify-content:space-between;align-items:center;">
+          <span>${m.madrasaName || d.id}${isCurrent ? ' <span class="muted">(আপনার বর্তমান)</span>' : ''}</span>
+          <span class="badge ${isActiveM ? 'present' : 'absent'}">${isActiveM ? 'সক্রিয়' : 'নিষ্ক্রিয়'}</span>
+        </div>
+        <div class="muted" style="margin-top:2px;">নিবন্ধনের তারিখ: ${dateStr} &nbsp; আইডি: ${d.id}</div>
+        <div style="margin-top:6px;">
+          <button class="small ${isActiveM ? 'danger' : ''}" onclick="toggleMadrasaActive('${d.id}', ${isActiveM})">${isActiveM ? 'নিবন্ধন বাতিল করুন' : 'পুনরায় সক্রিয় করুন'}</button>
+        </div>
+      </div>`;
+    }).join('');
+  }, err => {
+    const wrap = document.getElementById('madrasasListWrap');
+    if (wrap) wrap.innerHTML = '<p class="muted">লোড করতে সমস্যা হয়েছে: ' + err.message + '</p>';
+    showDiagBanner('মাদ্রাসা তালিকা লোড এরর: ' + err.message);
+  });
+}
+
+function toggleMadrasaActive(id, currentlyActive) {
+  let confirmMsg = currentlyActive
+    ? 'এই মাদ্রাসার নিবন্ধন বাতিল করতে চান? এই মাদ্রাসার সকল শিক্ষক ও শিক্ষার্থী সাথে সাথে অ্যাপে প্রবেশাধিকার হারাবে।'
+    : 'এই মাদ্রাসার নিবন্ধন পুনরায় সক্রিয় করতে চান?';
+  if (id === madrasaId && currentlyActive) {
+    confirmMsg = 'সতর্কতা: এটি আপনার নিজের বর্তমান মাদ্রাসা! বাতিল করলে আপনি নিজেও এই মুহূর্তে প্রবেশাধিকার হারাবেন। ' + confirmMsg;
+  }
+  if (!confirm(confirmMsg)) return;
+  db.collection('madrasas').doc(id).set({ active: !currentlyActive }, { merge: true })
+    .catch(e => { alert('আপডেট ব্যর্থ: ' + e.message); showDiagBanner('মাদ্রাসা স্ট্যাটাস আপডেট ব্যর্থ: ' + e.message); });
 }
 
 // ================= FEES / বেতন =================
