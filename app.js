@@ -506,6 +506,24 @@ function studentsByClass(filterValue) {
   return studentsCache.filter(s => s.className === filterValue);
 }
 
+// ================= BANGLA NUMERALS / ORDINALS =================
+// Converts any string/number containing ASCII digits (0-9) into Bengali
+// numerals (০-৯), leaving all other characters untouched.
+const BANGLA_DIGITS = ['০','১','২','৩','৪','৫','৬','৭','৮','৯'];
+function toBanglaNumeral(n) {
+  return String(n).split('').map(ch => (ch >= '0' && ch <= '9') ? BANGLA_DIGITS[Number(ch)] : ch).join('');
+}
+
+// Bengali ordinal suffixes for 1-10 (১ম, ২য়, ৩য়, ৪র্থ, ৫ম, ৬ষ্ঠ, ৭ম, ৮ম,
+// ৯ম, ১০ম); every rank from 11 onward uses "তম" (১১তম, ১২তম, ১৩তম, ...).
+const BANGLA_ORDINAL_SUFFIX_1_TO_10 = { 1:'ম', 2:'য়', 3:'য়', 4:'র্থ', 5:'ম', 6:'ষ্ঠ', 7:'ম', 8:'ম', 9:'ম', 10:'ম' };
+function banglaOrdinal(n) {
+  const num = Number(n);
+  const numeral = toBanglaNumeral(num);
+  if (num >= 1 && num <= 10) return numeral + BANGLA_ORDINAL_SUFFIX_1_TO_10[num];
+  return numeral + 'তম';
+}
+
 // ================= UNREAD BADGES (student notices/diary) =================
 function noticesSeenKey() { return 'lastSeenNotices_' + (myStudentId || 'x'); }
 function diarySeenKey() { return 'lastSeenDiary_' + (myStudentId || 'x'); }
@@ -1489,6 +1507,12 @@ function computeMarksheetTotals(subjects) {
 // Recomputes and stores each student's rank among all students of the SAME
 // exam + academic year + class, based on GPA (highest GPA = rank ১).
 //
+// Students who FAILED the exam (overall grade === 'F') are EXCLUDED from
+// ranking entirely — they get no meritRank/meritTotal at all (their GPA is
+// still stored and shown normally via the regular gpa field, just with no
+// rank position). meritTotal only counts the passing students in the group,
+// so "মেধাক্রম ৩ / ১০" means 3rd among 10 students who passed.
+//
 // This MUST run on a teacher's device, not a student's: firestore.rules
 // only lets a student read their own results docs, so a student's device
 // could never gather every classmate's marks to work out a rank itself.
@@ -1507,7 +1531,7 @@ function recomputeMeritRanks(examName, academicYear) {
     .where('examName', '==', examName)
     .get()
     .then(snap => {
-      const groups = {}; // className -> [{ id, gpa }]
+      const groups = {}; // className -> [{ id, gpa, failed }]
       snap.docs.forEach(d => {
         const r = d.data();
         if ((r.academicYear || '') !== (academicYear || '')) return;
@@ -1515,20 +1539,36 @@ function recomputeMeritRanks(examName, academicYear) {
         const student = studentsCache.find(s => s.id === r.studentId);
         const className = student ? student.className : null;
         if (!className) return;
-        const { gpa } = computeMarksheetTotals(r.subjects);
+        const totals = computeMarksheetTotals(r.subjects);
         if (!groups[className]) groups[className] = [];
-        groups[className].push({ id: d.id, gpa: Number(gpa) });
+        groups[className].push({ id: d.id, gpa: Number(totals.gpa), failed: totals.grade === 'F' });
       });
 
       const batch = db.batch();
       let hasWrites = false;
       Object.keys(groups).forEach(className => {
-        const list = groups[className].slice().sort((a, b) => b.gpa - a.gpa);
+        const all = groups[className];
+        // Only passing students (grade !== 'F') get a rank position.
+        const passList = all.filter(item => !item.failed).sort((a, b) => b.gpa - a.gpa);
+        const failList = all.filter(item => item.failed);
+
         let rank = 0, lastGpa = null, seen = 0;
-        list.forEach(item => {
+        passList.forEach(item => {
           seen += 1;
           if (item.gpa !== lastGpa) { rank = seen; lastGpa = item.gpa; }
-          batch.update(db.collection('results').doc(item.id), { meritRank: rank, meritTotal: list.length });
+          batch.update(db.collection('results').doc(item.id), { meritRank: rank, meritTotal: passList.length });
+          hasWrites = true;
+        });
+
+        // Failed students: explicitly clear any previously-stored rank
+        // (e.g. from before this update, or if a resubmitted marksheet now
+        // fails when it didn't before) — their GPA still shows via the
+        // normal gpa field, they just have no মেধাক্রম position.
+        failList.forEach(item => {
+          batch.update(db.collection('results').doc(item.id), {
+            meritRank: firebase.firestore.FieldValue.delete(),
+            meritTotal: firebase.firestore.FieldValue.delete()
+          });
           hasWrites = true;
         });
       });
@@ -1628,7 +1668,7 @@ function renderResultsScreen(isTeacher) {
       const nameLine = isTeacher ? (student ? student.name + (student.className ? ' (' + student.className + ')' : '') : 'অজানা') : '';
       const hasMarksheet = Array.isArray(r.subjects) && r.subjects.length > 0;
       if (hasMarksheet) Object.assign(r, computeMarksheetTotals(r.subjects));
-      const rankBadge = r.meritRank ? ` &nbsp; <span class="badge">মেধাক্রম ${r.meritRank}</span>` : '';
+      const rankBadge = r.meritRank ? ` &nbsp; <span class="badge">মেধাক্রম ${banglaOrdinal(r.meritRank)}</span>` : '';
       const summary = hasMarksheet
         ? `${r.totalObtained}/${r.totalFull} &nbsp; <span class="badge">${r.grade}</span>${rankBadge}`
         : (r.marks !== undefined ? `${r.marks}` : '');
@@ -1847,7 +1887,7 @@ function viewMarksheet(studentId, docId) {
         ${r.meritRank ? `
         <div style="flex:1;min-width:90px;background:#fce7f3;border-radius:10px;padding:10px;text-align:center;">
           <div class="muted" style="font-size:11px;">মেধাক্রম</div>
-          <div style="font-size:18px;font-weight:bold;color:#9d174d;">${r.meritRank}${r.meritTotal ? ' / ' + r.meritTotal : ''}</div>
+          <div style="font-size:18px;font-weight:bold;color:#9d174d;">${banglaOrdinal(r.meritRank)}${r.meritTotal ? ' / ' + toBanglaNumeral(r.meritTotal) : ''}</div>
         </div>` : ''}
       </div>
     ` : `<p style="margin-top:10px;"><b>প্রাপ্ত নম্বর:</b> ${r.marks !== undefined ? r.marks : '-'}</p>`;
