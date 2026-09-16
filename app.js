@@ -1484,6 +1484,14 @@ function gradeFromAvgGpa(avgGpa) {
 // Used both when saving a new marksheet and when displaying any marksheet
 // (old or new) so existing saved marksheets self-correct on display too,
 // with no separate data migration needed.
+//
+// OVERRIDE: even though the GPA NUMBER stays a plain average of every
+// subject's GPA, the overall GRADE LABEL must show "F" whenever ANY single
+// subject itself failed (that subject's own grade is F / GPA 0) — a
+// passing average can otherwise hide one failed subject, and a report card
+// should never call a student "C" (or any passing grade) if they failed a
+// subject. hasFailedSubject is also returned so the UI can optionally show
+// an "অকৃতকার্য" (Fail) label next to the grade.
 function computeMarksheetTotals(subjects) {
   const totalObtained = subjects.reduce((sum, s) => sum + s.obtained, 0);
   const totalFull = subjects.reduce((sum, s) => sum + s.full, 0);
@@ -1495,11 +1503,13 @@ function computeMarksheetTotals(subjects) {
   const avgGpa = subjectGpas.length > 0
     ? subjectGpas.reduce((a, b) => a + b, 0) / subjectGpas.length
     : 0;
+  const hasFailedSubject = subjectGpas.some(g => g === 0);
   return {
     totalObtained, totalFull,
     percentage: Math.round(percentage * 100) / 100,
-    grade: gradeFromAvgGpa(avgGpa),
-    gpa: avgGpa.toFixed(2)
+    grade: hasFailedSubject ? 'F' : gradeFromAvgGpa(avgGpa),
+    gpa: avgGpa.toFixed(2),
+    hasFailedSubject
   };
 }
 
@@ -1669,8 +1679,9 @@ function renderResultsScreen(isTeacher) {
       const hasMarksheet = Array.isArray(r.subjects) && r.subjects.length > 0;
       if (hasMarksheet) Object.assign(r, computeMarksheetTotals(r.subjects));
       const rankBadge = r.meritRank ? ` &nbsp; <span class="badge">মেধাক্রম ${banglaOrdinal(r.meritRank)}</span>` : '';
+      const failBadge = (hasMarksheet && r.hasFailedSubject) ? ` &nbsp; <span class="badge absent">অকৃতকার্য</span>` : '';
       const summary = hasMarksheet
-        ? `${r.totalObtained}/${r.totalFull} &nbsp; <span class="badge">${r.grade}</span>${rankBadge}`
+        ? `${r.totalObtained}/${r.totalFull} &nbsp; <span class="badge">${r.grade}</span>${failBadge}${rankBadge}`
         : (r.marks !== undefined ? `${r.marks}` : '');
       const isPublished = r.published === true;
       const safeDocId = String(d.id).replace(/\\/g, '\\\\').replace(/'/g, "\\'");
@@ -1878,6 +1889,7 @@ function viewMarksheet(studentId, docId) {
         <div style="flex:1;min-width:90px;background:${gc.bg};border-radius:10px;padding:10px;text-align:center;">
           <div class="muted" style="font-size:11px;">গ্রেড</div>
           <div style="font-size:18px;font-weight:bold;color:${gc.fg};">${r.grade}</div>
+          ${r.hasFailedSubject ? '<div style="font-size:10px;color:#991b1b;font-weight:bold;margin-top:2px;">(অকৃতকার্য)</div>' : ''}
         </div>
         ${r.gpa ? `
         <div style="flex:1;min-width:90px;background:#fef9c3;border-radius:10px;padding:10px;text-align:center;">
