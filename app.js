@@ -1672,6 +1672,21 @@ function renderResultsScreen(isTeacher) {
 
     if (docs.length === 0) { wrap.innerHTML = '<p class="muted">এই শ্রেণিতে কোনো রেজাল্ট নেই</p>'; return; }
 
+    // রোল অনুযায়ী ধারাবাহিকভাবে (ascending) সাজানো — সেভের তারিখ অনুযায়ী নয়,
+    // যাতে শিক্ষক সবসময় রোল নম্বরের ক্রম অনুযায়ী তালিকা দেখতে পান।
+    if (isTeacher) {
+      docs = [...docs].sort((a, b) => {
+        const sa = studentsCache.find(s => s.id === a.data().studentId);
+        const sb = studentsCache.find(s => s.id === b.data().studentId);
+        const rollA = sa && sa.roll !== undefined && sa.roll !== null ? String(sa.roll) : '';
+        const rollB = sb && sb.roll !== undefined && sb.roll !== null ? String(sb.roll) : '';
+        const numA = Number(rollA), numB = Number(rollB);
+        const bothNumeric = rollA !== '' && rollB !== '' && !isNaN(numA) && !isNaN(numB);
+        if (bothNumeric) return numA - numB;
+        return rollA.localeCompare(rollB, 'bn');
+      });
+    }
+
     wrap.innerHTML = docs.map(d => {
       const r = d.data();
       const student = studentsCache.find(s => s.id === r.studentId);
@@ -1694,6 +1709,7 @@ function renderResultsScreen(isTeacher) {
         ${isTeacher ? `<div class="muted" style="margin-top:2px;">${isPublished ? '✅ প্রকাশিত (শিক্ষার্থী দেখতে পারবে)' : '🔒 অপ্রকাশিত (শুধু শিক্ষক দেখতে পারবে)'}</div>` : ''}
         <div style="margin-top:6px;">
           <button class="small secondary" onclick="viewMarksheet('${safeStudentId}','${safeDocId}')">মার্কশিট দেখুন</button>
+          ${isTeacher && hasMarksheet ? `<button class="small secondary" onclick="editMarksheet('${safeStudentId}','${safeDocId}')">সম্পাদনা করুন</button>` : ''}
           ${isTeacher ? `<button class="small ${isPublished ? 'secondary' : ''}" onclick="togglePublish('${safeDocId}', ${isPublished})">${isPublished ? 'স্থগিত করুন' : 'প্রকাশ করুন'}</button>` : ''}
           ${isTeacher ? `<button class="small danger" onclick="deleteMarksheet('${safeDocId}')">মুছুন</button>` : ''}
         </div>
@@ -1755,6 +1771,26 @@ function removeSubjectRow(index) {
   renderSubjectRows();
 }
 
+// Lets the teacher fix a wrong subject's full/obtained marks in place,
+// instead of having to remove and re-add the whole subject row. Used both
+// while building a brand-new marksheet and while editing an already-saved
+// one (see editMarksheet below).
+function editSubjectRowValue(index) {
+  const s = currentMarksheetSubjects[index];
+  if (!s) return;
+  const newFullStr = prompt('পূর্ণ নম্বর সম্পাদনা করুন (' + s.name + '):', s.full);
+  if (newFullStr === null) return; // cancelled
+  const newFull = Number(newFullStr);
+  if (!newFull || newFull <= 0) return alert('পূর্ণ নম্বর সঠিকভাবে দিন');
+  const newObtainedStr = prompt('প্রাপ্ত নম্বর সম্পাদনা করুন (' + s.name + '):', s.obtained);
+  if (newObtainedStr === null) return; // cancelled
+  const newObtained = Number(newObtainedStr);
+  if (newObtainedStr.trim() === '' || isNaN(newObtained)) return alert('প্রাপ্ত নম্বর দিন');
+  if (newObtained > newFull) return alert('প্রাপ্ত নম্বর পূর্ণ নম্বরের চেয়ে বেশি হতে পারে না');
+  currentMarksheetSubjects[index] = { name: s.name, full: newFull, obtained: newObtained };
+  renderSubjectRows();
+}
+
 function renderSubjectRows() {
   const wrap = document.getElementById('subjectRowsWrap');
   if (!wrap) return;
@@ -1765,7 +1801,7 @@ function renderSubjectRows() {
   wrap.innerHTML = currentMarksheetSubjects.map((s, i) => `
     <div class="student-row">
       <span>${s.name}</span>
-      <span>${s.obtained}/${s.full} <button class="small danger" onclick="removeSubjectRow(${i})">✕</button></span>
+      <span>${s.obtained}/${s.full} <button class="small secondary" onclick="editSubjectRowValue(${i})">✎ সম্পাদনা</button> <button class="small danger" onclick="removeSubjectRow(${i})">✕</button></span>
     </div>
   `).join('');
 }
@@ -1785,28 +1821,67 @@ function saveMarksheet() {
   // older year's result for this student.
   const docId = studentId + '_' + examName + (academicYear ? '_' + academicYear : '');
 
-  db.collection('results').doc(docId).set({
-    madrasaId,
-    studentId,
-    examName,
-    academicYear: academicYear || '',
-    subjects: currentMarksheetSubjects,
-    totalObtained,
-    totalFull,
-    percentage: Math.round(percentage * 100) / 100,
-    grade,
-    gpa,
-    published: false,
-    date: new Date().toISOString().slice(0,10)
+  // If this marksheet already exists (i.e. this save is really an EDIT of
+  // marks that were wrong), keep its current published/unpublished state
+  // as-is instead of silently resetting it to unpublished every time a
+  // teacher fixes a mistaken number.
+  db.collection('results').doc(docId).get().then(existingDoc => {
+    const existingPublished = existingDoc.exists ? (existingDoc.data().published === true) : false;
+    return db.collection('results').doc(docId).set({
+      madrasaId,
+      studentId,
+      examName,
+      academicYear: academicYear || '',
+      subjects: currentMarksheetSubjects,
+      totalObtained,
+      totalFull,
+      percentage: Math.round(percentage * 100) / 100,
+      grade,
+      gpa,
+      published: existingPublished,
+      date: new Date().toISOString().slice(0,10)
+    });
   }).then(() => {
     currentMarksheetSubjects = [];
     document.getElementById('resExam').value = '';
     renderSubjectRows();
-    alert('মার্কশিট সংরক্ষণ করা হয়েছে (এখনো অপ্রকাশিত — শিক্ষার্থী দেখতে পাবে না যতক্ষণ না আপনি "প্রকাশ করুন" চাপবেন)');
+    alert('মার্কশিট সংরক্ষণ করা হয়েছে');
     // Recompute মেধাক্রম for this exam+class group so the new marksheet is
     // reflected in everyone's rank right away.
     recomputeMeritRanks(examName, academicYear);
   }).catch(e => { alert('সংরক্ষণ ব্যর্থ: ' + e.message); showDiagBanner('মার্কশিট সংরক্ষণ ব্যর্থ: ' + e.message); });
+}
+
+// Loads an already-saved marksheet back into the "নতুন মার্কশিট তৈরি করুন"
+// form so the teacher can fix a wrong subject's marks (via ✎ সম্পাদনা on
+// each row, or remove/re-add a subject) and press "মার্কশিট সংরক্ষণ করুন"
+// again to save the correction. Saving reuses the same doc id (studentId +
+// examName + academicYear), so it updates the existing marksheet in place
+// instead of creating a duplicate.
+function editMarksheet(studentId, docId) {
+  db.collection('results').doc(docId).get().then(doc => {
+    if (!doc.exists) return alert('মার্কশিট খুঁজে পাওয়া যায়নি');
+    const r = doc.data();
+    if (!Array.isArray(r.subjects) || r.subjects.length === 0) {
+      return alert('এই পুরাতন রেজাল্টে বিষয়ভিত্তিক তথ্য নেই, তাই সম্পাদনা করা যাবে না');
+    }
+    currentMarksheetSubjects = r.subjects.map(s => ({ name: s.name, full: s.full, obtained: s.obtained }));
+    // Make sure the student appears in the "শিক্ষার্থী" dropdown regardless
+    // of whatever class filter was active before.
+    resultsClassFilter = 'all';
+    renderResultsScreen(true);
+    setTimeout(() => {
+      const studentSel = document.getElementById('resStudent');
+      const examEl = document.getElementById('resExam');
+      const yearEl = document.getElementById('resAcademicYear');
+      if (studentSel) studentSel.value = studentId;
+      if (examEl) examEl.value = r.examName || '';
+      if (yearEl) yearEl.value = r.academicYear || '';
+      renderSubjectRows();
+      const formCard = document.querySelector('.card');
+      if (formCard && formCard.scrollIntoView) formCard.scrollIntoView({ behavior: 'smooth' });
+    }, 0);
+  }).catch(e => { alert('লোড ব্যর্থ: ' + e.message); showDiagBanner('মার্কশিট এডিট লোড ব্যর্থ: ' + e.message); });
 }
 
 function togglePublish(docId, currentlyPublished) {
