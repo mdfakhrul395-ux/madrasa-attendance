@@ -171,12 +171,26 @@ service cloud.firestore {
       allow delete: if isTeacherAuth() && resource.data.madrasaId == myMadrasaId();
     }
 
+    // ================= SUGGESTIONS (পরামর্শ বক্স) =================
+    // Private between the sender and the madrasa's ADMIN only:
+    //  - read: the admin teacher of the same madrasa, or the student who sent it.
+    //    Ordinary (non-admin) teachers can NOT read any suggestion.
+    //  - create: only a student, only for themself, only these fields (so a
+    //    student can't forge an admin "reply" on their own suggestion).
+    //  - update (admin reply) / delete: admin of the same madrasa only.
     match /suggestions/{docId} {
-      allow read: if (isTeacherAuth() && resource.data.madrasaId == myMadrasaId()) ||
+      allow read: if (isRequesterAdmin() && resource.data.madrasaId == myMadrasaId()) ||
         (isStudentAuth() && resource.data.studentId == mySessionStudentId());
-      allow create: if (isTeacherAuth() && request.resource.data.madrasaId == myMadrasaId()) ||
-        (isStudentAuth() && request.resource.data.studentId == mySessionStudentId());
-      allow update, delete: if isTeacherAuth() && resource.data.madrasaId == myMadrasaId();
+      allow create: if isStudentAuth() &&
+        request.resource.data.studentId == mySessionStudentId() &&
+        request.resource.data.madrasaId == myMadrasaId() &&
+        request.resource.data.keys().hasOnly(['madrasaId', 'studentId', 'text', 'createdAt']) &&
+        request.resource.data.text is string &&
+        request.resource.data.text.size() > 0 &&
+        request.resource.data.text.size() <= 2000;
+      allow update: if isRequesterAdmin() && resource.data.madrasaId == myMadrasaId() &&
+        request.resource.data.madrasaId == resource.data.madrasaId;
+      allow delete: if isRequesterAdmin() && resource.data.madrasaId == myMadrasaId();
     }
 
     match /fees_monthly/{docId} {
