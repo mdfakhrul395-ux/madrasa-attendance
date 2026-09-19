@@ -3171,3 +3171,67 @@ function loadOnetimeFeesStudent() {
       showDiagBanner('আমার ফি লোড এরর: ' + err.message);
     });
 }
+// ===== মেধাক্রম: GPA → মোট নম্বর → রোল =====
+// এটি উপরের পুরাতন recomputeMeritRanks ফাংশনকে প্রতিস্থাপন করে
+function meritRollCompare(a, b) {
+  const ra = a === undefined || a === null ? '' : String(a);
+  const rb = b === undefined || b === null ? '' : String(b);
+  const na = Number(ra), nb = Number(rb);
+  if (ra !== '' && rb !== '' && !isNaN(na) && !isNaN(nb)) return na - nb;
+  return ra.localeCompare(rb, 'bn');
+}
+
+function recomputeMeritRanks(examName, academicYear) {
+  if (!examName) return Promise.resolve();
+  return db.collection('results')
+    .where('madrasaId', '==', madrasaId)
+    .where('examName', '==', examName)
+    .get()
+    .then(snap => {
+      const groups = {};
+      snap.docs.forEach(d => {
+        const r = d.data();
+        if ((r.academicYear || '') !== (academicYear || '')) return;
+        if (!Array.isArray(r.subjects) || r.subjects.length === 0) return;
+        const student = studentsCache.find(s => s.id === r.studentId);
+        const className = student ? student.className : null;
+        if (!className) return;
+        const totals = computeMarksheetTotals(r.subjects);
+        if (!groups[className]) groups[className] = [];
+        groups[className].push({
+          id: d.id,
+          gpa: Number(totals.gpa),
+          total: totals.totalObtained,
+          roll: student.roll,
+          failed: totals.grade === 'F'
+        });
+      });
+
+      const batch = db.batch();
+      let hasWrites = false;
+      Object.keys(groups).forEach(className => {
+        const all = groups[className];
+        const passList = all.filter(item => !item.failed).sort((a, b) => {
+          if (b.gpa !== a.gpa) return b.gpa - a.gpa;
+          if (b.total !== a.total) return b.total - a.total;
+          return meritRollCompare(a.roll, b.roll);
+        });
+        const failList = all.filter(item => item.failed);
+
+        passList.forEach((item, idx) => {
+          batch.update(db.collection('results').doc(item.id), { meritRank: idx + 1, meritTotal: passList.length });
+          hasWrites = true;
+        });
+
+        failList.forEach(item => {
+          batch.update(db.collection('results').doc(item.id), {
+            meritRank: firebase.firestore.FieldValue.delete(),
+            meritTotal: firebase.firestore.FieldValue.delete()
+          });
+          hasWrites = true;
+        });
+      });
+      return hasWrites ? batch.commit() : Promise.resolve();
+    })
+    .catch(e => showDiagBanner('মেধাক্রম হিসাব ব্যর্থ: ' + e.message));
+}
