@@ -8,6 +8,7 @@
  *   - শিক্ষক ও শিক্ষার্থী দুইপাশের নিচের মেনুতে "হোম" ট্যাব যোগ করে
  *     (শিক্ষকের "শিক্ষার্থী" ট্যাব এবং শিক্ষার্থীর "নোটিশ" ট্যাব "আরও" মেনুতে চলে যায়)
  *   - লগইন করলে প্রথমে হোম ড্যাশবোর্ড খোলে
+ *   - শিক্ষার্থী লগইনে আগে শ্রেণি বেছে তারপর নাম বাছাই করার ব্যবস্থা (সাথে খোঁজার ঘর)
  *   - নিজের CSS নিজেই যুক্ত করে (style.css বদলাতে হয় না)
  *
  * তারিখের হিসাব app.js এর মতোই (UTC অনুযায়ী YYYY-MM-DD), তাই হাজিরার সাথে মিলে যায়।
@@ -192,6 +193,34 @@
 .dash-due{display:flex;justify-content:space-between;gap:10px;padding:9px 0;border-top:1px solid var(--line);font-size:13.5px}
 .dash-due b{color:var(--bad);font-size:13px}
 
+/* শিক্ষার্থী লগইন */
+.slogin{padding:4px 0 24px;color:#1e293b}
+.slogin .sl-head{margin:8px 2px 4px}
+.slogin .sl-title{font-size:22px;font-weight:800;color:#0a3a35}
+.slogin .sl-sub{font-size:13.5px;color:#64748b;margin-top:3px;line-height:1.5}
+.slogin .sl-label{font-size:13px;font-weight:800;color:#0a3a35;margin:18px 2px 8px}
+.slogin .sl-chips{display:flex;flex-wrap:wrap;gap:8px}
+.slogin .sl-chip{width:auto;margin:0;padding:10px 14px;border:0;border-radius:14px;background:#fff;color:#334155;font-size:14.5px;font-weight:700;box-shadow:0 0 0 1px #e2e8f0;display:inline-flex;align-items:center;gap:8px}
+.slogin .sl-chip small{font-size:11.5px;font-weight:700;background:#eef2f5;color:#64748b;border-radius:99px;padding:1px 8px}
+.slogin .sl-chip.on{background:#0a3a35;color:#fff;box-shadow:none}
+.slogin .sl-chip.on small{background:rgba(255,255,255,.2);color:#fff}
+.slogin .sl-skel{width:96px;height:42px;border-radius:14px;background:linear-gradient(90deg,#eef2f5 25%,#f8fafc 40%,#eef2f5 60%);background-size:400% 100%;animation:dashShimmer 1.4s infinite}
+.slogin .sl-search{margin:0 0 4px;padding:12px 14px;border-radius:14px;background:#fff;border:0;box-shadow:0 0 0 1px #e2e8f0;font-size:15px}
+.slogin .sl-list{display:grid;gap:8px;margin-top:8px}
+.slogin .sl-stu{display:flex;align-items:center;gap:12px;width:100%;margin:0;padding:11px 12px;border:0;border-radius:16px;background:#fff;color:#1e293b;text-align:left;font-weight:600;box-shadow:0 0 0 1px #e2e8f0}
+.slogin .sl-stu.on{background:#e7f5f2;box-shadow:0 0 0 2px #0f766e}
+.slogin .sl-av{flex:none;width:40px;height:40px;border-radius:50%;background:#e3f3f0;color:#0f766e;display:grid;place-items:center;font-weight:800;font-size:17px}
+.slogin .sl-stu.on .sl-av{background:#0f766e;color:#fff}
+.slogin .sl-nm{flex:1;min-width:0;display:flex;flex-direction:column}
+.slogin .sl-nm b{font-size:15px;font-weight:700;overflow-wrap:anywhere}
+.slogin .sl-nm small{font-size:12px;color:#64748b;font-weight:500}
+.slogin .sl-ck{flex:none;width:24px;text-align:center;color:#0f766e;font-weight:800;font-size:18px}
+.slogin .sl-note{font-size:13px;color:#64748b;line-height:1.6;padding:10px 4px}
+.slogin .sl-link{width:auto;margin:8px 0 0;padding:6px 2px;border:0;background:none;color:#0f766e;font-size:13px;font-weight:700;text-decoration:underline}
+.slogin .sl-pin{margin-top:16px;background:#fff;border-radius:20px;padding:16px;box-shadow:0 0 0 1px #e2e8f0}
+.slogin .sl-pin-who{font-size:16px;font-weight:800;color:#0a3a35}
+.slogin .sl-pin input{text-align:center;font-size:22px;letter-spacing:10px;padding:12px}
+
 .more-sheet{max-height:70vh;overflow-y:auto}
 
 @media (max-width:360px){
@@ -245,6 +274,16 @@
   const todayStr = () => new Date().toISOString().slice(0, 10);
   const money = n => '৳ ' + bn(Math.round(Number(n) || 0).toLocaleString('en-US'));
   const cmpBn = (a, b) => String(a).localeCompare(String(b), 'bn');
+  // শ্রেণির স্বাভাবিক ক্রম: প্রথম, দ্বিতীয়, তৃতীয় ... বা ১ম, ২য় ... বা ক্লাস ১, ২ ...
+  const CLASS_WORDS = [['একাদশ', 11], ['দ্বাদশ', 12], ['প্রথম', 1], ['দ্বিতীয়', 2], ['তৃতীয়', 3], ['চতুর্থ', 4], ['পঞ্চম', 5], ['ষষ্ঠ', 6], ['সপ্তম', 7], ['অষ্টম', 8], ['নবম', 9], ['দশম', 10]];
+  function classRank(name) {
+    const t = String(name || '');
+    if (t === 'শ্রেণি নেই') return 2000;
+    for (let i = 0; i < CLASS_WORDS.length; i++) if (t.indexOf(CLASS_WORDS[i][0]) > -1) return CLASS_WORDS[i][1];
+    const m = t.replace(/[০-৯]/g, d => '০১২৩৪৫৬৭৮৯'.indexOf(d)).match(/\d+/);
+    return m ? Number(m[0]) : 1000;
+  }
+  const classCmp = (a, b) => classRank(a) - classRank(b) || cmpBn(a, b);
   const fmtDay = ds => {
     if (!ds) return '';
     const p = String(ds).split('-').map(Number);
@@ -260,11 +299,9 @@
     const p = ds.split('-').map(Number);
     return WEEKDAY_SHORT[new Date(Date.UTC(p[0], p[1] - 1, p[2])).getUTCDay()];
   }
-  // অ্যাপের অন্য জায়গার শ্রেণি-ড্রপডাউনের (getClassList) ক্রমেই সাজানো
+  // শ্রেণিগুলো স্বাভাবিক ক্রমে সাজানো
   function orderClasses(keys) {
-    const base = getClassList().filter(c => keys.indexOf(c) > -1);
-    const rest = keys.filter(c => base.indexOf(c) === -1).sort(cmpBn);
-    return base.concat(rest);
+    return keys.slice().sort(classCmp);
   }
   function studentMap() {
     const m = {};
@@ -1340,6 +1377,159 @@
       window.studentTab('home');
     };
   }
+
+  // =====================================================================
+  //            শিক্ষার্থী লগইন: আগে শ্রেণি, তারপর নাম, তারপর PIN
+  // app.js এর confirmStudentPick() একটুও বদলানো হয়নি — সেটি আগের মতোই
+  // #studentPick, #studentPinInput ও #pinError খোঁজে, তাই এই তিনটি আইডি রাখা হয়েছে।
+  // =====================================================================
+  let slClass = null;      // বাছাই করা শ্রেণি ('' মানে শ্রেণিহীন)
+  let slSel = null;        // বাছাই করা শিক্ষার্থীর id
+  let slQuery = '';
+  let slLast = null;
+  let slTimer = null;
+  let slClassList = [];
+
+  function slRollCmp(a, b) {
+    const ra = a.roll == null ? '' : String(a.roll), rb = b.roll == null ? '' : String(b.roll);
+    const na = Number(ra), nb = Number(rb);
+    if (ra !== '' && rb !== '' && !isNaN(na) && !isNaN(nb) && na !== nb) return na - nb;
+    return ra.localeCompare(rb, 'bn') || String(a.name).localeCompare(String(b.name), 'bn');
+  }
+  function slClasses() {
+    const list = Array.from(new Set(studentsCache.map(s => s.className).filter(Boolean))).sort(classCmp);
+    if (studentsCache.some(s => !s.className)) list.push('');
+    return list;
+  }
+  function slInClass() {
+    return studentsCache.filter(s => (s.className || '') === slClass).sort(slRollCmp);
+  }
+
+  function slShell() {
+    return `
+<div id="studentPickerScreen" class="slogin">
+  <div class="sl-head">
+    <div class="sl-title">শিক্ষার্থী লগইন</div>
+    <div class="sl-sub">আপনার শ্রেণি বেছে নিন, তারপর নিজের নামে চাপ দিন</div>
+  </div>
+  <div class="sl-label">আপনার শ্রেণি</div>
+  <div id="slClasses" class="sl-chips"></div>
+  <div id="slStudentsWrap"></div>
+  <div id="slPinWrap"></div>
+  <select id="studentPick" style="display:none"></select>
+  <button class="secondary" onclick="logout()" style="margin-top:16px">ফিরে যান</button>
+</div>`;
+  }
+
+  function slPaintClasses() {
+    const box = el('slClasses');
+    if (!box) return;
+    slClassList = slClasses();
+    if (!studentsCache.length) {
+      box.innerHTML = '<div class="sl-skel"></div><div class="sl-skel"></div><div class="sl-skel"></div>';
+      return;
+    }
+    box.innerHTML = slClassList.map((c, i) => {
+      const n = studentsCache.filter(s => (s.className || '') === c).length;
+      return `<button class="sl-chip${c === slClass ? ' on' : ''}" onclick="slPickClass(${i})">${esc(c || 'শ্রেণি নেই')}<small>${bn(n)}</small></button>`;
+    }).join('');
+  }
+
+  function slPaintStudents(resetSearch) {
+    const wrap = el('slStudentsWrap');
+    if (!wrap) return;
+    if (!studentsCache.length) {
+      wrap.innerHTML = '<p class="sl-note">শিক্ষার্থীদের তালিকা লোড হচ্ছে... তালিকা না এলে ইন্টারনেট দেখুন, অথবা শিক্ষককে শিক্ষার্থী যোগ করতে বলুন।</p>';
+      return;
+    }
+    if (slClass === null) { wrap.innerHTML = ''; return; }
+    const all = slInClass();
+    // নাম বাছাই হয়ে গেলে শুধু সেই কার্ডটি থাকে, যাতে PIN ঘরটি ঠিক নিচেই দেখা যায়
+    const chosen = slSel ? all.find(s => s.id === slSel) : null;
+    if (chosen) {
+      wrap.innerHTML = `<div class="sl-label">আপনার নাম</div>
+        <div class="sl-list"><div class="sl-stu on"><span class="sl-av">${esc(Array.from(chosen.name || '?')[0])}</span><span class="sl-nm"><b>${esc(chosen.name)}</b><small>${chosen.roll ? 'রোল ' + esc(bn(chosen.roll)) : ''}</small></span><span class="sl-ck">\u2713</span></div></div>
+        <button class="sl-link" onclick="slChange()">অন্য নাম বাছুন</button>`;
+      return;
+    }
+    const wasChosen = !el('slList');
+    if (resetSearch || wasChosen) {
+      wrap.innerHTML = `<div class="sl-label">আপনার নাম</div>`
+        + (all.length > 8 ? `<input id="slSearch" class="sl-search" type="search" placeholder="নাম বা রোল লিখে খুঁজুন" oninput="slSearch(this.value)">` : '')
+        + '<div id="slList" class="sl-list"></div>';
+    }
+    const q = slQuery.trim().toLowerCase();
+    const shown = q ? all.filter(s => String(s.name || '').toLowerCase().indexOf(q) > -1 || String(s.roll == null ? '' : s.roll) === q || bn(s.roll == null ? '' : s.roll) === q) : all;
+    const list = el('slList');
+    if (!list) return;
+    list.innerHTML = shown.length ? shown.map(s => `
+      <button class="sl-stu${s.id === slSel ? ' on' : ''}" onclick="slPickStudent('${esc(s.id)}')">
+        <span class="sl-av">${esc(Array.from(s.name || '?')[0])}</span>
+        <span class="sl-nm"><b>${esc(s.name)}</b><small>${s.roll ? 'রোল ' + esc(bn(s.roll)) : ''}</small></span>
+        <span class="sl-ck">${s.id === slSel ? '\u2713' : ''}</span>
+      </button>`).join('') : '<p class="sl-note">এই নামে কেউ পাওয়া যায়নি</p>';
+  }
+
+  function slPaintPin() {
+    const wrap = el('slPinWrap');
+    if (!wrap) return;
+    const sel = el('studentPick');
+    if (sel) { sel.innerHTML = studentsCache.map(s => `<option value="${esc(s.id)}">${esc(s.name)}</option>`).join(''); if (slSel) sel.value = slSel; }
+    const me = slSel ? studentsCache.find(s => s.id === slSel) : null;
+    if (!me) { wrap.innerHTML = ''; return; }
+    wrap.innerHTML = `
+      <div class="sl-pin">
+        <label for="studentPinInput">আপনার PIN দিন</label>
+        <input id="studentPinInput" type="password" inputmode="numeric" maxlength="4" placeholder="••••" autocomplete="off" onkeydown="if(event.key==='Enter'){confirmStudentPick();}">
+        <p id="pinError" class="muted" style="color:#dc2626;"></p>
+        <button onclick="confirmStudentPick()">প্রবেশ করুন</button>
+      </div>`;
+  }
+
+  window.slPickClass = function (i) {
+    const c = slClassList[i];
+    if (c === undefined) return;
+    slClass = c; slSel = null; slQuery = '';
+    try { localStorage.setItem('loginClass', c); } catch (e) { /* ignore */ }
+    slPaintClasses(); slPaintStudents(true); slPaintPin();
+  };
+  window.slPickStudent = function (id) {
+    slSel = id;
+    slPaintStudents(false); slPaintPin();
+    setTimeout(() => {
+      const pin = el('studentPinInput');
+      if (pin) { pin.scrollIntoView({ behavior: 'smooth', block: 'center' }); pin.focus(); }
+    }, 60);
+  };
+  window.slSearch = function (v) { slQuery = v || ''; slPaintStudents(false); };
+  window.slChange = function () {
+    slSel = null; slQuery = '';
+    slPaintStudents(true); slPaintPin();
+  };
+
+  function showPicker() {
+    if (slTimer) { clearInterval(slTimer); slTimer = null; }
+    const classes = slClasses();
+    let saved = null;
+    try { saved = localStorage.getItem('loginClass'); } catch (e) { /* ignore */ }
+    slSel = null; slQuery = '';
+    slClass = (saved !== null && classes.indexOf(saved) > -1) ? saved : (classes.length === 1 ? classes[0] : null);
+    setScreen(slShell());
+    if (typeof hideNav === 'function') hideNav();
+    slPaintClasses(); slPaintStudents(true); slPaintPin();
+    // শিক্ষার্থী তালিকা দেরিতে এলে (বা বদলালে) আবার আঁকা
+    slLast = studentsCache;
+    slTimer = setInterval(() => {
+      if (!el('studentPickerScreen')) { clearInterval(slTimer); slTimer = null; return; }
+      if (studentsCache !== slLast) {
+        slLast = studentsCache;
+        if (slClass !== null && slClasses().indexOf(slClass) === -1) slClass = null;
+        if (slSel && !studentsCache.some(s => s.id === slSel)) slSel = null;
+        slPaintClasses(); slPaintStudents(true); slPaintPin();
+      }
+    }, 700);
+  }
+  window.showStudentPicker = showPicker;
 
   // ================= app.js এর সাথে জোড়া লাগানো =================
   const origTeacherTab = window.teacherTab;
