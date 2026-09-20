@@ -245,18 +245,21 @@
     return { total: studentsCache.length, present, absent, unmarked, marked: present + absent };
   }
   function pendingLeaves() {
-    return (S.leaves || []).filter(l => (l.status || 'pending') === 'pending');
+    const ids = studentMap();
+    return (S.leaves || []).filter(l => (l.status || 'pending') === 'pending' && ids[l.studentId]);
   }
   function feeStats() {
     if (!S.feesM) return null;
     const ids = {};
     studentsCache.forEach(s => { ids[s.id] = true; });
-    let paid = 0, collected = 0;
+    let paid = 0, collected = 0, recorded = 0;
     S.feesM.forEach(f => {
-      if (ids[f.studentId] && f.status === 'paid') { paid++; collected += Number(f.amount) || 0; }
+      if (!ids[f.studentId]) return;
+      recorded++;
+      if (f.status === 'paid') { paid++; collected += Number(f.amount) || 0; }
     });
     const total = studentsCache.length;
-    return { total, paid, due: Math.max(0, total - paid), collected };
+    return { total, paid, recorded, due: Math.max(0, total - paid), collected };
   }
 
   function setNum(id, n) {
@@ -306,7 +309,7 @@
         </svg>
         <div class="dash-ring-center">
           <div class="dash-ring-pct"><span id="dashRingN">–</span><small id="dashRingU" style="display:none">%</small></div>
-          <div class="dash-ring-cap">আজকের উপস্থিতি</div>
+          <div class="dash-ring-cap">উপস্থিতি</div>
         </div>
       </div>
       <div class="dash-hero-stats">
@@ -393,9 +396,14 @@
       cellState('dashCell_leaves', n > 0 ? 'warn' : '');
     }
     const f = feeStats();
-    if (f) {
+    if (f && f.recorded > 0) {
       setNum('dashC_fees', f.due);
       cellState('dashCell_fees', f.due > 0 ? 'bad' : '');
+    } else if (f) {
+      // এ মাসে কোনো বেতনের হিসাব লেখাই হয়নি — সবাইকে "বকেয়া" দেখানো বিভ্রান্তিকর
+      const c = el('dashC_fees');
+      if (c) { c.textContent = '–'; delete c.dataset.val; }
+      cellState('dashCell_fees', '');
     }
   }
 
@@ -527,6 +535,10 @@
     const chip = `<span class="dash-chip">${esc(monthLabel)}</span>`;
     if (!f.total) {
       box.innerHTML = head('এ মাসের বেতন', chip) + emptyHtml('বেতনের হিসাব দেখাতে শিক্ষার্থী দরকার', '', 'শিক্ষার্থী যোগ করুন', "teacherTab('students')");
+      return;
+    }
+    if (!f.recorded) {
+      box.innerHTML = head('এ মাসের বেতন', chip) + emptyHtml('এ মাসে এখনো কোনো বেতনের হিসাব লেখা হয়নি', 'বেতনের পাতায় পরিশোধিত বা বকেয়া চিহ্নিত করলে আদায়ের হিসাব এখানে দেখা যাবে।', 'বেতনের পাতা', "teacherTab('fees')");
       return;
     }
     const first = !S.done.fees;
