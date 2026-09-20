@@ -9,6 +9,8 @@
  *     (শিক্ষকের "শিক্ষার্থী" ট্যাব এবং শিক্ষার্থীর "নোটিশ" ট্যাব "আরও" মেনুতে চলে যায়)
  *   - লগইন করলে প্রথমে হোম ড্যাশবোর্ড খোলে
  *   - শিক্ষার্থী লগইনে আগে শ্রেণি বেছে তারপর নাম বাছাই করার ব্যবস্থা (সাথে খোঁজার ঘর)
+ *   - অ্যাডমিন ছাড়া অন্য শিক্ষক যে ফোনে লগইন করেছেন, সেই ফোনে শিক্ষার্থী লগইন বন্ধ
+ *   - "শিক্ষার্থী" (নাম, PIN, নম্বর), "সেটিংস" ও "পরামর্শ" ট্যাব শুধু অ্যাডমিনের জন্য
  *   - নিজের CSS নিজেই যুক্ত করে (style.css বদলাতে হয় না)
  *
  * তারিখের হিসাব app.js এর মতোই (UTC অনুযায়ী YYYY-MM-DD), তাই হাজিরার সাথে মিলে যায়।
@@ -274,6 +276,8 @@
   const todayStr = () => new Date().toISOString().slice(0, 10);
   const money = n => '৳ ' + bn(Math.round(Number(n) || 0).toLocaleString('en-US'));
   const cmpBn = (a, b) => String(a).localeCompare(String(b), 'bn');
+  // "শিক্ষার্থী" ট্যাব শুধু অ্যাডমিন শিক্ষক (এবং সুপার অ্যাডমিন) দেখতে ও খুলতে পারবেন
+  const canManageStudents = () => !!((typeof myTeacherIsAdmin !== 'undefined' && myTeacherIsAdmin) || (typeof isSuperAdminUser !== 'undefined' && isSuperAdminUser));
   // শ্রেণির স্বাভাবিক ক্রম: প্রথম, দ্বিতীয়, তৃতীয় ... বা ১ম, ২য় ... বা ক্লাস ১, ২ ...
   const CLASS_WORDS = [['একাদশ', 11], ['দ্বাদশ', 12], ['প্রথম', 1], ['দ্বিতীয়', 2], ['তৃতীয়', 3], ['চতুর্থ', 4], ['পঞ্চম', 5], ['ষষ্ঠ', 6], ['সপ্তম', 7], ['অষ্টম', 8], ['নবম', 9], ['দশম', 10]];
   function classRank(name) {
@@ -363,7 +367,11 @@
   const head = (title, right) => `<div class="dash-sec-head"><h3>${title}</h3>${right || ''}</div>`;
   const link = (label, js) => `<button class="dash-link" onclick="${js}">${label}</button>`;
   const errHtml = label => `<div class="dash-err"><b>${label} লোড করা যায়নি</b>ইন্টারনেট সংযোগ দেখে আবার চেষ্টা করুন।<br><button class="dash-btn ghost" onclick="dashRefresh()">আবার চেষ্টা করুন</button></div>`;
-  const emptyHtml = (title, sub, cta, js) => `
+  const emptyHtml = (title, sub, cta, js) => {
+    if (cta && js && js.indexOf("teacherTab('students')") > -1 && !canManageStudents()) cta = '';
+    return emptyHtmlRaw(title, sub, cta, js);
+  };
+  const emptyHtmlRaw = (title, sub, cta, js) => `
     <div class="dash-empty">
       <div><b>${title}</b>${sub || ''}${cta ? `${sub ? '<br>' : ''}<button class="dash-btn ghost" onclick="${js}">${cta}</button>` : ''}</div>
     </div>`;
@@ -404,8 +412,8 @@
   </section>
 
   <div class="dash-strip">
-    <button class="dash-cell" onclick="teacherTab('students')"><b id="dashC_students">–</b><span>মোট শিক্ষার্থী</span></button>
-    <button class="dash-cell" onclick="teacherTab('students')"><b id="dashC_classes">–</b><span>মোট শ্রেণি</span></button>
+    <button class="dash-cell" ${canManageStudents() ? `onclick="teacherTab('students')"` : 'style="cursor:default"'}><b id="dashC_students">–</b><span>মোট শিক্ষার্থী</span></button>
+    <button class="dash-cell" ${canManageStudents() ? `onclick="teacherTab('students')"` : 'style="cursor:default"'}><b id="dashC_classes">–</b><span>মোট শ্রেণি</span></button>
     <button class="dash-cell" id="dashCell_leaves" onclick="teacherTab('leaves')"><b id="dashC_leaves">–</b><span>অপেক্ষমাণ ছুটি</span></button>
     <button class="dash-cell" id="dashCell_fees" onclick="teacherTab('fees')"><b id="dashC_fees">–</b><span>বেতন বকেয়া</span></button>
   </div>
@@ -414,7 +422,9 @@
     <button class="dash-act main" onclick="teacherTab('attendance')"><span class="dash-act-ic">\u2705</span>হাজিরা নিন</button>
     <button class="dash-act" onclick="teacherTab('results')"><span class="dash-act-ic">\u{1F3C6}</span>রেজাল্ট</button>
     <button class="dash-act" onclick="teacherTab('notices')"><span class="dash-act-ic">\u{1F4E2}</span>নোটিশ দিন</button>
-    <button class="dash-act" onclick="teacherTab('students')"><span class="dash-act-ic">\u{1F468}\u200D\u{1F393}</span>শিক্ষার্থী</button>
+    ${canManageStudents()
+      ? `<button class="dash-act" onclick="teacherTab('students')"><span class="dash-act-ic">\u{1F468}\u200D\u{1F393}</span>শিক্ষার্থী</button>`
+      : `<button class="dash-act" onclick="teacherTab('diary')"><span class="dash-act-ic">\u{1F4D3}</span>ডায়েরী</button>`}
   </div>
 
   <section class="dash-sec attn" id="dashLeaves">${skel(64)}</section>
@@ -1508,6 +1518,7 @@
   };
 
   function showPicker() {
+    if (studentLoginLocked()) { window.showRoleSelect(); return; }
     if (slTimer) { clearInterval(slTimer); slTimer = null; }
     const classes = slClasses();
     let saved = null;
@@ -1531,10 +1542,53 @@
   }
   window.showStudentPicker = showPicker;
 
+  // =====================================================================
+  //   সাধারণ শিক্ষকের ডিভাইসে "শিক্ষার্থী" লগইন বন্ধ (অ্যাডমিন ছাড়া)
+  // শিক্ষার্থীদের কোনো অ্যাকাউন্ট নেই, তাই "আপনি কে?" পাতায় অ্যাপ বুঝতে পারে না কে চাপছে।
+  // তাই যে ডিভাইসে কোনো সাধারণ (অ্যাডমিন নন) শিক্ষক লগইন করেছেন, সেই ডিভাইসে
+  // শিক্ষার্থী লগইন বন্ধ থাকে। অ্যাডমিন শিক্ষক বা সুপার অ্যাডমিন ওই ডিভাইসে লগইন করলে আবার খুলে যায়।
+  // =====================================================================
+  const LOCK_KEY = 'nonAdminTeacherDevice';
+  const studentLoginLocked = () => { try { return localStorage.getItem(LOCK_KEY) === '1'; } catch (e) { return false; } };
+  function syncDeviceLock() {
+    try {
+      if (canManageStudents()) localStorage.removeItem(LOCK_KEY);
+      else localStorage.setItem(LOCK_KEY, '1');
+    } catch (e) { /* ignore */ }
+  }
+  function lockStudentButton() {
+    if (!studentLoginLocked()) return;
+    const btn = document.querySelector("#app button[onclick=\"pickRole('student')\"]");
+    if (!btn || btn.dataset.locked) return;
+    btn.dataset.locked = '1';
+    btn.removeAttribute('onclick');
+    btn.disabled = true;
+    btn.style.opacity = '.5';
+    btn.style.cursor = 'not-allowed';
+    btn.insertAdjacentHTML('afterend', '<p class="muted" style="margin-top:8px;line-height:1.6;">এই ফোনে শিক্ষক লগইন করা হয়েছিল, তাই এখানে শিক্ষার্থী লগইন বন্ধ। শিক্ষার্থীরা নিজেদের ফোন থেকে লগইন করুন। অ্যাডমিন শিক্ষক এই ফোনে লগইন করলে আবার চালু হবে।</p>');
+  }
+  const origShowRoleSelect = window.showRoleSelect;
+  if (typeof origShowRoleSelect === 'function') {
+    window.showRoleSelect = function () {
+      const r = origShowRoleSelect.apply(this, arguments);
+      lockStudentButton();
+      return r;
+    };
+  }
+  const origPickRole = window.pickRole;
+  if (typeof origPickRole === 'function') {
+    window.pickRole = function (r) {
+      if (r === 'student' && studentLoginLocked()) { window.showRoleSelect(); return; }
+      return origPickRole.apply(this, arguments);
+    };
+  }
+
   // ================= app.js এর সাথে জোড়া লাগানো =================
   const origTeacherTab = window.teacherTab;
   window.teacherTab = function (tab) {
     stop();
+    // অ্যাডমিন ছাড়া কেউ "শিক্ষার্থী", "সেটিংস" বা "পরামর্শ" ট্যাবে ঢুকতে চাইলে হোমে ফিরিয়ে দেওয়া হয়
+    if ((tab === 'students' || tab === 'settings' || tab === 'suggestions') && !canManageStudents()) tab = 'home';
     if (tab === 'home') {
       renderTeacherNav('home');
       render();
@@ -1543,8 +1597,21 @@
     return origTeacherTab.apply(this, arguments);
   };
 
+  // "আরও" মেনুতে "শিক্ষার্থী", "সেটিংস" ও "পরামর্শ" শুধু অ্যাডমিনের জন্য দেখানো (বাকি নিয়ম app.js এর মতোই)
+  window.renderTeacherNav = function (activeKey) {
+    const nav = document.getElementById('bottomNav');
+    nav.style.display = 'block';
+    const visible = teacherMoreTabs.filter(t => {
+      if (t.key === 'teachers') return myTeacherIsAdmin;
+      if (t.key === 'super_admin') return isSuperAdminUser;
+      if (t.key === 'students' || t.key === 'settings' || t.key === 'suggestions') return canManageStudents();
+      return true;
+    });
+    nav.innerHTML = buildNavHtml(teacherPrimaryTabs, visible, 'teacherTab', activeKey);
+  };
+
   // লগইন বা নিবন্ধনের পর প্রথম পাতা হবে হোম
-  window.showTeacherApp = function () { window.teacherTab('home'); };
+  window.showTeacherApp = function () { syncDeviceLock(); window.teacherTab('home'); };
 
   const origLogout = window.logout;
   if (typeof origLogout === 'function') {
