@@ -1,12 +1,13 @@
-/* ShikkhaOS — শিক্ষকের হোম ড্যাশবোর্ড
+/* ShikkhaOS — শিক্ষক ও শিক্ষার্থীর হোম ড্যাশবোর্ড
  *
  * এই ফাইলটি app.js এর ঠিক নিচে লোড হয় (index.html এ):
  *   <script src="app.js"></script>
  *   <script src="dashboard.js"></script>
  *
  * app.js এর একটি অক্ষরও বদলাতে হয় না। এই ফাইল নিজেই:
- *   - নিচের মেনুতে "হোম" ট্যাব যোগ করে ("শিক্ষার্থী" ট্যাব "আরও" মেনুতে চলে যায়)
- *   - শিক্ষক লগইন করলে প্রথমে হোম ড্যাশবোর্ড খোলে
+ *   - শিক্ষক ও শিক্ষার্থী দুইপাশের নিচের মেনুতে "হোম" ট্যাব যোগ করে
+ *     (শিক্ষকের "শিক্ষার্থী" ট্যাব এবং শিক্ষার্থীর "নোটিশ" ট্যাব "আরও" মেনুতে চলে যায়)
+ *   - লগইন করলে প্রথমে হোম ড্যাশবোর্ড খোলে
  *   - নিজের CSS নিজেই যুক্ত করে (style.css বদলাতে হয় না)
  *
  * তারিখের হিসাব app.js এর মতোই (UTC অনুযায়ী YYYY-MM-DD), তাই হাজিরার সাথে মিলে যায়।
@@ -157,6 +158,40 @@
 .dash-gpa small{display:block;font-size:11.5px;font-weight:600;color:var(--mute)}
 .dash-note-txt{font-size:13px;color:var(--mute);line-height:1.6}
 
+.dash-who{display:flex;align-items:center;gap:12px;min-width:0}
+.dash-me{flex:none;width:46px;height:46px;border-radius:50%;background:rgba(255,255,255,.14);box-shadow:inset 0 0 0 2px rgba(224,176,79,.95);display:grid;place-items:center;font-weight:800;font-size:19px}
+.dash-cal-head,.dash-cal{display:grid;grid-template-columns:repeat(7,1fr);gap:6px}
+.dash-cal-head span{text-align:center;font-size:11px;font-weight:700;color:var(--mute);padding-bottom:2px}
+.dash-day{width:100%;max-width:40px;aspect-ratio:1;justify-self:center;border-radius:50%;display:grid;place-items:center;font-size:12.5px;font-weight:700;background:#f1f5f8;color:#94a3b8}
+.dash-day.p{background:linear-gradient(#14b8a6,#0f766e);color:#fff}
+.dash-day.a{background:#ef6b6b;color:#fff}
+.dash-day.f{background:none;box-shadow:inset 0 0 0 1px var(--line);color:#cbd5e1}
+.dash-day.t{box-shadow:0 0 0 2px #fff,0 0 0 4px var(--brass)}
+.dash-day.blank{visibility:hidden}
+.dash-legend .x{background:#dbe3ea}
+.dash-badge{display:inline-block;font-size:11.5px;font-weight:700;padding:3px 10px;border-radius:99px;white-space:nowrap}
+.dash-badge.ok{background:#dcfce7;color:var(--ok)}.dash-badge.warn{background:#fef3c7;color:var(--warn)}.dash-badge.bad{background:#fee2e2;color:var(--bad)}.dash-badge.mute{background:#eef2f5;color:var(--mute)}
+.dash-dot{display:inline-block;width:8px;height:8px;border-radius:50%;background:var(--brass);margin-right:6px;vertical-align:1px}
+.dash-diary-row{display:grid;grid-template-columns:34% 1fr;gap:10px;padding:10px 0;border-top:1px solid var(--line);font-size:13px;line-height:1.55;overflow-wrap:anywhere}
+.dash-diary-row b{font-weight:700;color:var(--pine)}
+.dash-diary-row span{color:#334155}
+.dash-res{display:flex;align-items:center;gap:14px}
+.dash-grade{flex:none;width:72px;height:72px;border-radius:22px;display:grid;place-items:center;font-size:28px;font-weight:800}
+.dash-res-meta{flex:1;min-width:0}
+.dash-res-exam{font-weight:800;font-size:14.5px;color:var(--pine);overflow-wrap:anywhere}
+.dash-res-sub{font-size:12px;color:var(--mute);margin-top:1px}
+.dash-res-nums{display:flex;gap:16px;margin-top:8px}
+.dash-res-nums span{font-size:11px;color:var(--mute);display:flex;flex-direction:column}
+.dash-res-nums b{font-size:17px;color:var(--ink);font-weight:800}
+.dash-subj-top{display:flex;justify-content:space-between;gap:8px;font-size:13px;margin-top:11px}
+.dash-subj-bar{height:7px;border-radius:99px;background:#eef2f5;overflow:hidden;margin-top:5px}
+.dash-subj-bar i{display:block;height:100%;border-radius:99px;transform-origin:left}
+.dash-anim .dash-subj-bar i{animation:dashFill 1s cubic-bezier(.22,1,.36,1) both}
+.dash-trend{margin-top:16px;padding-top:12px;border-top:1px solid var(--line)}
+.dash-spark{width:100%;height:auto;display:block;margin-top:6px}
+.dash-due{display:flex;justify-content:space-between;gap:10px;padding:9px 0;border-top:1px solid var(--line);font-size:13.5px}
+.dash-due b{color:var(--bad);font-size:13px}
+
 .more-sheet{max-height:70vh;overflow-y:auto}
 
 @media (max-width:360px){
@@ -200,6 +235,7 @@
   let watchTimer = null;
   let lastStudents = null;
   let meritClassPref = null;
+  let mode = 'teacher'; // এখন কোন ড্যাশবোর্ড খোলা: 'teacher' | 'student'
   const weekCache = {};
 
   const bn = n => toBanglaNumeral(n);
@@ -209,6 +245,12 @@
   const todayStr = () => new Date().toISOString().slice(0, 10);
   const money = n => '৳ ' + bn(Math.round(Number(n) || 0).toLocaleString('en-US'));
   const cmpBn = (a, b) => String(a).localeCompare(String(b), 'bn');
+  const fmtDay = ds => {
+    if (!ds) return '';
+    const p = String(ds).split('-').map(Number);
+    if (p.length !== 3 || p.some(isNaN)) return bn(ds);
+    return new Date(Date.UTC(p[0], p[1] - 1, p[2])).toLocaleDateString('bn-BD', { day: 'numeric', month: 'long', year: 'numeric', timeZone: 'UTC' });
+  };
 
   function dateOffset(off) {
     const p = todayStr().split('-').map(Number);
@@ -427,7 +469,7 @@
     const rows = shown.map(l => {
       const st = map[l.studentId];
       const name = st ? st.name : 'অজানা শিক্ষার্থী';
-      const meta = [st && st.className ? esc(st.className) : '', l.date ? esc(bn(l.date)) : ''].filter(Boolean).map(x => `<span>${x}</span>`).join(' &nbsp; ');
+      const meta = [st && st.className ? esc(st.className) : '', l.date ? esc(fmtDay(l.date)) : ''].filter(Boolean).map(x => `<span>${x}</span>`).join(' &nbsp; ');
       const id = esc(l.id);
       return `
       <div class="dash-leave">
@@ -774,6 +816,7 @@
 
   function render() {
     stop();
+    mode = 'teacher';
     const tok = token;
     S = { today: null, week: {}, leaves: null, feesM: null, feesO: null, notices: null, merit: null, errors: {}, done: {} };
     setScreen(screenHtml());
@@ -787,8 +830,516 @@
   window.stopTeacherDashboard = stop;
   window.dashRefresh = function () {
     Object.keys(weekCache).forEach(k => { delete weekCache[k]; });
-    render();
+    if (mode === 'student') window.renderStudentDashboard(); else render();
   };
+
+  // =====================================================================
+  //                    শিক্ষার্থীর হোম ড্যাশবোর্ড
+  // app.js এর শিক্ষার্থী-পাশের যে কোয়েরিগুলো আগে থেকেই চলছে, ঠিক সেগুলোই এখানে
+  // ব্যবহার করা হয়েছে (studentId দিয়ে ফিল্টার), তাই নতুন কোনো Firestore rule লাগে না।
+  // =====================================================================
+  let T = null; // শিক্ষার্থীর ড্যাশবোর্ডের ডেটা
+
+  const CAL_HEAD = ['শনি', 'রবি', 'সোম', 'মঙ্গল', 'বুধ', 'বৃহঃ', 'শুক্র'];
+  const monthLabel = ym => {
+    const p = ym.split('-').map(Number);
+    return new Date(Date.UTC(p[0], p[1] - 1, 1)).toLocaleDateString('bn-BD', { month: 'long', year: 'numeric', timeZone: 'UTC' });
+  };
+  const LEAVE_STATUS = {
+    pending: ['অপেক্ষমাণ', 'warn'],
+    approved: ['অনুমোদিত', 'ok'],
+    rejected: ['প্রত্যাখ্যাত', 'bad']
+  };
+
+  function stuScreenHtml() {
+    return `
+<div id="studentDashScreen" class="dash">
+  <section class="dash-hero">
+    <div class="dash-hero-top">
+      <div class="dash-who">
+        <div class="dash-me" id="sdAvatar">?</div>
+        <div>
+          <div class="dash-greet" id="sdName">আসসালামু আলাইকুম</div>
+          <div class="dash-date" id="sdMeta"></div>
+        </div>
+      </div>
+      <button class="dash-refresh" onclick="dashRefresh()" aria-label="নতুন করে লোড করুন">↻</button>
+    </div>
+    <div class="dash-hero-main">
+      <div class="dash-ring-wrap">
+        <svg class="dash-ring" viewBox="0 0 120 120" aria-hidden="true">
+          <circle class="dash-ring-bg" cx="60" cy="60" r="${RING_R}"/>
+          <circle id="sdRingFg" class="dash-ring-fg" cx="60" cy="60" r="${RING_R}" transform="rotate(-90 60 60)" stroke-dasharray="${RING_C}" stroke-dashoffset="${RING_C}"/>
+        </svg>
+        <div class="dash-ring-center">
+          <div class="dash-ring-pct"><span id="sdRingN">–</span><small id="sdRingU" style="display:none">%</small></div>
+          <div class="dash-ring-cap">এ মাসে</div>
+        </div>
+      </div>
+      <div class="dash-hero-stats">
+        <div class="dash-hs"><span><i class="p"></i>উপস্থিত দিন</span><b id="sdP">–</b></div>
+        <div class="dash-hs"><span><i class="a"></i>অনুপস্থিত দিন</span><b id="sdA">–</b></div>
+        <div class="dash-hs"><span><i class="u"></i>টানা উপস্থিতি</span><b id="sdS">–</b></div>
+      </div>
+    </div>
+    <div class="dash-hero-foot">
+      <div class="dash-hero-status" id="sdStatus">তথ্য লোড হচ্ছে...</div>
+      <button class="dash-cta" id="sdCta" style="display:none" onclick="studentTab('attendance')">সময় দিন</button>
+    </div>
+  </section>
+
+  <div class="dash-strip">
+    <button class="dash-cell" onclick="studentTab('results')"><b id="sdC_gpa">–</b><span>সর্বশেষ GPA</span></button>
+    <button class="dash-cell" onclick="studentTab('results')"><b id="sdC_rank">–</b><span>মেধাক্রম</span></button>
+    <button class="dash-cell" id="sdCell_due" onclick="studentTab('fees')"><b id="sdC_due">–</b><span>বকেয়া (টাকা)</span></button>
+    <button class="dash-cell" id="sdCell_new" onclick="studentTab('notices')"><b id="sdC_new">–</b><span>নতুন নোটিশ</span></button>
+  </div>
+
+  <div class="dash-actions">
+    <button class="dash-act main" onclick="studentTab('attendance')"><span class="dash-act-ic">\u23F0</span>বের হওয়ার সময়</button>
+    <button class="dash-act" onclick="studentTab('leaves')"><span class="dash-act-ic">\u{1F4C5}</span>ছুটির আবেদন</button>
+    <button class="dash-act" onclick="studentTab('fees')"><span class="dash-act-ic">\u{1F4B0}</span>বেতন</button>
+    <button class="dash-act" onclick="studentTab('suggestions')"><span class="dash-act-ic">\u{1F4AC}</span>পরামর্শ</button>
+  </div>
+
+  <section class="dash-sec attn" id="sdDiary">${skel(120)}</section>
+  <section class="dash-sec" id="sdCal">${skel(230)}</section>
+  <section class="dash-sec" id="sdResult">${skel(170)}</section>
+  <section class="dash-sec" id="sdFees">${skel(100)}</section>
+  <section class="dash-sec" id="sdNotices">${skel(80)}</section>
+  <section class="dash-sec" id="sdLeaves">${skel(80)}</section>
+</div>`;
+  }
+
+  // ---------- হিসাব ----------
+  function stuAttMap() {
+    const m = {};
+    (T.att || []).forEach(e => { if (e.date) m[e.date] = e; });
+    return m;
+  }
+  function stuAttSummary() {
+    const today = todayStr(), month = today.slice(0, 7);
+    const marked = (T.att || []).filter(e => e.date && e.date <= today && (e.status === 'present' || e.status === 'absent'));
+    let p = 0, a = 0;
+    marked.forEach(e => { if (e.date.startsWith(month)) { if (e.status === 'present') p++; else a++; } });
+    const desc = marked.slice().sort((x, y) => y.date.localeCompare(x.date));
+    let streak = 0;
+    for (let i = 0; i < desc.length; i++) { if (desc[i].status === 'present') streak++; else break; }
+    return { p, a, rate: (p + a) ? Math.round(p / (p + a) * 100) : null, streak };
+  }
+  function stuLatestResult() {
+    if (!T.results || !T.results.length) return null;
+    return T.results.slice().sort((a, b) => (b.date || '').localeCompare(a.date || ''))[0];
+  }
+  function stuDue() {
+    const items = [];
+    (T.feesM || []).slice().sort((a, b) => (b.month || '').localeCompare(a.month || '')).forEach(f => {
+      if (f.status !== 'paid') items.push({ label: f.month ? monthLabel(f.month) : 'মাসিক বেতন', amount: Number(f.amount) || 0 });
+    });
+    (T.feesO || []).forEach(f => {
+      if (f.status !== 'paid') items.push({ label: f.feeType || 'ফি', amount: Number(f.amount) || 0 });
+    });
+    const has = (T.feesM || []).length + (T.feesO || []).length > 0;
+    return { items, total: items.reduce((s, x) => s + x.amount, 0), has };
+  }
+  function stuUnread() {
+    const seen = Number(localStorage.getItem(typeof noticesSeenKey === 'function' ? noticesSeenKey() : 'x') || 0);
+    return (T.notices || []).filter(n => (n.createdAt || 0) > seen);
+  }
+
+  // ---------- হিরো ও স্ট্রিপ ----------
+  function updateStuHero() {
+    const ring = el('sdRingFg');
+    if (!ring) return;
+    const me = studentsCache.find(s => s.id === myStudentId);
+    if (me) {
+      el('sdName').textContent = me.name;
+      el('sdAvatar').textContent = Array.from(me.name || '?')[0];
+      el('sdMeta').innerHTML = [me.className ? esc(me.className) : '', me.roll ? 'রোল ' + esc(bn(me.roll)) : ''].filter(Boolean).join(' &nbsp; ');
+    }
+    const status = el('sdStatus'), cta = el('sdCta');
+    if (T.errors.att) { status.textContent = 'উপস্থিতির তথ্য লোড করা যায়নি'; cta.style.display = 'none'; return; }
+    if (!T.att) return;
+    const sm = stuAttSummary();
+    setNum('sdP', sm.p);
+    setNum('sdA', sm.a);
+    setNum('sdS', sm.streak);
+    const n = el('sdRingN'), u = el('sdRingU');
+    if (sm.rate == null) { n.textContent = '–'; delete n.dataset.val; u.style.display = 'none'; }
+    else { u.style.display = ''; setNum('sdRingN', sm.rate); }
+    ring.style.strokeDashoffset = sm.rate == null ? RING_C : RING_C * (1 - sm.rate / 100);
+
+    const te = stuAttMap()[todayStr()];
+    const left = te && te.timeLeftHome ? bn(te.timeLeftHome) : '';
+    let msg;
+    if (te && te.status === 'present') msg = 'আজ আপনি উপস্থিত' + (left ? ', বাসা থেকে বের হয়েছেন ' + left : '');
+    else if (te && te.status === 'absent') msg = 'আজ অনুপস্থিত হিসেবে চিহ্নিত' + (te.reason ? ' (' + trunc(te.reason, 30) + ')' : '');
+    else msg = 'আজকের হাজিরা এখনো নেওয়া হয়নি' + (left ? ', বের হওয়ার সময় ' + left : '');
+    status.textContent = msg;
+    cta.style.display = (left || (te && te.status === 'absent')) ? 'none' : '';
+  }
+
+  function updateStuStrip() {
+    if (!el('sdC_gpa')) return;
+    if (T.results) {
+      const r = stuLatestResult();
+      const has = r && Array.isArray(r.subjects) && r.subjects.length;
+      el('sdC_gpa').textContent = has ? bn(computeMarksheetTotals(r.subjects).gpa) : '–';
+      el('sdC_rank').textContent = r && r.meritRank ? banglaOrdinal(r.meritRank) : '–';
+    }
+    if (T.feesM && T.feesO) {
+      const d = stuDue();
+      const c = el('sdC_due');
+      if (d.has) { c.textContent = bn(Math.round(d.total).toLocaleString('en-US')); cellState('sdCell_due', d.total > 0 ? 'bad' : ''); }
+      else { c.textContent = '–'; cellState('sdCell_due', ''); }
+    }
+    if (T.notices) {
+      const n = stuUnread().length;
+      el('sdC_new').textContent = n >= 5 ? bn(5) + '+' : bn(n);
+      cellState('sdCell_new', n > 0 ? 'warn' : '');
+    }
+  }
+
+  // ---------- ডায়েরি ----------
+  function renderStuDiary() {
+    const box = el('sdDiary');
+    if (!box) return;
+    if (T.errors.diary) { box.classList.remove('attn'); box.innerHTML = errHtml('ডায়েরি'); return; }
+    if (!T.diary) return;
+    if (!T.diary.length) {
+      box.classList.remove('attn');
+      box.innerHTML = head('ডায়েরি') + emptyHtml('এখনো কোনো ডায়েরি দেওয়া হয়নি', 'শিক্ষক পড়া বা হোমওয়ার্ক দিলে এখানে দেখা যাবে।');
+      return;
+    }
+    box.classList.add('attn');
+    const r = T.diary[0];
+    const isToday = r.date === todayStr();
+    let rows = '';
+    let count = 0;
+    if (r.subjects && typeof r.subjects === 'object' && Object.keys(r.subjects).length) {
+      const known = DIARY_SUBJECTS.concat(LEGACY_DIARY_SUBJECTS);
+      const filled = known.filter(k => (r.subjects[k] || '').trim())
+        .concat(Object.keys(r.subjects).filter(k => known.indexOf(k) === -1 && (r.subjects[k] || '').trim()));
+      count = filled.length;
+      rows = filled.slice(0, 4).map(k => `<div class="dash-diary-row"><b>${esc(k)}</b><span>${esc(trunc(r.subjects[k], 90)).replace(/\n/g, '<br>')}</span></div>`).join('');
+      if (count > 4) rows += `<div class="dash-note-txt" style="padding-top:8px">আরও ${bn(count - 4)}টি বিষয় আছে</div>`;
+    } else {
+      rows = `<div class="dash-diary-row"><span style="grid-column:1/-1">${esc(trunc(r.text || '', 160)).replace(/\n/g, '<br>')}</span></div>`;
+    }
+    const day = (r.dayName ? esc(r.dayName) + ', ' : '') + esc(fmtDay(r.date));
+    const chip = isToday ? '<span class="dash-chip">আজকের</span>' : '';
+    const attach = r.attachmentDataUrl ? `<div class="dash-note-txt" style="padding-top:8px">\u{1F4CE} সংযুক্তি আছে, ডায়েরির পাতায় দেখুন</div>` : '';
+    box.innerHTML = head(isToday ? 'আজকের পড়া' : 'সর্বশেষ ডায়েরি', link('সব ডায়েরি', "studentTab('diary')"))
+      + `<div class="dash-exam">${day} ${chip}</div>` + rows + attach;
+  }
+
+  // ---------- ক্যালেন্ডার ----------
+  function renderStuCal() {
+    const box = el('sdCal');
+    if (!box) return;
+    if (T.errors.att) { box.innerHTML = errHtml('উপস্থিতি'); return; }
+    if (!T.att) return;
+    const today = todayStr();
+    const p = today.split('-').map(Number);
+    const y = p[0], m = p[1];
+    const days = new Date(Date.UTC(y, m, 0)).getUTCDate();
+    const startCol = (new Date(Date.UTC(y, m - 1, 1)).getUTCDay() + 1) % 7; // শনিবার থেকে শুরু
+    const map = stuAttMap();
+    let cells = '';
+    for (let i = 0; i < startCol; i++) cells += '<span class="dash-day blank"></span>';
+    for (let d = 1; d <= days; d++) {
+      const ds = y + '-' + String(m).padStart(2, '0') + '-' + String(d).padStart(2, '0');
+      const e = map[ds];
+      let cls = 'n';
+      if (ds > today) cls = 'f';
+      else if (e && e.status === 'present') cls = 'p';
+      else if (e && e.status === 'absent') cls = 'a';
+      cells += `<span class="dash-day ${cls}${ds === today ? ' t' : ''}">${bn(d)}</span>`;
+    }
+    const sm = stuAttSummary();
+    const chip = sm.rate != null ? `<span class="dash-chip">হার ${bn(sm.rate)}%</span>` : '';
+    const first = !T.done.cal;
+    T.done.cal = true;
+    box.classList.toggle('dash-anim', first);
+    box.innerHTML = head(monthLabel(today.slice(0, 7)), chip)
+      + `<div class="dash-cal-head">${CAL_HEAD.map(h => `<span>${h}</span>`).join('')}</div><div class="dash-cal">${cells}</div>`
+      + `<div class="dash-legend"><span><i class="g"></i>উপস্থিত</span><span><i class="l"></i>অনুপস্থিত</span><span><i class="x"></i>তথ্য নেই</span></div>`;
+  }
+
+  // ---------- রেজাল্ট ----------
+  function sparkline(vals) {
+    const W = 240, H = 58, padX = 16, padTop = 18, padBot = 6, n = vals.length;
+    const lo = Math.max(0, Math.min.apply(null, vals) - 0.5);
+    const hi = Math.min(5, Math.max.apply(null, vals) + 0.5);
+    const span = Math.max(0.5, hi - lo);
+    const pts = vals.map((v, i) => {
+      const x = n === 1 ? W / 2 : padX + i * (W - 2 * padX) / (n - 1);
+      const y = padTop + (1 - (Math.min(hi, Math.max(lo, v)) - lo) / span) * (H - padTop - padBot);
+      return [x, y, v];
+    });
+    const line = pts.map(q => q[0].toFixed(1) + ',' + q[1].toFixed(1)).join(' ');
+    const dots = pts.map((q, i) => {
+      const last = i === n - 1;
+      return `<circle cx="${q[0].toFixed(1)}" cy="${q[1].toFixed(1)}" r="${last ? 4.5 : 3.2}" fill="${last ? '#e0b04f' : '#fff'}" stroke="#0f766e" stroke-width="2"/>`
+        + `<text x="${q[0].toFixed(1)}" y="${Math.max(10, q[1] - 8).toFixed(1)}" text-anchor="middle" font-size="10" font-weight="700" fill="#64748b">${bn(Number(q[2]).toFixed(2))}</text>`;
+    }).join('');
+    return `<svg viewBox="0 0 ${W} ${H}" class="dash-spark" aria-hidden="true"><polyline points="${line}" fill="none" stroke="#0f766e" stroke-width="2.5" stroke-linecap="round" stroke-linejoin="round"/>${dots}</svg>`;
+  }
+
+  function renderStuResult() {
+    const box = el('sdResult');
+    if (!box) return;
+    const title = 'সর্বশেষ রেজাল্ট';
+    if (T.errors.results) { box.innerHTML = errHtml('রেজাল্ট'); return; }
+    if (!T.results) return;
+    const r = stuLatestResult();
+    if (!r) {
+      box.innerHTML = head(title) + emptyHtml('এখনো কোনো রেজাল্ট প্রকাশ করা হয়নি', 'শিক্ষক প্রকাশ করলে এখানে দেখতে পাবেন।');
+      return;
+    }
+    const more = link('পূর্ণ মার্কশিট', "studentTab('results')");
+    const has = Array.isArray(r.subjects) && r.subjects.length;
+    if (!has) {
+      box.innerHTML = head(title, more) + `<div class="dash-res-exam">${esc(r.examName || '')}</div><div class="dash-note-txt">প্রাপ্ত নম্বর: ${esc(bn(r.marks !== undefined ? r.marks : '-'))}</div>`;
+      return;
+    }
+    const t = computeMarksheetTotals(r.subjects);
+    const gc = gradeColor(t.grade);
+    const rank = r.meritRank ? `<span class="dash-chip">মেধাক্রম ${banglaOrdinal(r.meritRank)}${r.meritTotal ? ' / ' + bn(r.meritTotal) : ''}</span>` : '';
+    const fail = t.hasFailedSubject ? '<span class="dash-badge bad">অকৃতকার্য</span>' : '';
+    const shown = r.subjects.slice(0, 6);
+    const bars = shown.map((s, i) => {
+      const pct = s.full > 0 ? s.obtained / s.full * 100 : 0;
+      const sg = gradeFromPercent(pct);
+      return `<div class="dash-subj"><div class="dash-subj-top"><span>${esc(s.name)}</span><span><b>${bn(s.obtained)}</b>/${bn(s.full)} &nbsp;<em style="font-style:normal;color:${gradeColor(sg.grade).fg};font-weight:800">${esc(sg.grade)}</em></span></div>`
+        + `<div class="dash-subj-bar"><i style="width:${Math.max(3, Math.round(pct))}%;background:${gradeColor(sg.grade).fg};animation-delay:${i * 60}ms"></i></div></div>`;
+    }).join('');
+    const rest = r.subjects.length > shown.length ? `<div class="dash-note-txt" style="padding-top:10px">আরও ${bn(r.subjects.length - shown.length)}টি বিষয় মার্কশিটে আছে</div>` : '';
+
+    let trend = '';
+    const withSubj = T.results.filter(x => Array.isArray(x.subjects) && x.subjects.length).sort((a, b) => (a.date || '').localeCompare(b.date || '')).slice(-5);
+    if (withSubj.length >= 2) {
+      trend = `<div class="dash-trend"><div class="dash-exam">GPA-এর ধারা (সর্বশেষ ${bn(withSubj.length)}টি পরীক্ষা)</div>${sparkline(withSubj.map(x => Number(computeMarksheetTotals(x.subjects).gpa)))}</div>`;
+    }
+    const first = !T.done.result;
+    T.done.result = true;
+    box.classList.toggle('dash-anim', first);
+    box.innerHTML = head(title, more) + `
+      <div class="dash-res">
+        <div class="dash-grade" style="background:${gc.bg};color:${gc.fg}">${esc(t.grade)}</div>
+        <div class="dash-res-meta">
+          <div class="dash-res-exam">${esc(r.examName || '')}</div>
+          <div class="dash-res-sub">${r.academicYear ? 'শিক্ষাবর্ষ ' + esc(bn(r.academicYear)) : ''}</div>
+          <div class="dash-res-nums"><span><b>${bn(t.gpa)}</b>GPA</span><span><b>${bn(t.percentage)}%</b>শতাংশ</span><span><b>${bn(t.totalObtained)}</b>মোট নম্বর</span></div>
+        </div>
+      </div>
+      <div style="display:flex;gap:8px;flex-wrap:wrap;margin-top:12px">${rank}${fail}</div>
+      <div style="margin-top:6px">${bars}${rest}</div>${trend}`;
+  }
+
+  // ---------- বেতন ----------
+  function renderStuFees() {
+    const box = el('sdFees');
+    if (!box) return;
+    if (T.errors.feesM) { box.innerHTML = errHtml('বেতনের তথ্য'); return; }
+    if (!T.feesM || !T.feesO) return;
+    const month = todayStr().slice(0, 7);
+    const cur = T.feesM.find(f => f.month === month);
+    const chip = cur
+      ? `<span class="dash-badge ${cur.status === 'paid' ? 'ok' : 'bad'}">এ মাস: ${cur.status === 'paid' ? 'পরিশোধিত' : 'বকেয়া'}</span>`
+      : '<span class="dash-badge mute">এ মাস: হিসাব নেই</span>';
+    const d = stuDue();
+    const title = 'বেতন ও ফি';
+    if (!d.has) {
+      box.innerHTML = head(title, chip) + emptyHtml('বেতনের তথ্য এখনো যোগ করা হয়নি', 'শিক্ষক হিসাব লিখলে এখানে দেখতে পাবেন।');
+      return;
+    }
+    if (!d.items.length) {
+      box.innerHTML = head(title, chip) + `<div class="dash-empty"><div class="dash-empty-ic">\u2713</div><div><b>সব বেতন ও ফি পরিশোধিত</b></div></div>`;
+      return;
+    }
+    const rows = d.items.slice(0, 4).map(x => `<div class="dash-due"><span>${esc(x.label)}</span><b>${x.amount > 0 ? money(x.amount) : 'পরিমাণ নির্ধারিত নয়'}</b></div>`).join('');
+    const rest = d.items.length > 4 ? `<div class="dash-note-txt" style="padding-top:8px">আরও ${bn(d.items.length - 4)}টি বকেয়া আছে</div>` : '';
+    box.innerHTML = head(title, chip) + `
+      <div class="dash-fee-amt" style="color:var(--bad)">${money(d.total)}</div>
+      <div class="dash-fee-lbl">মোট বকেয়া (${bn(d.items.length)}টি)</div>
+      <div style="margin-top:10px">${rows}${rest}</div>`;
+  }
+
+  // ---------- নোটিশ ----------
+  function renderStuNotices() {
+    const box = el('sdNotices');
+    if (!box) return;
+    if (T.errors.notices) { box.innerHTML = errHtml('নোটিশ'); return; }
+    if (!T.notices) return;
+    if (!T.notices.length) { box.innerHTML = head('নোটিশ') + emptyHtml('এখনো কোনো নোটিশ নেই'); return; }
+    const seen = Number(localStorage.getItem(typeof noticesSeenKey === 'function' ? noticesSeenKey() : 'x') || 0);
+    const rows = T.notices.slice(0, 2).map(n => {
+      const d = n.createdAt ? new Date(n.createdAt).toLocaleDateString('bn-BD') : '';
+      const dot = (n.createdAt || 0) > seen ? '<i class="dash-dot"></i>' : '';
+      return `<div class="dash-note"><div class="dash-note-top"><b>${dot}${esc(n.title)}</b><span class="dash-note-date">${esc(d)}</span></div><p>${esc(trunc(n.body, 110))}</p></div>`;
+    }).join('');
+    box.innerHTML = head('সর্বশেষ নোটিশ', link('সব নোটিশ', "studentTab('notices')")) + `<div class="dash-note-list">${rows}</div>`;
+  }
+
+  // ---------- ছুটি ----------
+  function renderStuLeaves() {
+    const box = el('sdLeaves');
+    if (!box) return;
+    if (T.errors.leaves) { box.innerHTML = errHtml('ছুটির আবেদন'); return; }
+    if (!T.leaves) return;
+    const title = 'আমার ছুটির আবেদন';
+    if (!T.leaves.length) {
+      box.innerHTML = head(title) + emptyHtml('কোনো আবেদন করা হয়নি', '', 'ছুটির আবেদন করুন', "studentTab('leaves')");
+      return;
+    }
+    const list = T.leaves.slice().sort((a, b) => (b.createdAt || 0) - (a.createdAt || 0)).slice(0, 2);
+    const rows = list.map(l => {
+      const st = LEAVE_STATUS[l.status || 'pending'] || LEAVE_STATUS.pending;
+      return `<div class="dash-note"><div class="dash-note-top"><b>${esc(fmtDay(l.date))}</b><span class="dash-badge ${st[1]}">${st[0]}</span></div><p>${esc(trunc(l.reason, 90))}</p></div>`;
+    }).join('');
+    box.innerHTML = head(title, link('নতুন আবেদন', "studentTab('leaves')")) + `<div class="dash-note-list">${rows}</div>`;
+  }
+
+  function refreshStuAll() {
+    updateStuHero();
+    updateStuStrip();
+    renderStuDiary();
+    renderStuCal();
+    renderStuResult();
+    renderStuFees();
+    renderStuNotices();
+    renderStuLeaves();
+  }
+
+  // ---------- ডেটা ----------
+  function stuFail(tok, key, err) {
+    if (tok !== token || !T) return;
+    T.errors[key] = true;
+    console.error('[dashboard/student]', key, err);
+    if (typeof showDiagBanner === 'function') showDiagBanner('শিক্ষার্থী ড্যাশবোর্ড (' + key + ') লোড এরর: ' + (err && err.code ? err.code + ' ' : '') + (err && err.message));
+    refreshStuAll();
+  }
+
+  function ensureStuDiary(tok) {
+    if (!T || T.diaryStarted) return;
+    const me = studentsCache.find(s => s.id === myStudentId);
+    if (!me) return; // শিক্ষার্থী তালিকা লোড হওয়ার অপেক্ষা
+    if (!me.className) { T.diary = []; renderStuDiary(); T.diaryStarted = true; return; }
+    T.diaryStarted = true;
+    unsubs.push(db.collection('diary').where('madrasaId', '==', madrasaId).where('className', '==', me.className).orderBy('createdAt', 'desc').limit(3)
+      .onSnapshot(snap => {
+        if (tok !== token || !T) return;
+        T.diary = snap.docs.map(d => d.data());
+        delete T.errors.diary;
+        renderStuDiary();
+      }, err => stuFail(tok, 'diary', err)));
+  }
+
+  function startStudent(tok) {
+    const sid = myStudentId, mid = madrasaId;
+    const alive = () => tok === token && T && el('studentDashScreen');
+
+    unsubs.push(db.collection('attendance').where('studentId', '==', sid)
+      .onSnapshot(snap => {
+        if (!alive()) return;
+        T.att = snap.docs.map(d => d.data());
+        delete T.errors.att;
+        updateStuHero(); renderStuCal();
+      }, err => stuFail(tok, 'att', err)));
+
+    unsubs.push(db.collection('results').where('studentId', '==', sid).where('published', '==', true)
+      .onSnapshot(snap => {
+        if (!alive()) return;
+        T.results = snap.docs.map(d => d.data());
+        delete T.errors.results;
+        updateStuStrip(); renderStuResult();
+      }, err => stuFail(tok, 'results', err)));
+
+    unsubs.push(db.collection('fees_monthly').where('studentId', '==', sid)
+      .onSnapshot(snap => {
+        if (!alive()) return;
+        T.feesM = snap.docs.map(d => d.data());
+        delete T.errors.feesM;
+        updateStuStrip(); renderStuFees();
+      }, err => stuFail(tok, 'feesM', err)));
+
+    unsubs.push(db.collection('fees_onetime').where('studentId', '==', sid)
+      .onSnapshot(snap => {
+        if (!alive()) return;
+        T.feesO = snap.docs.map(d => d.data());
+        updateStuStrip(); renderStuFees();
+      }, err => {
+        if (tok !== token || !T) return;
+        console.error('[dashboard/student] feesO', err);
+        T.feesO = []; updateStuStrip(); renderStuFees();
+      }));
+
+    unsubs.push(db.collection('notices').where('madrasaId', '==', mid).orderBy('createdAt', 'desc').limit(5)
+      .onSnapshot(snap => {
+        if (!alive()) return;
+        T.notices = snap.docs.map(d => d.data());
+        delete T.errors.notices;
+        updateStuStrip(); renderStuNotices();
+      }, err => stuFail(tok, 'notices', err)));
+
+    unsubs.push(db.collection('leaves').where('studentId', '==', sid)
+      .onSnapshot(snap => {
+        if (!alive()) return;
+        T.leaves = snap.docs.map(d => d.data());
+        delete T.errors.leaves;
+        renderStuLeaves();
+      }, err => stuFail(tok, 'leaves', err)));
+
+    ensureStuDiary(tok);
+
+    // শিক্ষার্থী তালিকা (নাম/শ্রেণি) দেরিতে এলে হিরো ও ডায়েরি হালনাগাদ করা
+    lastStudents = studentsCache;
+    watchTimer = setInterval(() => {
+      if (!alive()) { stop(); return; }
+      if (studentsCache !== lastStudents) {
+        lastStudents = studentsCache;
+        updateStuHero();
+        ensureStuDiary(tok);
+      }
+    }, 600);
+  }
+
+  function renderStudent() {
+    stop();
+    mode = 'student';
+    const tok = token;
+    T = { att: null, results: null, feesM: null, feesO: null, notices: null, leaves: null, diary: null, diaryStarted: false, errors: {}, done: {} };
+    setScreen(stuScreenHtml());
+    updateStuHero();
+    startStudent(tok);
+  }
+  window.renderStudentDashboard = renderStudent;
+
+  // নিচের মেনু: "হোম" যোগ, "নোটিশ" চলে যায় "আরও" মেনুতে (নোটিশের নতুন-সংখ্যা সেখানেও দেখা যায়)
+  if (typeof studentPrimaryTabs !== 'undefined' && !studentPrimaryTabs.some(t => t.key === 'home')) {
+    studentPrimaryTabs.unshift({ key: 'home', label: 'হোম', icon: '\u{1F3E0}' });
+    const ni = studentPrimaryTabs.findIndex(t => t.key === 'notices');
+    if (ni > -1) studentMoreTabs.unshift(studentPrimaryTabs.splice(ni, 1)[0]);
+  }
+
+  const origStudentTab = window.studentTab;
+  if (typeof origStudentTab === 'function') {
+    window.studentTab = function (tab) {
+      stop();
+      if (tab === 'home') {
+        currentStudentTab = 'home';
+        renderStudentNav('home');
+        renderStudent();
+        return;
+      }
+      return origStudentTab.apply(this, arguments);
+    };
+    window.showStudentApp = function () {
+      startUnreadListeners();
+      window.studentTab('home');
+    };
+  }
 
   // ================= app.js এর সাথে জোড়া লাগানো =================
   const origTeacherTab = window.teacherTab;
