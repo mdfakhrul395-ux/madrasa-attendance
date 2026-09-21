@@ -1228,6 +1228,7 @@ function loadAttendanceCell(s, date) {
           <button class="small ${d.status==='present'?'':'secondary'}" onclick="setAttendance('${s.id}','${date}','present')">উপস্থিত</button>
           <button class="small ${d.status==='absent'?'danger':'secondary'}" onclick="setAttendance('${s.id}','${date}','absent')">অনুপস্থিত</button>
         </div>
+        <div id="waRow_${s.id}" style="margin-top:8px;"></div>
         <div class="muted" style="margin-top:8px;">
           বাসা থেকে বের হওয়ার সময়: <b>${d.timeLeftHome ? d.timeLeftHome : 'এখনো শিক্ষার্থী নিজে সেট করেনি'}</b>
           <div style="font-size:11px;">(শুধু শিক্ষার্থী নিজে এটি একবার সেট করতে পারে, শিক্ষক পরিবর্তন করতে পারবেন না)</div>
@@ -1235,6 +1236,7 @@ function loadAttendanceCell(s, date) {
         <label>অনুপস্থিতির কারণ (যদি থাকে)</label>
         <input value="${d.reason||''}" onchange="updateAttField('${s.id}','${date}','reason',this.value)">
       `;
+      updateWaRow(s.id, d.status);
     })
     .catch(e => {
       if (settled) return;
@@ -1345,6 +1347,70 @@ function updateAttendanceButtonsUI(studentId, status) {
   const buttons = cell.querySelectorAll('.row button');
   if (buttons[0]) buttons[0].className = 'small' + (status === 'present' ? '' : ' secondary');
   if (buttons[1]) buttons[1].className = 'small' + (status === 'absent' ? ' danger' : ' secondary');
+  updateWaRow(studentId, status);
+}
+
+// ================= অনুপস্থিত শিক্ষার্থীর অভিভাবককে বার্তা (WhatsApp / SMS) =================
+// শিক্ষক "অভিভাবককে জানান" চাপলে WhatsApp (বা নম্বরে WhatsApp না থাকলে SMS) খোলে, বার্তা আগে থেকেই লেখা থাকে।
+// শিক্ষক পাঠানোর আগে বার্তা বদলাতে পারেন; অ্যাপ নিজে কিছু পাঠায় না। ফোন নম্বর আসে student_contacts থেকে
+// (শুধু শিক্ষকের অ্যাকাউন্ট পড়তে পারে), তাই এটি শুধু শিক্ষকের পাশেই কাজ করে।
+function absentMessageText(student, date, reason) {
+  const inst = (appSettings && appSettings.madrasaName) ? appSettings.madrasaName : 'মাদরাসা';
+  let when;
+  if (date === todayLocal()) when = 'আজ';
+  else {
+    const p = String(date).split('-').map(Number);
+    let label = date;
+    try { label = new Date(p[0], p[1] - 1, p[2]).toLocaleDateString('bn-BD', { day: 'numeric', month: 'long', year: 'numeric' }); } catch (e) { /* ignore */ }
+    when = label + ' তারিখে';
+  }
+  const cls = student.className ? ' (' + student.className + ')' : '';
+  const why = reason && String(reason).trim() ? ' কারণ: ' + String(reason).trim() + '।' : '';
+  return 'আসসালামু আলাইকুম। ' + inst + '-এর পক্ষ থেকে জানাচ্ছি, আপনার সন্তান ' + student.name + cls + ' ' + when + ' মাদরাসায় অনুপস্থিত ছিল।' + why + ' অনুগ্রহ করে বিষয়টি জানাবেন। জাযাকুমুল্লাহু খাইরান।';
+}
+
+// বাটনের HTML: WhatsApp থাকলে 💬, শুধু নম্বর থাকলে SMS, কিছুই না থাকলে ছোট নোট
+function absentMessageButtonHtml(studentId, date, reason) {
+  const c = studentContactsCache[studentId] || {};
+  const phone = (c.phone || '').trim();
+  const safeReason = encodeURIComponent(reason || '').replace(/'/g, '%27');
+  const args = "'" + studentId + "','" + date + "',decodeURIComponent('" + safeReason + "')";
+  if (phone && c.hasWhatsapp) return '<button class="small" onclick="openAbsentMessage(' + args + ')">💬 অভিভাবককে জানান</button>';
+  if (phone) return '<button class="small secondary" onclick="openAbsentMessage(' + args + ')">📱 SMS পাঠান</button>';
+  return '<span class="muted" style="font-size:12px;">মোবাইল নম্বর নেই</span>';
+}
+
+// উপস্থিতির কার্ডে: অনুপস্থিত হলে বাটন দেখায়, নইলে খালি
+function updateWaRow(studentId, status) {
+  const row = document.getElementById('waRow_' + studentId);
+  if (!row) return;
+  if (status !== 'absent') { row.innerHTML = ''; return; }
+  row.innerHTML = absentMessageButtonHtml(studentId, '', '');
+}
+
+// date/reason না দিলে (উপস্থিতির কার্ড থেকে) বর্তমান তারিখ ও কারণের ঘর থেকে নেয়
+function openAbsentMessage(studentId, date, reason) {
+  const student = studentsCache.find(s => s.id === studentId);
+  if (!student) return alert('শিক্ষার্থী খুঁজে পাওয়া যায়নি');
+  const c = studentContactsCache[studentId] || {};
+  const phone = (c.phone || '').trim();
+  if (!phone) return alert('এই শিক্ষার্থীর মোবাইল নম্বর দেওয়া নেই। "শিক্ষার্থী" ট্যাব থেকে নম্বর যোগ করুন।');
+
+  if (!date) {
+    const dateEl = document.getElementById('attDate');
+    date = dateEl ? dateEl.value : todayLocal();
+  }
+  if (reason === undefined) {
+    const cell = document.getElementById('att_' + studentId);
+    const input = cell ? cell.querySelector('input') : null;
+    reason = input ? input.value : '';
+  }
+  const text = absentMessageText(student, date, reason);
+  if (c.hasWhatsapp) {
+    window.open('https://wa.me/' + normalizePhoneForWhatsapp(phone) + '?text=' + encodeURIComponent(text), '_blank');
+  } else {
+    window.location.href = 'sms:' + phone.replace(/[^0-9+]/g, '') + '?body=' + encodeURIComponent(text);
+  }
 }
 
 function updateAttField(studentId, date, field, value) {
@@ -2221,6 +2287,7 @@ function loadDailyReport() {
             <td style="padding:6px;border:1px solid #ddd;text-align:center;"><span class="badge ${badgeClass}">${statusText}</span></td>
             <td style="padding:6px;border:1px solid #ddd;">${d.timeLeftHome || '-'}</td>
             <td style="padding:6px;border:1px solid #ddd;">${d.reason || '-'}</td>
+            <td class="no-print" style="padding:6px;border:1px solid #ddd;text-align:center;">${status === 'absent' ? absentMessageButtonHtml(s.id, date, d.reason || '') : ''}</td>
           </tr>
         `;
       }).join('');
@@ -2242,6 +2309,7 @@ function loadDailyReport() {
                 <th style="padding:6px;border:1px solid #ddd;">অবস্থা</th>
                 <th style="padding:6px;border:1px solid #ddd;">বের হওয়ার সময়</th>
                 <th style="padding:6px;border:1px solid #ddd;">কারণ</th>
+                <th class="no-print" style="padding:6px;border:1px solid #ddd;">বার্তা</th>
               </tr>
             </thead>
             <tbody>${rows}</tbody>
