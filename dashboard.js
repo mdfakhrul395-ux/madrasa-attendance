@@ -14,7 +14,9 @@
  *   - "সেটিংস" ও "পরামর্শ" ট্যাব শুধু অ্যাডমিনের জন্য
  *   - নিজের CSS নিজেই যুক্ত করে (style.css বদলাতে হয় না)
  *
- * তারিখের হিসাব app.js এর মতোই (UTC অনুযায়ী YYYY-MM-DD), তাই হাজিরার সাথে মিলে যায়।
+ * তারিখের হিসাব app.js এর todayLocal() এর মতোই (ফোনের নিজস্ব সময় অনুযায়ী YYYY-MM-DD),
+ * তাই হাজিরার সাথে মিলে যায়। আগে এখানে UTC তারিখ ব্যবহার হতো, যার ফলে বাংলাদেশে
+ * রাত ১২টা থেকে ভোর ৬টা পর্যন্ত ড্যাশবোর্ডে আগের দিনের তারিখ ও হাজিরা দেখাত।
  */
 (function () {
   'use strict';
@@ -274,7 +276,11 @@
   const el = id => document.getElementById(id);
   const esc = s => String(s == null ? '' : s).replace(/[&<>"']/g, c => ({ '&': '&amp;', '<': '&lt;', '>': '&gt;', '"': '&quot;', "'": '&#39;' }[c]));
   const trunc = (s, n) => { const a = Array.from(String(s || '')); return a.length > n ? a.slice(0, n).join('') + '…' : a.join(''); };
-  const todayStr = () => new Date().toISOString().slice(0, 10);
+  // আজকের তারিখ, ফোনের নিজস্ব (বাংলাদেশ) সময় অনুযায়ী — app.js এর todayLocal() এর মতোই
+  const todayStr = () => {
+    const d = new Date();
+    return d.getFullYear() + '-' + String(d.getMonth() + 1).padStart(2, '0') + '-' + String(d.getDate()).padStart(2, '0');
+  };
   const money = n => '৳ ' + bn(Math.round(Number(n) || 0).toLocaleString('en-US'));
   const cmpBn = (a, b) => String(a).localeCompare(String(b), 'bn');
   // অ্যাডমিন শিক্ষক (এবং সুপার অ্যাডমিন)। সাধারণ শিক্ষক শিক্ষার্থী শুধু যোগ করতে পারেন, সংশোধন বা মুছতে পারেন না
