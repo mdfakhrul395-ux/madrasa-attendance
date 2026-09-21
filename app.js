@@ -2151,12 +2151,14 @@ function renderReportScreen() {
       <div class="row" style="margin-bottom:10px;">
         <button class="small ${reportMode==='daily' ? '' : 'secondary'}" onclick="switchReportMode('daily')">দৈনিক রিপোর্ট</button>
         <button class="small ${reportMode==='monthly' ? '' : 'secondary'}" onclick="switchReportMode('monthly')">মাসিক রিপোর্ট</button>
+        <button class="small ${reportMode==='summary' ? '' : 'secondary'}" onclick="switchReportMode('summary')">মাসিক সারাংশ</button>
       </div>
       <div id="reportControlsWrap"></div>
     </div>
     <div id="reportResultWrap"></div>
   `);
   if (reportMode === 'daily') renderDailyReportControls();
+  else if (reportMode === 'summary') renderSummaryReportControls();
   else renderMonthlyReportControls();
 }
 
@@ -2186,6 +2188,7 @@ function onReportDateChange(value) {
 function onReportClassFilterChange(value) {
   reportClassFilter = value;
   if (reportMode === 'daily') loadDailyReport();
+  else if (reportMode === 'summary') loadSummaryReport();
   else { populateReportStudentSelect(); loadMonthlyReport(); }
 }
 
@@ -2273,7 +2276,8 @@ function renderMonthlyReportControls() {
 
 function onReportMonthChange(value) {
   reportMonth = value;
-  loadMonthlyReport();
+  if (reportMode === 'summary') loadSummaryReport();
+  else loadMonthlyReport();
 }
 
 function populateReportStudentSelect() {
@@ -2372,6 +2376,131 @@ function loadMonthlyReport() {
       resultWrap.innerHTML = '<div class="card"><p class="muted">লোড করতে সমস্যা হয়েছে: ' + e.message + '</p></div>';
       if (e.code !== 'permission-denied') showDiagBanner('মাসিক রিপোর্ট এরর: ' + e.message);
     });
+}
+
+// -- মাসিক সারাংশ (পুরো শ্রেণির সবার একসাথে) --
+// বাছাই করা মাস ও শ্রেণির প্রতিটি শিক্ষার্থীর উপস্থিত/অনুপস্থিত দিন ও উপস্থিতির হার একটি তালিকায়।
+// "কার্যদিবস" = সেই মাসের যে যে দিনে অন্তত একজনের হাজিরা নেওয়া হয়েছে।
+// হাজিরা আনা হয় প্রতিদিনের জন্য আলাদা কোয়েরিতে (madrasaId + date), যা অতিরিক্ত ইনডেক্স ছাড়াই চলে।
+let summaryLoadToken = 0;
+
+function renderSummaryReportControls() {
+  const controlsWrap = document.getElementById('reportControlsWrap');
+  if (!controlsWrap) return;
+  controlsWrap.innerHTML = `
+    <label>মাস</label>
+    <input type="month" id="reportMonthInput" value="${reportMonth}" onchange="onReportMonthChange(this.value)">
+    <div id="reportClassFilterWrap"></div>
+  `;
+  document.getElementById('reportClassFilterWrap').innerHTML = classFilterDropdownHtml(reportClassFilter, 'onReportClassFilterChange');
+  loadSummaryReport();
+}
+
+function loadSummaryReport() {
+  const resultWrap = document.getElementById('reportResultWrap');
+  if (!resultWrap) return;
+  const students = studentsByClass(reportClassFilter);
+  if (students.length === 0) { resultWrap.innerHTML = '<div class="card"><p class="muted">কোনো শিক্ষার্থী নেই</p></div>'; return; }
+  const month = reportMonth; // 'YYYY-MM'
+  if (!/^\d{4}-\d{2}$/.test(month)) { resultWrap.innerHTML = '<div class="card"><p class="muted">মাস বাছাই করুন</p></div>'; return; }
+
+  const myToken = ++summaryLoadToken;
+  resultWrap.innerHTML = '<div class="card"><p class="muted">লোড হচ্ছে...</p></div>';
+
+  const y = Number(month.slice(0, 4)), m = Number(month.slice(5, 7));
+  const daysInMonth = new Date(y, m, 0).getDate();
+  const today = todayLocal();
+  const dates = [];
+  for (let d = 1; d <= daysInMonth; d++) {
+    const ds = month + '-' + String(d).padStart(2, '0');
+    if (ds <= today) dates.push(ds); // ভবিষ্যতের দিন বাদ
+  }
+  if (dates.length === 0) { resultWrap.innerHTML = '<div class="card"><p class="muted">এই মাস এখনো শুরু হয়নি</p></div>'; return; }
+
+  Promise.all(dates.map(ds =>
+    db.collection('attendance').where('madrasaId', '==', madrasaId).where('date', '==', ds).get()
+  )).then(snaps => {
+    if (myToken !== summaryLoadToken) return; // মাঝপথে মাস/শ্রেণি বদলালে পুরনো ফলাফল বাদ
+    const ids = {};
+    students.forEach(s => { ids[s.id] = { p: 0, a: 0 }; });
+    const workDays = {};
+    snaps.forEach((snap, i) => {
+      snap.docs.forEach(doc => {
+        const x = doc.data();
+        const rec = ids[x.studentId];
+        if (!rec) return; // অন্য শ্রেণির শিক্ষার্থী
+        if (x.status === 'present') { rec.p++; workDays[dates[i]] = true; }
+        else if (x.status === 'absent') { rec.a++; workDays[dates[i]] = true; }
+      });
+    });
+    const workCount = Object.keys(workDays).length;
+
+    const rows = students.slice().sort((a, b) => {
+      const ca = String(a.className || ''), cb = String(b.className || '');
+      if (ca !== cb) return ca.localeCompare(cb, 'bn');
+      const ra = Number(a.roll), rb = Number(b.roll);
+      if (!isNaN(ra) && !isNaN(rb) && ra !== rb) return ra - rb;
+      return String(a.name).localeCompare(String(b.name), 'bn');
+    }).map(s => {
+      const r = ids[s.id];
+      const marked = r.p + r.a;
+      const rate = marked > 0 ? Math.round((r.p / marked) * 1000) / 10 : null;
+      return { s, p: r.p, a: r.a, marked, rate };
+    });
+
+    const rated = rows.filter(r => r.rate !== null);
+    const avg = rated.length ? Math.round(rated.reduce((sum, r) => sum + r.rate, 0) / rated.length * 10) / 10 : null;
+    const lowCount = rated.filter(r => r.rate < 75).length;
+
+    const body = rows.map(r => {
+      const color = r.rate === null ? '#64748b' : r.rate < 75 ? '#b91c1c' : r.rate < 90 ? '#b45309' : '#15803d';
+      return `
+        <tr>
+          <td style="padding:6px;border:1px solid #ddd;">${r.s.roll || '-'}</td>
+          <td style="padding:6px;border:1px solid #ddd;">${r.s.name}</td>
+          <td style="padding:6px;border:1px solid #ddd;">${r.s.className || '-'}</td>
+          <td style="padding:6px;border:1px solid #ddd;text-align:center;">${r.p}</td>
+          <td style="padding:6px;border:1px solid #ddd;text-align:center;">${r.a}</td>
+          <td style="padding:6px;border:1px solid #ddd;text-align:center;font-weight:bold;color:${color};">${r.rate === null ? '-' : r.rate + '%'}</td>
+        </tr>`;
+    }).join('');
+
+    resultWrap.innerHTML = `
+      <style id="reportPrintStyle">
+        @media print { #bottomNav, .no-print { display: none !important; } }
+      </style>
+      <div class="card" id="reportPrintArea">
+        <h2 style="text-align:center;margin-bottom:2px;">মাসিক উপস্থিতির সারাংশ</h2>
+        <p class="muted" style="text-align:center;margin-top:0;">মাস: ${month}${reportClassFilter !== 'all' ? ' | শ্রেণি: ' + reportClassFilter : ''}</p>
+        <p style="text-align:center;">শিক্ষার্থী: <b>${students.length}</b> &nbsp; কার্যদিবস: <b>${workCount}</b> &nbsp; গড় উপস্থিতি: <b>${avg === null ? '-' : avg + '%'}</b></p>
+        ${lowCount ? `<p style="text-align:center;color:#b91c1c;font-size:13px;">৭৫% এর কম উপস্থিতি: <b>${lowCount}</b> জন</p>` : ''}
+        ${workCount === 0 ? '<p class="muted" style="text-align:center;">এই মাসে এখনো কোনো হাজিরা নেওয়া হয়নি</p>' : ''}
+        <div style="overflow-x:auto;">
+          <table style="width:100%;border-collapse:collapse;margin-top:10px;">
+            <thead>
+              <tr>
+                <th style="padding:6px;border:1px solid #ddd;">রোল</th>
+                <th style="padding:6px;border:1px solid #ddd;">নাম</th>
+                <th style="padding:6px;border:1px solid #ddd;">শ্রেণি</th>
+                <th style="padding:6px;border:1px solid #ddd;">উপস্থিত</th>
+                <th style="padding:6px;border:1px solid #ddd;">অনুপস্থিত</th>
+                <th style="padding:6px;border:1px solid #ddd;">হার</th>
+              </tr>
+            </thead>
+            <tbody>${body}</tbody>
+          </table>
+        </div>
+        <p class="muted" style="font-size:12px;margin-top:8px;">হার = উপস্থিত ÷ (উপস্থিত + অনুপস্থিত)। যেদিন কারও হাজিরা নেওয়া হয়নি, সেদিন তার হিসাবে ধরা হয়নি।</p>
+        <div class="no-print" style="margin-top:14px;text-align:center;">
+          <button onclick="window.print()">🖨️ প্রিন্ট করুন</button>
+        </div>
+      </div>
+    `;
+  }).catch(e => {
+    if (myToken !== summaryLoadToken) return;
+    resultWrap.innerHTML = '<div class="card"><p class="muted">লোড করতে সমস্যা হয়েছে: ' + e.message + '</p></div>';
+    if (e.code !== 'permission-denied') showDiagBanner('মাসিক সারাংশ এরর: ' + e.message);
+  });
 }
 
 // ---- Notices (shared, realtime) ----
