@@ -1,3 +1,13 @@
+// বাংলাদেশ/ডিভাইসের লোকাল তারিখ (UTC নয়) — 'YYYY-MM-DD'
+// আগে new Date().toISOString().slice(0,10) ব্যবহার হতো, যা UTC তারিখ দেয়।
+// ফলে বাংলাদেশে রাত ১২টা–ভোর ৬টা পর্যন্ত আগের দিনের তারিখ দেখাত।
+function todayLocal() {
+  const d = new Date();
+  return d.getFullYear() + '-' +
+    String(d.getMonth() + 1).padStart(2, '0') + '-' +
+    String(d.getDate()).padStart(2, '0');
+}
+
 // ================= MULTI-TENANT: MADRASA ID =================
 // Each madrasa gets its own link like yourapp.com/?m=abc123 — opening that
 // link once saves the id to this device permanently (localStorage). Existing
@@ -96,14 +106,14 @@ let feesClassFilter = 'all';
 
 // fees (বেতন) state
 let feesMode = 'monthly'; // 'monthly' | 'onetime'
-let feesMonth = new Date().toISOString().slice(0,7); // 'YYYY-MM'
+let feesMonth = todayLocal().slice(0,7); // 'YYYY-MM'
 let currentFeesIsTeacher = true;
 
 // attendance report state (daily/monthly)
 let reportClassFilter = 'all';
 let reportMode = 'daily'; // 'daily' | 'monthly'
-let reportDate = new Date().toISOString().slice(0,10);
-let reportMonth = new Date().toISOString().slice(0,7); // 'YYYY-MM'
+let reportDate = todayLocal();
+let reportMonth = todayLocal().slice(0,7); // 'YYYY-MM'
 let reportStudentId = '';
 
 // marksheet entry state (teacher side, in-progress subject rows before save)
@@ -1135,7 +1145,7 @@ function deleteStudent(id) {
 
 // ---- Attendance (teacher marks, shared) ----
 function renderAttendanceScreen() {
-  const today = new Date().toISOString().slice(0,10);
+  const today = todayLocal();
   setScreen(`
     <div id="attendanceScreen">
       <div class="card">
@@ -1283,7 +1293,7 @@ function updateAttField(studentId, date, field, value) {
 // afterward). This is enforced server-side in firestore.rules; the UI here
 // just reflects that by showing an input only when nothing is saved yet.
 function renderMyAttendance() {
-  const today = new Date().toISOString().slice(0,10);
+  const today = todayLocal();
   setScreen(`
     <div class="card">
       <h2>আজ বাসা থেকে বের হওয়ার সময়</h2>
@@ -1345,7 +1355,7 @@ function loadMyTimeLeftBox(today) {
 }
 
 function submitMyTimeLeft() {
-  const today = new Date().toISOString().slice(0,10);
+  const today = todayLocal();
   const input = document.getElementById('myTimeLeft');
   const value = input ? input.value : '';
   if (!value) return alert('সময় নির্বাচন করুন');
@@ -1370,7 +1380,7 @@ function submitMyTimeLeft() {
 function renderLeavesScreen(isTeacher) {
   let html = '';
   if (!isTeacher) {
-    const today = new Date().toISOString().slice(0,10);
+    const today = todayLocal();
     html += `
       <div class="card">
         <h2>ছুটির আবেদন করুন</h2>
@@ -1839,7 +1849,7 @@ function saveMarksheet() {
       grade,
       gpa,
       published: existingPublished,
-      date: new Date().toISOString().slice(0,10)
+      date: todayLocal()
     });
   }).then(() => {
     currentMarksheetSubjects = [];
@@ -2032,7 +2042,7 @@ function printMarksheet() {
 
 // ---- Time left home report (teacher) ----
 function renderTimeLeftScreen() {
-  const today = new Date().toISOString().slice(0,10);
+  const today = todayLocal();
   setScreen(`
     <div class="card">
       <h2>বের হওয়ার সময় রিপোর্ট</h2>
@@ -2430,7 +2440,7 @@ function renderDiaryScreen(isTeacher) {
   if (isTeacher) {
     const classes = getClassList();
     const classOpts = classes.map(c => `<option value="${c}">${c}</option>`).join('');
-    const today = new Date().toISOString().slice(0,10);
+    const today = todayLocal();
     html += `
       <div class="card">
         <h2>নতুন ডায়েরি এন্ট্রি</h2>
@@ -3010,7 +3020,7 @@ function updateFeeAmount(studentId, month, value) {
 // already fixed for the attendance present/absent buttons.
 function setFeeStatus(studentId, month, status) {
   const data = { studentId, month, madrasaId, status };
-  if (status === 'paid') data.paidDate = new Date().toISOString().slice(0,10);
+  if (status === 'paid') data.paidDate = todayLocal();
   db.collection('fees_monthly').doc(studentId + '_' + month).set(data, { merge: true })
     .then(() => updateFeeCellUI(studentId, status, data.paidDate))
     .catch(e => showDiagBanner('বেতন স্ট্যাটাস আপডেট ব্যর্থ: ' + e.message));
@@ -3097,7 +3107,7 @@ function addOnetimeFee() {
   if (!feeType) { if (errEl) errEl.textContent = 'ফি এর ধরন লিখুন'; return; }
   if (!amount || amount <= 0) { if (errEl) errEl.textContent = 'সঠিক পরিমাণ দিন'; return; }
   db.collection('fees_onetime').add({
-    madrasaId, studentId, feeType, amount, status: 'due', date: new Date().toISOString().slice(0,10), createdAt: Date.now()
+    madrasaId, studentId, feeType, amount, status: 'due', date: todayLocal(), createdAt: Date.now()
   }).then(() => {
     document.getElementById('onetimeFeeType').value = '';
     document.getElementById('onetimeAmount').value = '';
