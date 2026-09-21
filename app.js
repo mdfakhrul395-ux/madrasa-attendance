@@ -3184,18 +3184,22 @@ function toggleMadrasaActive(id, currentlyActive) {
 
 function renderFeesScreen(isTeacher) {
   currentFeesIsTeacher = isTeacher;
+  // "বকেয়া তালিকা" শুধু শিক্ষকের জন্য; শিক্ষার্থীর পাশে এই মোড থাকলে মাসিক বেতনে ফিরিয়ে দেওয়া হয়
+  if (!isTeacher && feesMode === 'dues') feesMode = 'monthly';
   setScreen(`
     <div class="card">
       <h2>বেতন / ফি</h2>
       <div class="row" style="margin-bottom:10px;">
         <button class="small ${feesMode==='monthly' ? '' : 'secondary'}" onclick="switchFeesMode('monthly')">মাসিক বেতন</button>
         <button class="small ${feesMode==='onetime' ? '' : 'secondary'}" onclick="switchFeesMode('onetime')">ভর্তি/পরীক্ষা ফি</button>
+        ${isTeacher ? `<button class="small ${feesMode==='dues' ? '' : 'secondary'}" onclick="switchFeesMode('dues')">বকেয়া তালিকা</button>` : ''}
       </div>
       <div id="feesControlsWrap"></div>
     </div>
     <div id="feesResultWrap"></div>
   `);
   if (feesMode === 'monthly') renderMonthlyFeesControls(isTeacher);
+  else if (feesMode === 'dues') renderDuesControls();
   else renderOnetimeFeesControls(isTeacher);
 }
 
@@ -3207,7 +3211,165 @@ function switchFeesMode(mode) {
 function onFeesClassFilterChange(value) {
   feesClassFilter = value;
   if (feesMode === 'monthly') loadMonthlyFeesTeacher();
+  else if (feesMode === 'dues') loadDuesReport();
   else loadOnetimeFeesTeacher();
+}
+
+// ---- বকেয়া তালিকা (শিক্ষক): কার কোন কোন মাসের বেতন ও কত টাকা বাকি, একসাথে ----
+// নিয়ম: মাসিক বেতনের যে এন্ট্রি "পরিশোধিত" নয় এবং যাতে টাকার পরিমাণ লেখা আছে (বা স্পষ্টভাবে "বকেয়া" চিহ্নিত)
+// শুধু সেগুলোই বকেয়া। যে মাসে কোনো হিসাবই লেখা হয়নি, সেটা বকেয়া ধরা হয় না।
+// সাথে ভর্তি/পরীক্ষা ফির বকেয়াও যোগ হয়। এক শিক্ষার্থীর সব বকেয়া এক সারিতে।
+let duesLoadToken = 0;
+const duesMsgCache = {};
+
+function renderDuesControls() {
+  const controlsWrap = document.getElementById('feesControlsWrap');
+  if (!controlsWrap) return;
+  controlsWrap.innerHTML = '<div id="feesClassFilterWrap"></div>';
+  document.getElementById('feesClassFilterWrap').innerHTML = classFilterDropdownHtml(feesClassFilter, 'onFeesClassFilterChange');
+  loadDuesReport();
+}
+
+function feeMoney(n) {
+  return toBanglaNumeral(Math.round(Number(n) || 0).toLocaleString('en-US')) + ' টাকা';
+}
+
+function feeMonthLabel(ym) {
+  const p = String(ym).split('-').map(Number);
+  if (p.length < 2 || isNaN(p[0]) || isNaN(p[1])) return ym;
+  try { return new Date(p[0], p[1] - 1, 1).toLocaleDateString('bn-BD', { month: 'long', year: 'numeric' }); } catch (e) { return ym; }
+}
+
+function loadDuesReport() {
+  const resultWrap = document.getElementById('feesResultWrap');
+  if (!resultWrap) return;
+  const students = studentsByClass(feesClassFilter);
+  if (students.length === 0) { resultWrap.innerHTML = '<div class="card"><p class="muted">কোনো শিক্ষার্থী নেই</p></div>'; return; }
+
+  const myToken = ++duesLoadToken;
+  resultWrap.innerHTML = '<div class="card"><p class="muted">লোড হচ্ছে...</p></div>';
+
+  Promise.all([
+    db.collection('fees_monthly').where('madrasaId', '==', madrasaId).get(),
+    db.collection('fees_onetime').where('madrasaId', '==', madrasaId).get()
+  ]).then(res => {
+    if (myToken !== duesLoadToken) return; // মাঝপথে শ্রেণি বদলালে পুরনো ফলাফল বাদ
+    const per = {};
+    students.forEach(st => { per[st.id] = { months: [], monthAmt: 0, extras: [], extraAmt: 0 }; });
+
+    res[0].docs.forEach(doc => {
+      const f = doc.data();
+      const rec = per[f.studentId];
+      if (!rec || f.status === 'paid') return;
+      const amt = Number(f.amount) || 0;
+      if (!(amt > 0 || f.status === 'due')) return;
+      rec.months.push({ month: f.month || '', amt });
+      rec.monthAmt += amt;
+    });
+    res[1].docs.forEach(doc => {
+      const f = doc.data();
+      const rec = per[f.studentId];
+      if (!rec || f.status === 'paid') return;
+      const amt = Number(f.amount) || 0;
+      rec.extras.push({ type: f.feeType || 'ফি', amt });
+      rec.extraAmt += amt;
+    });
+
+    const rows = students.map(st => {
+      const r = per[st.id];
+      r.months.sort((a, b) => String(a.month).localeCompare(String(b.month)));
+      return { st, r, total: r.monthAmt + r.extraAmt, count: r.months.length + r.extras.length };
+    }).filter(x => x.count > 0).sort((a, b) => {
+      const ca = String(a.st.className || ''), cb = String(b.st.className || '');
+      if (ca !== cb) return ca.localeCompare(cb, 'bn');
+      const ra = Number(a.st.roll), rb = Number(b.st.roll);
+      if (!isNaN(ra) && !isNaN(rb) && ra !== rb) return ra - rb;
+      return String(a.st.name).localeCompare(String(b.st.name), 'bn');
+    });
+
+    if (rows.length === 0) {
+      resultWrap.innerHTML = '<div class="card"><p style="text-align:center;">✅ কোনো বকেয়া নেই</p><p class="muted" style="text-align:center;font-size:12px;">শুধু যে মাসে টাকার পরিমাণ লেখা আছে বা "বকেয়া" চিহ্নিত করা আছে, সেগুলোই হিসাবে আসে।</p></div>';
+      return;
+    }
+
+    const grand = rows.reduce((sum, x) => sum + x.total, 0);
+    const inst = (appSettings && appSettings.madrasaName) ? appSettings.madrasaName : 'মাদরাসা';
+
+    const body = rows.map(x => {
+      const monthsText = x.r.months.map(m => feeMonthLabel(m.month)).join(', ');
+      const extrasText = x.r.extras.map(e => e.type).join(', ');
+      const detail = [monthsText ? 'বেতন: ' + monthsText : '', extrasText ? 'ফি: ' + extrasText : ''].filter(Boolean).join(' | ');
+
+      const parts = [];
+      if (x.r.months.length) parts.push(toBanglaNumeral(x.r.months.length) + ' মাসের বেতন (' + monthsText + ')');
+      if (x.r.extras.length) parts.push(extrasText);
+      duesMsgCache[x.st.id] = 'আসসালামু আলাইকুম। ' + inst + '-এর পক্ষ থেকে জানাচ্ছি, আপনার সন্তান ' + x.st.name
+        + (x.st.className ? ' (' + x.st.className + ')' : '') + '-এর ' + parts.join(' এবং ') + ' বাবদ মোট '
+        + feeMoney(x.total) + ' বকেয়া আছে। অনুগ্রহ করে পরিশোধের ব্যবস্থা করবেন। জাযাকুমুল্লাহু খাইরান।';
+
+      const c = studentContactsCache[x.st.id] || {};
+      const phone = (c.phone || '').trim();
+      const btn = phone
+        ? '<button class="small ' + (c.hasWhatsapp ? '' : 'secondary') + '" onclick="sendDuesMessage(\'' + x.st.id + '\')">' + (c.hasWhatsapp ? '💬 জানান' : '📱 SMS') + '</button>'
+        : '<span class="muted" style="font-size:12px;">নম্বর নেই</span>';
+
+      return `
+        <tr>
+          <td style="padding:6px;border:1px solid #ddd;">${x.st.roll || '-'}</td>
+          <td style="padding:6px;border:1px solid #ddd;">${x.st.name}<div class="muted" style="font-size:11px;">${x.st.className || '-'}</div></td>
+          <td style="padding:6px;border:1px solid #ddd;font-size:12px;">${detail}</td>
+          <td style="padding:6px;border:1px solid #ddd;text-align:right;font-weight:bold;color:#b91c1c;white-space:nowrap;">${feeMoney(x.total)}</td>
+          <td class="no-print" style="padding:6px;border:1px solid #ddd;text-align:center;">${btn}</td>
+        </tr>`;
+    }).join('');
+
+    resultWrap.innerHTML = `
+      <style id="reportPrintStyle">
+        @media print { #bottomNav, .no-print { display: none !important; } }
+      </style>
+      <div class="card" id="reportPrintArea">
+        <h2 style="text-align:center;margin-bottom:2px;">বকেয়া তালিকা</h2>
+        <p class="muted" style="text-align:center;margin-top:0;">${feesClassFilter !== 'all' ? 'শ্রেণি: ' + feesClassFilter + ' | ' : ''}তারিখ: ${todayLocal()}</p>
+        <p style="text-align:center;">বকেয়া আছে: <b>${toBanglaNumeral(rows.length)}</b> জনের &nbsp; মোট বকেয়া: <b style="color:#b91c1c;">${feeMoney(grand)}</b></p>
+        <div style="overflow-x:auto;">
+          <table style="width:100%;border-collapse:collapse;margin-top:10px;">
+            <thead>
+              <tr>
+                <th style="padding:6px;border:1px solid #ddd;">রোল</th>
+                <th style="padding:6px;border:1px solid #ddd;">নাম</th>
+                <th style="padding:6px;border:1px solid #ddd;">কী কী বাকি</th>
+                <th style="padding:6px;border:1px solid #ddd;">মোট</th>
+                <th class="no-print" style="padding:6px;border:1px solid #ddd;">বার্তা</th>
+              </tr>
+            </thead>
+            <tbody>${body}</tbody>
+          </table>
+        </div>
+        <p class="muted" style="font-size:12px;margin-top:8px;">শুধু যে মাসে টাকার পরিমাণ লেখা আছে বা "বকেয়া" চিহ্নিত করা আছে, সেগুলোই এখানে আসে। যে মাসের হিসাব লেখাই হয়নি, তা ধরা হয়নি।</p>
+        <div class="no-print" style="margin-top:14px;text-align:center;">
+          <button onclick="window.print()">🖨️ প্রিন্ট করুন</button>
+        </div>
+      </div>
+    `;
+  }).catch(e => {
+    if (myToken !== duesLoadToken) return;
+    resultWrap.innerHTML = '<div class="card"><p class="muted">লোড করতে সমস্যা হয়েছে: ' + e.message + '</p></div>';
+    if (e.code !== 'permission-denied') showDiagBanner('বকেয়া তালিকা এরর: ' + e.message);
+  });
+}
+
+// "জানান" বাটন: WhatsApp (বা নম্বরে WhatsApp না থাকলে SMS) খোলে, বার্তা আগে থেকেই লেখা থাকে। অ্যাপ নিজে কিছু পাঠায় না।
+function sendDuesMessage(studentId) {
+  const text = duesMsgCache[studentId];
+  const c = studentContactsCache[studentId] || {};
+  const phone = (c.phone || '').trim();
+  if (!text) return alert('বার্তা তৈরি করা যায়নি, তালিকাটি আবার লোড করুন');
+  if (!phone) return alert('এই শিক্ষার্থীর মোবাইল নম্বর দেওয়া নেই। "শিক্ষার্থী" ট্যাব থেকে নম্বর যোগ করুন।');
+  if (c.hasWhatsapp) {
+    window.open('https://wa.me/' + normalizePhoneForWhatsapp(phone) + '?text=' + encodeURIComponent(text), '_blank');
+  } else {
+    window.location.href = 'sms:' + phone.replace(/[^0-9+]/g, '') + '?body=' + encodeURIComponent(text);
+  }
 }
 
 // ---- Monthly fee (মাসিক বেতন) ----
