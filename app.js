@@ -1152,6 +1152,8 @@ function renderAttendanceScreen() {
         <h2>উপস্থিতি নেওয়ার তারিখ</h2>
         <input type="date" id="attDate" value="${today}" onchange="loadAttendanceForDate()">
         <div id="attFilterWrap"></div>
+        <button id="markAllBtn" class="secondary" onclick="markAllPresent()" style="margin-top:10px;">✅ সবাইকে উপস্থিত করুন</button>
+        <p class="muted" style="font-size:12px;margin:6px 0 0;">যাদের হাজিরা আগে নেওয়া হয়েছে তাদের বদলাবে না। এরপর যারা অনুপস্থিত, শুধু তাদের "অনুপস্থিত" চাপুন।</p>
       </div>
       <div id="attList"></div>
     </div>
@@ -1261,6 +1263,70 @@ function retryAttendanceCell(studentId, date) {
   const s = studentsCache.find(st => st.id === studentId);
   if (!s) return;
   loadAttendanceCell(s, date);
+}
+
+// "সবাইকে উপস্থিত করুন": বর্তমানে বাছাই করা শ্রেণির (বা সকল শ্রেণির) যে শিক্ষার্থীদের
+// এই তারিখে এখনো হাজিরা নেওয়া হয়নি, শুধু তাদের সবাইকে একবারে "উপস্থিত" করে।
+// যাদের হাজিরা আগেই নেওয়া হয়েছে (উপস্থিত বা অনুপস্থিত) তাদের কিছুই বদলায় না।
+let markAllBusy = false;
+function markAllPresent() {
+  if (markAllBusy) return;
+  const dateEl = document.getElementById('attDate');
+  const date = dateEl ? dateEl.value : '';
+  if (!date) return alert('আগে তারিখ বাছাই করুন');
+  const students = studentsByClass(attClassFilter);
+  if (students.length === 0) return alert('এই শ্রেণিতে কোনো শিক্ষার্থী নেই');
+
+  const btn = document.getElementById('markAllBtn');
+  const setBusy = (on, label) => {
+    markAllBusy = on;
+    if (btn) { btn.disabled = on; btn.textContent = label || '✅ সবাইকে উপস্থিত করুন'; }
+  };
+  setBusy(true, 'হাজিরার তথ্য দেখা হচ্ছে...');
+
+  Promise.all(students.map(s => db.collection('attendance').doc(s.id + '_' + date).get()))
+    .then(docs => {
+      const pending = [];
+      let already = 0;
+      students.forEach((s, i) => {
+        const d = docs[i].exists ? docs[i].data() : {};
+        if (d.status === 'present' || d.status === 'absent') already++;
+        else pending.push(s);
+      });
+
+      if (pending.length === 0) {
+        setBusy(false);
+        alert('সবার হাজিরা আগেই নেওয়া হয়েছে, নতুন করে কিছু করার নেই।');
+        return;
+      }
+
+      const where = attClassFilter === 'all' ? 'সকল শ্রেণির' : attClassFilter + ' শ্রেণির';
+      const msg = where + ' ' + pending.length + ' জনকে (' + date + ') উপস্থিত করা হবে।'
+        + (already ? '\n' + already + ' জনের হাজিরা আগেই নেওয়া হয়েছে, তাদের বদলাবে না।' : '')
+        + '\n\nএগিয়ে যাবেন?';
+      if (!confirm(msg)) { setBusy(false); return; }
+
+      setBusy(true, 'সংরক্ষণ হচ্ছে...');
+      const commits = [];
+      for (let i = 0; i < pending.length; i += 400) {
+        const batch = db.batch();
+        pending.slice(i, i + 400).forEach(s => {
+          batch.set(db.collection('attendance').doc(s.id + '_' + date),
+            { studentId: s.id, date, status: 'present', madrasaId }, { merge: true });
+        });
+        commits.push(batch.commit());
+      }
+      return Promise.all(commits).then(() => {
+        pending.forEach(s => updateAttendanceButtonsUI(s.id, 'present'));
+        setBusy(false);
+        alert(pending.length + ' জনকে উপস্থিত করা হয়েছে। এখন যারা অনুপস্থিত, শুধু তাদের "অনুপস্থিত" চাপুন।');
+      });
+    })
+    .catch(e => {
+      setBusy(false);
+      alert('সংরক্ষণ করা যায়নি: ' + e.message);
+      showDiagBanner('সবাইকে উপস্থিত ব্যর্থ: ' + (e.code || '') + ' ' + e.message);
+    });
 }
 
 function setAttendance(studentId, date, status) {
