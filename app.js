@@ -222,23 +222,6 @@ function setSync(ok) {
 }
 
 // ================= MULTI-TENANT: TEACHER <-> MADRASA LINK =================
-// A teacher's madrasa is decided by their teachers/{uid} profile doc, not by
-// whatever link/localStorage this particular device has. The first time an
-// existing teacher logs in after this update, we create that profile for
-// them automatically using the device's current madrasaId (their existing
-// madrasa), so nothing needs to be set up manually.
-//
-// Also resolves myTeacherIsAdmin from the same doc (isAdmin:true/false) —
-// see the শিক্ষকগণ (multi-admin) feature below. A teacher whose doc has
-// active:false has been deactivated by an admin; Firestore rules already
-// block all of their reads/writes everywhere (see isTeacherAuth() in
-// firestore.rules), this just also surfaces a clear banner instead of a
-// silent wall of permission-denied errors.
-//
-// isSuperAdminUser is resolved here too (purely from the signed-in
-// account's email — never stored in Firestore, never toggleable from any
-// screen) so the "সুপার অ্যাডমিন" tab only ever appears for that one
-// hardcoded account.
 function ensureTeacherDoc(user) {
   isSuperAdminUser = (user.email === SUPER_ADMIN_EMAIL);
   const ref = db.collection('teachers').doc(user.uid);
@@ -258,20 +241,6 @@ function ensureTeacherDoc(user) {
   }).catch(err => { console.error('ensureTeacherDoc failed:', err); showDiagBanner('ensureTeacherDoc এরর: ' + err.message); });
 }
 
-// ================= MULTI-TENANT: ONE-TIME DATA MIGRATION (LEGACY) =================
-// This tagged every existing document (students, attendance, leaves,
-// results, notices, diary, suggestions) that didn't yet have a madrasaId
-// with this madrasa's id — a one-time step from when multi-tenant support
-// was first added. All real data has had madrasaId for a while now.
-//
-// It reads each collection with NO filter (db.collection(colName).get()),
-// which the current per-document security rules (resource.data.madrasaId
-// == myMadrasaId()) can no longer authorize as a list query — Firestore
-// rejects it up front with "Missing or insufficient permissions" before it
-// can even check whether there was anything to migrate. Since there's
-// nothing left to migrate anyway, we treat that rejection as "already
-// done" and stop retrying, instead of showing an error banner on every
-// single app load.
 function runMigrationIfNeeded() {
   const flagKey = 'migrationDone_' + madrasaId;
   if (localStorage.getItem(flagKey)) return Promise.resolve();
@@ -282,10 +251,6 @@ function runMigrationIfNeeded() {
     localStorage.setItem(flagKey, '1');
     console.log('Multi-tenant migration complete for', madrasaId);
   }).catch(err => {
-    // Blocked by security rules (expected now — see comment above) or any
-    // other error: mark as done so this doesn't keep re-running (and
-    // re-erroring) on every future app load. There's nothing left to
-    // migrate for this madrasa in practice.
     localStorage.setItem(flagKey, '1');
     console.log('Migration skipped (already complete or blocked by rules) for', madrasaId, err && err.message);
   });
@@ -303,24 +268,12 @@ function migrateCollection(colName) {
     }
     return Promise.all(commits);
   }).catch(err => {
-    // permission-denied here means the security rules no longer allow an
-    // unfiltered read of this collection — expected under multi-tenant
-    // rules, and means there's nothing unsafe left to migrate via this
-    // path. Silently treat as "nothing to do" instead of surfacing it as
-    // an error.
     if (err.code === 'permission-denied') return;
     console.error('Migration error (' + colName + '):', err);
     throw err;
   });
 }
 
-// ================= SECURITY: STUDENT PIN MIGRATION =================
-// Older versions stored each student's PIN directly on the students/{id}
-// document (readable by any signed-in device). This moves every existing
-// plaintext PIN into the student_pins/{id} collection (which no client can
-// ever read — see firestore.rules) and replaces it on the students doc with
-// a harmless hasPinSet:true/false flag. Runs once per madrasa (tracked in
-// localStorage) the first time a teacher opens the app after this update.
 function migratePinsIfNeeded() {
   const flagKey = 'pinsMigrated_' + madrasaId;
   if (localStorage.getItem(flagKey)) return Promise.resolve();
@@ -342,15 +295,6 @@ function migratePinsIfNeeded() {
   }).catch(err => { console.error('PIN migration error:', err); showDiagBanner('PIN মাইগ্রেশন এরর: ' + err.message); });
 }
 
-// ================= SECURITY: STUDENT PHONE/WHATSAPP MIGRATION =================
-// Older versions stored each student's phone number and WhatsApp flag
-// directly on the students/{id} document, which is readable by any
-// signed-in device (including anonymous students from other madrasas) via
-// the open `students` read rule. This moves that data into the
-// student_contacts/{id} collection (teacher-only read/write — see
-// firestore.rules) and removes phone/hasWhatsapp from the students doc.
-// Runs once per madrasa (tracked in localStorage) the first time a teacher
-// opens the app after this update.
 function migrateContactsIfNeeded() {
   const flagKey = 'contactsMigrated_' + madrasaId;
   if (localStorage.getItem(flagKey)) return Promise.resolve();
@@ -382,8 +326,6 @@ function listenSettings() {
   const ref = db.collection('madrasas').doc(madrasaId);
   ref.get().then(doc => {
     if (doc.exists) return;
-    // one-time fallback: copy the old single-tenant settings/app doc over,
-    // if this madrasa has never had its own madrasas/{id} doc yet
     return db.collection('settings').doc('app').get().then(legacyDoc => {
       if (legacyDoc.exists) return ref.set(legacyDoc.data(), { merge: true });
     });
@@ -392,9 +334,6 @@ function listenSettings() {
       appSettings = doc.exists ? (doc.data() || {}) : {};
       renderTopBar();
     }, err => {
-      // Ignore permission-denied here: this fires briefly during logout /
-      // role switches while auth is momentarily unresolved, and the
-      // listener re-attaches with a valid session moments later anyway.
       if (err.code !== 'permission-denied') showDiagBanner('Settings লোড এরর: ' + err.message);
       renderTopBar();
     });
@@ -517,15 +456,18 @@ function studentsByClass(filterValue) {
 }
 
 // ================= BANGLA NUMERALS / ORDINALS =================
-// Converts any string/number containing ASCII digits (0-9) into Bengali
-// numerals (০-৯), leaving all other characters untouched.
 const BANGLA_DIGITS = ['০','১','২','৩','৪','৫','৬','৭','৮','৯'];
 function toBanglaNumeral(n) {
   return String(n).split('').map(ch => (ch >= '0' && ch <= '9') ? BANGLA_DIGITS[Number(ch)] : ch).join('');
 }
 
-// Bengali ordinal suffixes for 1-10 (১ম, ২য়, ৩য়, ৪র্থ, ৫ম, ৬ষ্ঠ, ৭ম, ৮ম,
-// ৯ম, ১০ম); every rank from 11 onward uses "তম" (১১তম, ১২তম, ১৩তম, ...).
+// রোল নম্বর বাংলা সংখ্যায় (০-৯) লেখা থাকলে তা ইংরেজি সংখ্যায় (0-9) রূপান্তর করে,
+// যাতে Number() দিয়ে সঠিকভাবে সংখ্যাগত তুলনা/সর্ট করা যায়। বাংলা সংখ্যা দিলে আগে
+// Number() NaN রিটার্ন করত, ফলে রোল অনুযায়ী ধারাবাহিক সাজানো ভেঙে যেত।
+function toEnglishDigits(str) {
+  return String(str == null ? '' : str).replace(/[০-৯]/g, ch => String(BANGLA_DIGITS.indexOf(ch)));
+}
+
 const BANGLA_ORDINAL_SUFFIX_1_TO_10 = { 1:'ম', 2:'য়', 3:'য়', 4:'র্থ', 5:'ম', 6:'ষ্ঠ', 7:'ম', 8:'ম', 9:'ম', 10:'ম' };
 function banglaOrdinal(n) {
   const num = Number(n);
@@ -552,7 +494,7 @@ function startUnreadListeners() {
 }
 
 function startNoticesUnreadListener() {
-  if (unreadNoticesUnsub) return; // already listening
+  if (unreadNoticesUnsub) return;
   unreadNoticesUnsub = db.collection('notices')
     .where('madrasaId', '==', madrasaId)
     .orderBy('createdAt', 'desc')
@@ -566,8 +508,8 @@ function startNoticesUnreadListener() {
 function startDiaryUnreadListener() {
   const me = studentsCache.find(s => s.id === myStudentId);
   const myClass = me ? me.className : null;
-  if (!myClass) return; // will retry once class info is loaded (see listenStudents)
-  if (unreadDiaryUnsub && unreadDiaryUnsub.className === myClass) return; // already listening for this class
+  if (!myClass) return;
+  if (unreadDiaryUnsub && unreadDiaryUnsub.className === myClass) return;
   if (unreadDiaryUnsub && unreadDiaryUnsub.unsub) unreadDiaryUnsub.unsub();
   const unsub = db.collection('diary')
     .where('madrasaId', '==', madrasaId)
@@ -659,16 +601,6 @@ function teacherLogin() {
 }
 
 // ================= SELF-SIGNUP (নতুন মাদ্রাসা নিবন্ধন) =================
-// Lets a brand-new madrasa create its own account with NO manual Firebase
-// Console steps: they get their own madrasaId, their own admin teacher
-// account, and their own empty madrasas/{id} settings doc — all in one go.
-//
-// Sequencing matters here (see firestore.rules): the teacher doc must be
-// created FIRST (it's allowed to self-create as isAdmin:true only for a
-// madrasaId that has no madrasas/{id} doc yet — proving this is really a
-// new tenant, not an attempt to self-promote into an existing one). Once
-// that teacher doc exists, myMadrasaId() can resolve for this account, and
-// only then is the madrasas/{id} settings doc allowed to be created.
 function showSignupScreen() {
   setScreen(`
     <div class="card" style="margin-top:30px;">
@@ -701,11 +633,6 @@ function submitSignup() {
   const btn = event && event.target;
   if (btn) { btn.disabled = true; btn.textContent = 'নিবন্ধন করা হচ্ছে...'; }
 
-  // A short random id is enough here — collisions are astronomically
-  // unlikely, and firestore.rules' self-signup branch double-checks the
-  // madrasas/{id} doc doesn't already exist before allowing the write
-  // anyway, so even a collision would just fail safely rather than
-  // overwrite someone else's data.
   const newMadrasaId = 'm_' + Date.now().toString(36) + '_' + Math.random().toString(36).slice(2, 8);
 
   signupInProgress = true;
@@ -713,15 +640,9 @@ function submitSignup() {
   auth.createUserWithEmailAndPassword(email, password)
     .then(cred => {
       const uid = cred.user.uid;
-      // Step 1: create the teacher doc FIRST, as isAdmin:true, for the
-      // brand-new madrasaId (allowed by firestore.rules' self-signup branch
-      // since no madrasas/{newMadrasaId} doc exists yet).
       return db.collection('teachers').doc(uid).set({
         madrasaId: newMadrasaId, email, name: adminName, isAdmin: true, active: true, createdAt: Date.now()
       }).then(() => {
-        // Step 2: now that this account's teacher doc exists, myMadrasaId()
-        // resolves correctly, so the madrasas/{id} settings doc can be
-        // created too.
         return db.collection('madrasas').doc(newMadrasaId).set({
           madrasaName, createdAt: Date.now()
         });
@@ -789,11 +710,6 @@ function confirmStudentPick() {
     return;
   }
 
-  // The PIN itself is never checked here on the client (it can't be — this
-  // device is never allowed to read the real PIN). Instead we attempt to
-  // create the session doc with the entered PIN attached, and a Firestore
-  // rule checks it server-side against student_pins/{studentId}. A wrong
-  // PIN makes the write itself fail with "permission-denied".
   const uid = auth.currentUser.uid;
   db.collection('sessions').doc(uid).set({
     studentId: student.id, madrasaId, name: student.name, pin: enteredPin, updatedAt: Date.now()
@@ -814,11 +730,6 @@ function confirmStudentPick() {
 }
 
 function logout() {
-  // Tear down any live listeners *before* switching auth state — otherwise
-  // they keep firing during the brief window where request.auth is null
-  // (between signOut and the automatic anonymous re-sign-in), which used to
-  // surface a burst of harmless "Missing or insufficient permissions"
-  // errors on the diagnostic banner.
   if (studentsUnsub) { studentsUnsub(); studentsUnsub = null; }
   if (settingsUnsub) { settingsUnsub(); settingsUnsub = null; }
   stopStudentContactsListener();
@@ -895,9 +806,6 @@ function closeMoreMenu() {
 function renderTeacherNav(activeKey) {
   const nav = document.getElementById('bottomNav');
   nav.style.display = 'block';
-  // "শিক্ষকগণ" (multi-admin management) is only shown to admin teachers, and
-  // "সুপার অ্যাডমিন" only to the one hardcoded owner account — both filtered
-  // out of the "আরও" menu entirely for everyone else.
   const visibleMoreTabs = teacherMoreTabs.filter(t => {
     if (t.key === 'teachers') return myTeacherIsAdmin;
     if (t.key === 'super_admin') return isSuperAdminUser;
@@ -929,26 +837,26 @@ function listenStudents() {
     .orderBy('roll')
     .onSnapshot(snap => {
       studentsCache = snap.docs.map(d => ({ id: d.id, ...d.data() }));
+      // রোল নম্বর অনুযায়ী ধারাবাহিকভাবে সাজানো (বাংলা/ইংরেজি সংখ্যা উভয় ক্ষেত্রেই সঠিকভাবে)
+      studentsCache.sort((a, b) => {
+        const ra = toEnglishDigits(a.roll), rb = toEnglishDigits(b.roll);
+        const na = Number(ra), nb = Number(rb);
+        const bothNumeric = ra !== '' && rb !== '' && !isNaN(na) && !isNaN(nb);
+        if (bothNumeric && na !== nb) return na - nb;
+        return String(a.name || '').localeCompare(String(b.name || ''), 'bn');
+      });
       setSync(true);
-      // refresh currently visible screen if it depends on student list
       if (role === 'teacher' && document.getElementById('studentsScreen')) renderStudentsList();
       if (role === 'teacher' && document.getElementById('attendanceScreen')) renderAttendanceList();
       if (role === 'student' && myStudentId) startDiaryUnreadListener();
     }, err => {
       setSync(false);
-      // Ignore permission-denied here: this fires briefly during logout /
-      // role switches while auth is momentarily unresolved, and the
-      // listener re-attaches with a valid session moments later anyway.
       if (err.code !== 'permission-denied') {
         showDiagBanner('স্টুডেন্ট লিস্ট লোড এরর (madrasaId=' + madrasaId + '): ' + err.message);
       }
     });
 }
 
-// ================= STUDENT CONTACTS (phone/WhatsApp — teacher-only, separate from students) =================
-// Kept in its own collection (not on students/{id}) so phone numbers are
-// never exposed by the open `students` read rule. Only loaded for
-// signed-in teacher accounts; students never need or can read this.
 function listenStudentContacts() {
   if (studentContactsUnsub) { studentContactsUnsub(); studentContactsUnsub = null; }
   studentContactsUnsub = db.collection('student_contacts')
@@ -959,8 +867,6 @@ function listenStudentContacts() {
       studentContactsCache = map;
       if (role === 'teacher' && document.getElementById('studentsScreen')) renderStudentsList();
     }, err => {
-      // Ignore permission-denied: fires briefly during logout/role-switch
-      // while auth is momentarily unresolved, same pattern as other listeners.
       if (err.code !== 'permission-denied') showDiagBanner('যোগাযোগ তথ্য লোড এরর: ' + err.message);
     });
 }
@@ -970,7 +876,6 @@ function stopStudentContactsListener() {
   studentContactsCache = {};
 }
 
-// ================= TEACHERS (শিক্ষকগণ — multi-admin management, teacher-admin-only) =================
 function stopTeachersListener() {
   if (teachersUnsub) { teachersUnsub(); teachersUnsub = null; }
 }
@@ -1080,14 +985,14 @@ function renderStudentsList() {
 
 function normalizePhoneForWhatsapp(phone) {
   let p = (phone || '').replace(/[^0-9]/g, '');
-  if (p.startsWith('0')) p = '88' + p; // Bangladeshi local -> international
+  if (p.startsWith('0')) p = '88' + p;
   return p;
 }
 
 function setStudentPhone(id) {
   const existing = studentContactsCache[id] || {};
   const phone = prompt('মোবাইল নম্বর দিন (যেমন: 01712345678):', existing.phone || '');
-  if (phone === null) return; // cancelled
+  if (phone === null) return;
   const trimmed = phone.trim();
   const hasWhatsapp = trimmed ? confirm('এই নম্বরে কি WhatsApp আছে?') : false;
   db.collection('student_contacts').doc(id).set({ madrasaId, phone: trimmed, hasWhatsapp }, { merge: true })
@@ -1096,7 +1001,7 @@ function setStudentPhone(id) {
 
 function addStudent() {
   const name = document.getElementById('newName').value.trim();
-  const roll = document.getElementById('newRoll').value.trim();
+  const roll = toEnglishDigits(document.getElementById('newRoll').value.trim());
   const className = document.getElementById('newClass').value.trim();
   const phone = document.getElementById('newPhone').value.trim();
   const hasWhatsapp = document.getElementById('newWhatsapp').checked;
@@ -1129,7 +1034,7 @@ function addStudent() {
 
 function setStudentPin(id) {
   const pin = prompt('শিক্ষার্থীর জন্য ৪-সংখ্যার PIN দিন:');
-  if (pin === null) return; // cancelled
+  if (pin === null) return;
   if (!/^\d{4}$/.test(pin)) { alert('PIN অবশ্যই ৪ সংখ্যার হতে হবে'); return; }
   db.collection('student_pins').doc(id).set({ pin }, { merge: true })
     .then(() => db.collection('students').doc(id).set({ hasPinSet: true }, { merge: true }))
@@ -1184,29 +1089,10 @@ function renderAttendanceList() {
   students.forEach(s => loadAttendanceCell(s, date));
 }
 
-// Loads (or reloads) a single student's attendance card. Pulled out of
-// renderAttendanceList so a failed card can retry itself without having to
-// re-fetch every other student too.
-//
-// IMPORTANT: this always resolves the card to a definite end state — either
-// the real controls, or a visible "লোড ব্যর্থ" + রিট্রাই button. It never
-// leaves a card silently stuck on "লোড হচ্ছে..." the way the old code did
-// when db.collection('attendance').doc(...).get() rejected (e.g. on a
-// permission-denied for a student whose attendance doc doesn't exist yet
-// for this date) and the .catch() did nothing to the DOM.
-//
-// NOTE ON "বাসা থেকে বের হওয়ার সময়" (time left home): this is now READ-ONLY
-// on the teacher's screen. Only the student themself can set it (see
-// renderMyAttendance/submitMyTimeLeft below), and once set it can never be
-// changed by anyone — enforced server-side in firestore.rules, not just
-// hidden here in the UI.
 function loadAttendanceCell(s, date) {
   const cell = document.getElementById('att_' + s.id);
   if (cell) cell.innerHTML = 'লোড হচ্ছে...';
 
-  // Belt-and-suspenders timeout: if Firestore never settles the promise at
-  // all (e.g. stuck offline with no cached data), don't leave the card
-  // stuck forever either — show the same retry state after 15s.
   let settled = false;
   const timeoutId = setTimeout(() => {
     if (settled) return;
@@ -1243,10 +1129,6 @@ function loadAttendanceCell(s, date) {
       settled = true;
       clearTimeout(timeoutId);
       renderAttendanceCellError(s, date, e);
-      // Show every load failure here (not just non-permission-denied ones)
-      // since this is a foreground screen the teacher is actively looking
-      // at, not a background listener — silently hiding it is what made
-      // the card look stuck for no visible reason.
       showDiagBanner('অ্যাটেন্ডেন্স লোড ব্যর্থ (' + s.name + '): ' + (e.code || '') + ' ' + e.message);
     });
 }
@@ -1267,9 +1149,6 @@ function retryAttendanceCell(studentId, date) {
   loadAttendanceCell(s, date);
 }
 
-// "সবাইকে উপস্থিত করুন": বর্তমানে বাছাই করা শ্রেণির (বা সকল শ্রেণির) যে শিক্ষার্থীদের
-// এই তারিখে এখনো হাজিরা নেওয়া হয়নি, শুধু তাদের সবাইকে একবারে "উপস্থিত" করে।
-// যাদের হাজিরা আগেই নেওয়া হয়েছে (উপস্থিত বা অনুপস্থিত) তাদের কিছুই বদলায় না।
 let markAllBusy = false;
 function markAllPresent() {
   if (markAllBusy) return;
@@ -1337,10 +1216,6 @@ function setAttendance(studentId, date, status) {
     .catch(e => showDiagBanner('অ্যাটেন্ডেন্স সংরক্ষণ ব্যর্থ: ' + e.message));
 }
 
-// Updates just the clicked student's present/absent buttons in place,
-// instead of re-fetching and re-rendering every student's card (which used
-// to make the whole attendance list flash "লোড হচ্ছে..." and reload on
-// every single tap).
 function updateAttendanceButtonsUI(studentId, status) {
   const cell = document.getElementById('att_' + studentId);
   if (!cell) return;
@@ -1351,9 +1226,6 @@ function updateAttendanceButtonsUI(studentId, status) {
 }
 
 // ================= অনুপস্থিত শিক্ষার্থীর অভিভাবককে বার্তা (WhatsApp / SMS) =================
-// শিক্ষক "অভিভাবককে জানান" চাপলে WhatsApp (বা নম্বরে WhatsApp না থাকলে SMS) খোলে, বার্তা আগে থেকেই লেখা থাকে।
-// শিক্ষক পাঠানোর আগে বার্তা বদলাতে পারেন; অ্যাপ নিজে কিছু পাঠায় না। ফোন নম্বর আসে student_contacts থেকে
-// (শুধু শিক্ষকের অ্যাকাউন্ট পড়তে পারে), তাই এটি শুধু শিক্ষকের পাশেই কাজ করে।
 function absentMessageText(student, date, reason) {
   const inst = (appSettings && appSettings.madrasaName) ? appSettings.madrasaName : 'মাদরাসা';
   let when;
@@ -1369,7 +1241,6 @@ function absentMessageText(student, date, reason) {
   return 'আসসালামু আলাইকুম। ' + inst + '-এর পক্ষ থেকে জানাচ্ছি, আপনার সন্তান ' + student.name + cls + ' ' + when + ' মাদরাসায় অনুপস্থিত ছিল।' + why + ' অনুগ্রহ করে বিষয়টি জানাবেন। জাযাকুমুল্লাহু খাইরান।';
 }
 
-// বাটনের HTML: WhatsApp থাকলে 💬, শুধু নম্বর থাকলে SMS, কিছুই না থাকলে ছোট নোট
 function absentMessageButtonHtml(studentId, date, reason) {
   const c = studentContactsCache[studentId] || {};
   const phone = (c.phone || '').trim();
@@ -1380,7 +1251,6 @@ function absentMessageButtonHtml(studentId, date, reason) {
   return '<span class="muted" style="font-size:12px;">মোবাইল নম্বর নেই</span>';
 }
 
-// উপস্থিতির কার্ডে: অনুপস্থিত হলে বাটন দেখায়, নইলে খালি
 function updateWaRow(studentId, status) {
   const row = document.getElementById('waRow_' + studentId);
   if (!row) return;
@@ -1388,7 +1258,6 @@ function updateWaRow(studentId, status) {
   row.innerHTML = absentMessageButtonHtml(studentId, '', '');
 }
 
-// date/reason না দিলে (উপস্থিতির কার্ড থেকে) বর্তমান তারিখ ও কারণের ঘর থেকে নেয়
 function openAbsentMessage(studentId, date, reason) {
   const student = studentsCache.find(s => s.id === studentId);
   if (!student) return alert('শিক্ষার্থী খুঁজে পাওয়া যায়নি');
@@ -1419,11 +1288,6 @@ function updateAttField(studentId, date, field, value) {
 }
 
 // ---- Student's own attendance view ----
-// "বাসা থেকে বের হওয়ার সময়" can ONLY be entered by the student themself,
-// and only ONCE per day — after it's saved, it becomes a locked, read-only
-// value (nobody, including the student or any teacher, can change it
-// afterward). This is enforced server-side in firestore.rules; the UI here
-// just reflects that by showing an input only when nothing is saved yet.
 function renderMyAttendance() {
   const today = todayLocal();
   setScreen(`
@@ -1606,8 +1470,6 @@ function gradeFromPercent(percent) {
   return { grade: 'F', gpa: '0.00' };
 }
 
-// Reverse-lookup: turns an averaged GPA number back into a letter grade
-// using the same tier boundaries as gradeFromPercent (in GPA terms).
 function gradeFromAvgGpa(avgGpa) {
   if (avgGpa >= 5) return 'A+';
   if (avgGpa >= 4) return 'A';
@@ -1618,22 +1480,6 @@ function gradeFromAvgGpa(avgGpa) {
   return 'F';
 }
 
-// The overall "মোট" GPA/grade for a marksheet must be the AVERAGE of each
-// subject's own GPA — not a grade looked up from the overall percentage.
-// Those two methods can disagree (e.g. several subjects near a grade
-// boundary can average to a different tier than the combined percentage
-// falls into), and the average-of-subject-GPA method is the correct one.
-// Used both when saving a new marksheet and when displaying any marksheet
-// (old or new) so existing saved marksheets self-correct on display too,
-// with no separate data migration needed.
-//
-// OVERRIDE: even though the GPA NUMBER stays a plain average of every
-// subject's GPA, the overall GRADE LABEL must show "F" whenever ANY single
-// subject itself failed (that subject's own grade is F / GPA 0) — a
-// passing average can otherwise hide one failed subject, and a report card
-// should never call a student "C" (or any passing grade) if they failed a
-// subject. hasFailedSubject is also returned so the UI can optionally show
-// an "অকৃতকার্য" (Fail) label next to the grade.
 function computeMarksheetTotals(subjects) {
   const totalObtained = subjects.reduce((sum, s) => sum + s.obtained, 0);
   const totalFull = subjects.reduce((sum, s) => sum + s.full, 0);
@@ -1655,84 +1501,8 @@ function computeMarksheetTotals(subjects) {
   };
 }
 
-// ================= মেধাক্রম (MERIT RANK) =================
-// Recomputes and stores each student's rank among all students of the SAME
-// exam + academic year + class, based on GPA (highest GPA = rank ১).
-//
-// Students who FAILED the exam (overall grade === 'F') are EXCLUDED from
-// ranking entirely — they get no meritRank/meritTotal at all (their GPA is
-// still stored and shown normally via the regular gpa field, just with no
-// rank position). meritTotal only counts the passing students in the group,
-// so "মেধাক্রম ৩ / ১০" means 3rd among 10 students who passed.
-//
-// This MUST run on a teacher's device, not a student's: firestore.rules
-// only lets a student read their own results docs, so a student's device
-// could never gather every classmate's marks to work out a rank itself.
-// Instead the teacher's device (which can read every result in its own
-// madrasa) computes the rank for the whole group and writes it as a plain
-// `meritRank` / `meritTotal` field directly onto each result doc — the
-// student just displays whatever value is already stored there.
-//
-// Competition ranking is used: students tied on GPA share the same rank,
-// and the next distinct GPA skips ahead by the number tied above it
-// (e.g. ১, ১, ৩, ৪ — not ১, ১, ২, ৩).
-function recomputeMeritRanks(examName, academicYear) {
-  if (!examName) return Promise.resolve();
-  return db.collection('results')
-    .where('madrasaId', '==', madrasaId)
-    .where('examName', '==', examName)
-    .get()
-    .then(snap => {
-      const groups = {}; // className -> [{ id, gpa, failed }]
-      snap.docs.forEach(d => {
-        const r = d.data();
-        if ((r.academicYear || '') !== (academicYear || '')) return;
-        if (!Array.isArray(r.subjects) || r.subjects.length === 0) return;
-        const student = studentsCache.find(s => s.id === r.studentId);
-        const className = student ? student.className : null;
-        if (!className) return;
-        const totals = computeMarksheetTotals(r.subjects);
-        if (!groups[className]) groups[className] = [];
-        groups[className].push({ id: d.id, gpa: Number(totals.gpa), failed: totals.grade === 'F' });
-      });
-
-      const batch = db.batch();
-      let hasWrites = false;
-      Object.keys(groups).forEach(className => {
-        const all = groups[className];
-        // Only passing students (grade !== 'F') get a rank position.
-        const passList = all.filter(item => !item.failed).sort((a, b) => b.gpa - a.gpa);
-        const failList = all.filter(item => item.failed);
-
-        let rank = 0, lastGpa = null, seen = 0;
-        passList.forEach(item => {
-          seen += 1;
-          if (item.gpa !== lastGpa) { rank = seen; lastGpa = item.gpa; }
-          batch.update(db.collection('results').doc(item.id), { meritRank: rank, meritTotal: passList.length });
-          hasWrites = true;
-        });
-
-        // Failed students: explicitly clear any previously-stored rank
-        // (e.g. from before this update, or if a resubmitted marksheet now
-        // fails when it didn't before) — their GPA still shows via the
-        // normal gpa field, they just have no মেধাক্রম position.
-        failList.forEach(item => {
-          batch.update(db.collection('results').doc(item.id), {
-            meritRank: firebase.firestore.FieldValue.delete(),
-            meritTotal: firebase.firestore.FieldValue.delete()
-          });
-          hasWrites = true;
-        });
-      });
-      return hasWrites ? batch.commit() : Promise.resolve();
-    })
-    .catch(e => showDiagBanner('মেধাক্রম হিসাব ব্যর্থ: ' + e.message));
-}
-
 // One-off helper (button in রেজাল্ট tab) to backfill/refresh meritRank on
-// EVERY marksheet in this madrasa, grouped by exam+academicYear — needed
-// once so older marksheets (saved before this feature existed) also get a
-// মেধাক্রম value, and safe to re-run any time.
+// EVERY marksheet in this madrasa, grouped by exam+academicYear.
 function recomputeAllMeritRanks() {
   db.collection('results').where('madrasaId', '==', madrasaId).get().then(snap => {
     const combos = {};
@@ -1822,7 +1592,7 @@ function renderResultsScreen(isTeacher) {
         const sb = studentsCache.find(s => s.id === b.data().studentId);
         const rollA = sa && sa.roll !== undefined && sa.roll !== null ? String(sa.roll) : '';
         const rollB = sb && sb.roll !== undefined && sb.roll !== null ? String(sb.roll) : '';
-        const numA = Number(rollA), numB = Number(rollB);
+        const numA = Number(toEnglishDigits(rollA)), numB = Number(toEnglishDigits(rollB));
         const bothNumeric = rollA !== '' && rollB !== '' && !isNaN(numA) && !isNaN(numB);
         if (bothNumeric) return numA - numB;
         return rollA.localeCompare(rollB, 'bn');
@@ -1869,9 +1639,6 @@ function onResultsClassFilterChange(value) {
   renderResultsScreen(true);
 }
 
-// Faster subject entry: pressing Enter in the "প্রাপ্ত নম্বর" (marks
-// obtained) field adds the subject row immediately, instead of forcing the
-// teacher to reach for the "+ বিষয় যোগ করুন" button after every subject.
 function attachResultsFastEntryHandlers() {
   const obtainedEl = document.getElementById('resSubjectObtained');
   if (obtainedEl) {
@@ -1896,9 +1663,6 @@ function addSubjectRow() {
   if (obtained > full) return alert('প্রাপ্ত নম্বর পূর্ণ নম্বরের চেয়ে বেশি হতে পারে না');
   currentMarksheetSubjects.push({ name, full, obtained });
 
-  // Remember this full-marks value so the next subject row starts
-  // pre-filled with it (most exams use the same full marks for every
-  // subject, e.g. 100 or 200) — saves re-typing it every time.
   lastUsedSubjectFullMarks = full;
 
   nameEl.value = '';
@@ -1913,19 +1677,15 @@ function removeSubjectRow(index) {
   renderSubjectRows();
 }
 
-// Lets the teacher fix a wrong subject's full/obtained marks in place,
-// instead of having to remove and re-add the whole subject row. Used both
-// while building a brand-new marksheet and while editing an already-saved
-// one (see editMarksheet below).
 function editSubjectRowValue(index) {
   const s = currentMarksheetSubjects[index];
   if (!s) return;
   const newFullStr = prompt('পূর্ণ নম্বর সম্পাদনা করুন (' + s.name + '):', s.full);
-  if (newFullStr === null) return; // cancelled
+  if (newFullStr === null) return;
   const newFull = Number(newFullStr);
   if (!newFull || newFull <= 0) return alert('পূর্ণ নম্বর সঠিকভাবে দিন');
   const newObtainedStr = prompt('প্রাপ্ত নম্বর সম্পাদনা করুন (' + s.name + '):', s.obtained);
-  if (newObtainedStr === null) return; // cancelled
+  if (newObtainedStr === null) return;
   const newObtained = Number(newObtainedStr);
   if (newObtainedStr.trim() === '' || isNaN(newObtained)) return alert('প্রাপ্ত নম্বর দিন');
   if (newObtained > newFull) return alert('প্রাপ্ত নম্বর পূর্ণ নম্বরের চেয়ে বেশি হতে পারে না');
@@ -1958,15 +1718,8 @@ function saveMarksheet() {
 
   const { totalObtained, totalFull, percentage, grade, gpa } = computeMarksheetTotals(currentMarksheetSubjects);
 
-  // Doc id includes academicYear (when given) so the same exam name reused
-  // in a different year creates a new marksheet instead of overwriting an
-  // older year's result for this student.
   const docId = studentId + '_' + examName + (academicYear ? '_' + academicYear : '');
 
-  // If this marksheet already exists (i.e. this save is really an EDIT of
-  // marks that were wrong), keep its current published/unpublished state
-  // as-is instead of silently resetting it to unpublished every time a
-  // teacher fixes a mistaken number.
   db.collection('results').doc(docId).get().then(existingDoc => {
     const existingPublished = existingDoc.exists ? (existingDoc.data().published === true) : false;
     return db.collection('results').doc(docId).set({
@@ -1988,18 +1741,10 @@ function saveMarksheet() {
     document.getElementById('resExam').value = '';
     renderSubjectRows();
     alert('মার্কশিট সংরক্ষণ করা হয়েছে');
-    // Recompute মেধাক্রম for this exam+class group so the new marksheet is
-    // reflected in everyone's rank right away.
     recomputeMeritRanks(examName, academicYear);
   }).catch(e => { alert('সংরক্ষণ ব্যর্থ: ' + e.message); showDiagBanner('মার্কশিট সংরক্ষণ ব্যর্থ: ' + e.message); });
 }
 
-// Loads an already-saved marksheet back into the "নতুন মার্কশিট তৈরি করুন"
-// form so the teacher can fix a wrong subject's marks (via ✎ সম্পাদনা on
-// each row, or remove/re-add a subject) and press "মার্কশিট সংরক্ষণ করুন"
-// again to save the correction. Saving reuses the same doc id (studentId +
-// examName + academicYear), so it updates the existing marksheet in place
-// instead of creating a duplicate.
 function editMarksheet(studentId, docId) {
   db.collection('results').doc(docId).get().then(doc => {
     if (!doc.exists) return alert('মার্কশিট খুঁজে পাওয়া যায়নি');
@@ -2008,8 +1753,6 @@ function editMarksheet(studentId, docId) {
       return alert('এই পুরাতন রেজাল্টে বিষয়ভিত্তিক তথ্য নেই, তাই সম্পাদনা করা যাবে না');
     }
     currentMarksheetSubjects = r.subjects.map(s => ({ name: s.name, full: s.full, obtained: s.obtained }));
-    // Make sure the student appears in the "শিক্ষার্থী" dropdown regardless
-    // of whatever class filter was active before.
     resultsClassFilter = 'all';
     renderResultsScreen(true);
     setTimeout(() => {
@@ -2043,15 +1786,11 @@ function deleteMarksheet(docId) {
       return db.collection('results').doc(docId).delete();
     })
     .then(() => {
-      // Recompute মেধাক্রম for the group this marksheet belonged to, so
-      // remaining students' ranks shift up correctly.
       if (deletedExamName) recomputeMeritRanks(deletedExamName, deletedAcademicYear);
     })
     .catch(e => { alert('মুছতে ব্যর্থ: ' + e.message); showDiagBanner('মার্কশিট মুছতে ব্যর্থ: ' + e.message); });
 }
 
-// Small helper: pick a colour for a grade badge in the redesigned marksheet
-// (green tones for A+/A, blue for A-/B, orange for C/D, red for F).
 function gradeColor(grade) {
   if (grade === 'A+' || grade === 'A') return { bg: '#dcfce7', fg: '#166534' };
   if (grade === 'A-' || grade === 'B') return { bg: '#dbeafe', fg: '#1e40af' };
@@ -2379,13 +2118,8 @@ function loadMonthlyReport() {
 
   resultWrap.innerHTML = '<div class="card"><p class="muted">লোড হচ্ছে...</p></div>';
   const student = studentsCache.find(s => s.id === reportStudentId);
-  const month = reportMonth; // 'YYYY-MM'
+  const month = reportMonth;
 
-  // NOTE: must filter by madrasaId as well as studentId — firestore.rules'
-  // teacher-read branch checks resource.data.madrasaId == myMadrasaId(),
-  // and Firestore rejects list queries whose filters can't prove that
-  // condition on every possible result. Without this, the whole query was
-  // failing with "Missing or insufficient permissions".
   db.collection('attendance')
     .where('madrasaId', '==', madrasaId)
     .where('studentId', '==', reportStudentId)
@@ -2447,9 +2181,6 @@ function loadMonthlyReport() {
 }
 
 // -- মাসিক সারাংশ (পুরো শ্রেণির সবার একসাথে) --
-// বাছাই করা মাস ও শ্রেণির প্রতিটি শিক্ষার্থীর উপস্থিত/অনুপস্থিত দিন ও উপস্থিতির হার একটি তালিকায়।
-// "কার্যদিবস" = সেই মাসের যে যে দিনে অন্তত একজনের হাজিরা নেওয়া হয়েছে।
-// হাজিরা আনা হয় প্রতিদিনের জন্য আলাদা কোয়েরিতে (madrasaId + date), যা অতিরিক্ত ইনডেক্স ছাড়াই চলে।
 let summaryLoadToken = 0;
 
 function renderSummaryReportControls() {
@@ -2469,7 +2200,7 @@ function loadSummaryReport() {
   if (!resultWrap) return;
   const students = studentsByClass(reportClassFilter);
   if (students.length === 0) { resultWrap.innerHTML = '<div class="card"><p class="muted">কোনো শিক্ষার্থী নেই</p></div>'; return; }
-  const month = reportMonth; // 'YYYY-MM'
+  const month = reportMonth;
   if (!/^\d{4}-\d{2}$/.test(month)) { resultWrap.innerHTML = '<div class="card"><p class="muted">মাস বাছাই করুন</p></div>'; return; }
 
   const myToken = ++summaryLoadToken;
@@ -2481,14 +2212,14 @@ function loadSummaryReport() {
   const dates = [];
   for (let d = 1; d <= daysInMonth; d++) {
     const ds = month + '-' + String(d).padStart(2, '0');
-    if (ds <= today) dates.push(ds); // ভবিষ্যতের দিন বাদ
+    if (ds <= today) dates.push(ds);
   }
   if (dates.length === 0) { resultWrap.innerHTML = '<div class="card"><p class="muted">এই মাস এখনো শুরু হয়নি</p></div>'; return; }
 
   Promise.all(dates.map(ds =>
     db.collection('attendance').where('madrasaId', '==', madrasaId).where('date', '==', ds).get()
   )).then(snaps => {
-    if (myToken !== summaryLoadToken) return; // মাঝপথে মাস/শ্রেণি বদলালে পুরনো ফলাফল বাদ
+    if (myToken !== summaryLoadToken) return;
     const ids = {};
     students.forEach(s => { ids[s.id] = { p: 0, a: 0 }; });
     const workDays = {};
@@ -2496,18 +2227,31 @@ function loadSummaryReport() {
       snap.docs.forEach(doc => {
         const x = doc.data();
         const rec = ids[x.studentId];
-        if (!rec) return; // অন্য শ্রেণির শিক্ষার্থী
+        if (!rec) return;
         if (x.status === 'present') { rec.p++; workDays[dates[i]] = true; }
         else if (x.status === 'absent') { rec.a++; workDays[dates[i]] = true; }
       });
     });
     const workCount = Object.keys(workDays).length;
 
+    // রোল অনুযায়ী ধারাবাহিকভাবে সাজানো: প্রথমে সংখ্যা হিসেবে রোল তুলনা করা হয়,
+    // রোল সংখ্যাসূচক না হলে (যেমন কিছু বাংলা সংখ্যায় লেখা থাকলে) স্ট্রিং তুলনায় ফিরে যায়।
+    // শ্রেণি ফিল্টার "সকল শ্রেণি" থাকলে আগে শ্রেণি অনুযায়ী, তারপর প্রতিটি শ্রেণির ভেতরে রোল অনুযায়ী সাজে।
+    const rollSortValue = (roll) => {
+      const raw = (roll === undefined || roll === null) ? '' : String(roll);
+      const asciiDigits = raw.replace(/[০-৯]/g, ch => String(BANGLA_DIGITS.indexOf(ch)));
+      const n = Number(asciiDigits);
+      return { raw, n: (asciiDigits !== '' && !isNaN(n)) ? n : null };
+    };
+
     const rows = students.slice().sort((a, b) => {
       const ca = String(a.className || ''), cb = String(b.className || '');
-      if (ca !== cb) return ca.localeCompare(cb, 'bn');
-      const ra = Number(a.roll), rb = Number(b.roll);
-      if (!isNaN(ra) && !isNaN(rb) && ra !== rb) return ra - rb;
+      if (reportClassFilter === 'all' && ca !== cb) return ca.localeCompare(cb, 'bn');
+      const va = rollSortValue(a.roll), vb = rollSortValue(b.roll);
+      if (va.n !== null && vb.n !== null && va.n !== vb.n) return va.n - vb.n;
+      if (va.n !== null && vb.n === null) return -1;
+      if (va.n === null && vb.n !== null) return 1;
+      if (va.raw !== vb.raw) return va.raw.localeCompare(vb.raw, 'bn');
       return String(a.name).localeCompare(String(b.name), 'bn');
     }).map(s => {
       const r = ids[s.id];
@@ -2623,17 +2367,9 @@ function deleteNotice(id) {
   db.collection('notices').doc(id).delete();
 }
 
-// ---- Diary (শিক্ষকের ডায়েরি/হোমওয়ার্ক এন্ট্রি, কাগজের রেজিস্টার অনুযায়ী বিষয়ভিত্তিক ফরম্যাট, শ্রেণি অনুযায়ী, ফাইল সংযুক্তি সহ) ----
+// ---- Diary ----
+const DIARY_MAX_FILE_BYTES = 700 * 1024;
 
-const DIARY_MAX_FILE_BYTES = 700 * 1024; // ~700KB raw file limit (base64 inflates it, Firestore doc cap is 1MB)
-
-// Subjects, split into individual fields. Each group below used to be ONE
-// combined field (e.g. "কুরআন/তরীকায়ে তা'লীম" as a single line, forcing the
-// teacher to write about both together) — now every subject is its own
-// optional field, so the teacher can fill in just one of a pair (e.g. only
-// "কুরআন") and leave the other blank if that's all that was covered that
-// day. Fields are grouped visually (side-by-side) so the layout still
-// matches the paper register at a glance.
 const DIARY_SUBJECT_GROUPS = [
   { subjects: ["কুরআন", "তরীকায়ে তা'লীম"] },
   { subjects: ['আরবি ১ম', 'আরবি লিখা'] },
@@ -2649,9 +2385,6 @@ const DIARY_SUBJECT_GROUPS = [
 ];
 const DIARY_SUBJECTS = DIARY_SUBJECT_GROUPS.reduce((acc, g) => acc.concat(g.subjects), []);
 
-// Old combined subject names, from before this split — kept ONLY so diary
-// entries saved before this update still display correctly. Never used for
-// new entries.
 const LEGACY_DIARY_SUBJECTS = [
   "কুরআন/তরীকায়ে তা'লীম",
   'আরবি ১ম/আরবি লিখা',
@@ -2669,9 +2402,6 @@ const BANGLA_WEEKDAYS = ['রবিবার', 'সোমবার', 'মঙ্�
 
 function banglaWeekdayFromDate(dateStr) {
   if (!dateStr) return '';
-  // Parse as local date parts (not via `new Date(dateStr)`, which reads
-  // 'YYYY-MM-DD' as UTC midnight and can shift a day backward/forward
-  // depending on the device's timezone).
   const parts = dateStr.split('-').map(Number);
   const d = new Date(parts[0], parts[1] - 1, parts[2]);
   return BANGLA_WEEKDAYS[d.getDay()] || '';
@@ -2770,11 +2500,6 @@ function renderDiaryScreen(isTeacher) {
         }
       }
 
-      // Subject-wise register rows. Checks the new split subject list
-      // first, then the legacy combined names (for entries saved before
-      // this update), then anything else present on the doc as a safety
-      // net — so old entries keep displaying correctly without needing any
-      // data migration.
       let subjectsHtml;
       if (r.subjects && typeof r.subjects === 'object' && Object.keys(r.subjects).length > 0) {
         const knownOrder = DIARY_SUBJECTS.concat(LEGACY_DIARY_SUBJECTS);
@@ -2876,8 +2601,7 @@ function deleteDiaryEntry(id) {
     .catch(e => { alert('মুছতে ব্যর্থ: ' + e.message); showDiagBanner('ডায়েরী মুছতে ব্যর্থ: ' + e.message); });
 }
 
-// ---- Suggestion box (পরামর্শ বক্স, শিক্ষার্থীর নাম-সহ) ----
-
+// ---- Suggestion box ----
 function renderSuggestionsScreen(isTeacher) {
   let html = '';
   if (!isTeacher) {
@@ -2966,29 +2690,6 @@ function deleteSuggestion(id) {
 }
 
 // ================= শিক্ষকগণ (MULTI-ADMIN TEACHER MANAGEMENT) =================
-// Only visible/usable for teacher accounts whose teachers/{uid} doc has
-// isAdmin:true (see myTeacherIsAdmin, resolved in ensureTeacherDoc above,
-// and enforced server-side in firestore.rules — this screen only ever
-// being rendered client-side for an admin is a UX convenience, NOT the
-// real security boundary).
-//
-// "যোগ করুন" (add) creates a brand-new Firebase Auth email/password
-// account for the new teacher. This has to be done through a SECOND,
-// throwaway Firebase app instance — calling
-// createUserWithEmailAndPassword on the normal `auth` object would
-// sign the admin OUT of their own account and sign them into the new
-// teacher's account instead (a well-known Firebase behavior). The
-// secondary app instance is deleted again right after, so it never
-// lingers.
-//
-// "নিষ্ক্রিয় করুন" (deactivate) does NOT delete the teacher's Firebase
-// Auth account (that requires the Admin SDK / a Cloud Function, which
-// needs the paid Blaze plan — deliberately avoided so far in this
-// project). Instead it sets active:false on their teachers/{uid} doc.
-// firestore.rules' isTeacherAuth() now also checks this active flag, so
-// a deactivated teacher instantly loses ALL access everywhere in the
-// app (students, attendance, results, etc.) the moment this is set —
-// not just from this "শিক্ষকগণ" screen.
 function renderTeachersScreen() {
   setScreen(`
     <div class="card">
@@ -3055,8 +2756,6 @@ function addTeacherAccount() {
 
   let secondaryApp;
   try {
-    // Unique app name each time so repeated add attempts never collide with
-    // a still-initializing previous instance.
     secondaryApp = firebase.initializeApp(firebase.apps[0].options, 'TeacherCreate_' + Date.now());
   } catch (e) {
     if (errEl) errEl.textContent = 'শুরু করা যায়নি: ' + e.message;
@@ -3105,21 +2804,7 @@ function toggleTeacherActive(uid, currentlyActive) {
     .catch(e => { alert('আপডেট ব্যর্থ: ' + e.message); showDiagBanner('সক্রিয়/নিষ্ক্রিয় আপডেট ব্যর্থ: ' + e.message); });
 }
 
-// ================= সুপার অ্যাডমিন (SUPER ADMIN — all-madrasas panel) =================
-// Only ever rendered/reachable for the one hardcoded SUPER_ADMIN_EMAIL
-// account (see ensureTeacherDoc/submitSignup where isSuperAdminUser is
-// resolved, and renderTeacherNav/teacherTab where non-super-admin access is
-// blocked client-side). The REAL security boundary is firestore.rules: the
-// madrasas collection's `allow list` is restricted to isSuperAdmin()
-// (checked via request.auth.token.email), so no other admin — no matter
-// how many madrasas they run — can ever list this collection, even by
-// calling Firestore directly.
-//
-// Deactivating a madrasa here sets active:false on its madrasas/{id} doc.
-// firestore.rules' isTeacherAuth() and isStudentAuth() both check this (via
-// isMadrasaActive()), so every teacher AND every student of that madrasa
-// instantly loses all access app-wide — the same instant-cutoff pattern
-// already used for a single deactivated teacher account.
+// ================= সুপার অ্যাডমিন =================
 function renderSuperAdminScreen() {
   setScreen(`
     <div class="card">
@@ -3173,18 +2858,8 @@ function toggleMadrasaActive(id, currentlyActive) {
 }
 
 // ================= FEES / বেতন =================
-// Two kinds of fee are tracked:
-//  - monthly (মাসিক বেতন): one paid/due entry per student per month, marked
-//    the same way attendance is (doc id = studentId_YYYY-MM, in fees_monthly)
-//  - onetime (ভর্তি/পরীক্ষা ফি): ad-hoc charges of any custom name/amount,
-//    each its own doc in fees_onetime, toggled paid/due individually
-//
-// Students can see only their own fee/due status; teachers see and manage
-// everyone's, filterable by class like the rest of the app.
-
 function renderFeesScreen(isTeacher) {
   currentFeesIsTeacher = isTeacher;
-  // "বকেয়া তালিকা" শুধু শিক্ষকের জন্য; শিক্ষার্থীর পাশে এই মোড থাকলে মাসিক বেতনে ফিরিয়ে দেওয়া হয়
   if (!isTeacher && feesMode === 'dues') feesMode = 'monthly';
   setScreen(`
     <div class="card">
@@ -3215,10 +2890,6 @@ function onFeesClassFilterChange(value) {
   else loadOnetimeFeesTeacher();
 }
 
-// ---- বকেয়া তালিকা (শিক্ষক): কার কোন কোন মাসের বেতন ও কত টাকা বাকি, একসাথে ----
-// নিয়ম: মাসিক বেতনের যে এন্ট্রি "পরিশোধিত" নয় এবং যাতে টাকার পরিমাণ লেখা আছে (বা স্পষ্টভাবে "বকেয়া" চিহ্নিত)
-// শুধু সেগুলোই বকেয়া। যে মাসে কোনো হিসাবই লেখা হয়নি, সেটা বকেয়া ধরা হয় না।
-// সাথে ভর্তি/পরীক্ষা ফির বকেয়াও যোগ হয়। এক শিক্ষার্থীর সব বকেয়া এক সারিতে।
 let duesLoadToken = 0;
 const duesMsgCache = {};
 
@@ -3253,7 +2924,7 @@ function loadDuesReport() {
     db.collection('fees_monthly').where('madrasaId', '==', madrasaId).get(),
     db.collection('fees_onetime').where('madrasaId', '==', madrasaId).get()
   ]).then(res => {
-    if (myToken !== duesLoadToken) return; // মাঝপথে শ্রেণি বদলালে পুরনো ফলাফল বাদ
+    if (myToken !== duesLoadToken) return;
     const per = {};
     students.forEach(st => { per[st.id] = { months: [], monthAmt: 0, extras: [], extraAmt: 0 }; });
 
@@ -3282,7 +2953,7 @@ function loadDuesReport() {
     }).filter(x => x.count > 0).sort((a, b) => {
       const ca = String(a.st.className || ''), cb = String(b.st.className || '');
       if (ca !== cb) return ca.localeCompare(cb, 'bn');
-      const ra = Number(a.st.roll), rb = Number(b.st.roll);
+      const ra = Number(toEnglishDigits(a.st.roll)), rb = Number(toEnglishDigits(b.st.roll));
       if (!isNaN(ra) && !isNaN(rb) && ra !== rb) return ra - rb;
       return String(a.st.name).localeCompare(String(b.st.name), 'bn');
     });
@@ -3358,7 +3029,6 @@ function loadDuesReport() {
   });
 }
 
-// "জানান" বাটন: WhatsApp (বা নম্বরে WhatsApp না থাকলে SMS) খোলে, বার্তা আগে থেকেই লেখা থাকে। অ্যাপ নিজে কিছু পাঠায় না।
 function sendDuesMessage(studentId) {
   const text = duesMsgCache[studentId];
   const c = studentContactsCache[studentId] || {};
@@ -3372,7 +3042,6 @@ function sendDuesMessage(studentId) {
   }
 }
 
-// ---- Monthly fee (মাসিক বেতন) ----
 function renderMonthlyFeesControls(isTeacher) {
   const controlsWrap = document.getElementById('feesControlsWrap');
   if (!controlsWrap) return;
@@ -3438,11 +3107,6 @@ function updateFeeAmount(studentId, month, value) {
   }, { merge: true }).catch(e => showDiagBanner('বেতন সংরক্ষণ ব্যর্থ: ' + e.message));
 }
 
-// Updates ONLY the clicked student's own fee card in place (buttons +
-// paid-date line) instead of reloading every student's card via
-// loadMonthlyFeesTeacher(), which used to make the whole বেতন list flash
-// "লোড হচ্ছে..." and reload on every single tap — the same class of bug
-// already fixed for the attendance present/absent buttons.
 function setFeeStatus(studentId, month, status) {
   const data = { studentId, month, madrasaId, status };
   if (status === 'paid') data.paidDate = todayLocal();
@@ -3459,8 +3123,6 @@ function updateFeeButtonsUI(studentId, status) {
   if (buttons[1]) buttons[1].className = 'small' + (status === 'due' ? ' danger' : ' secondary');
 }
 
-// Updates just one student's fee card (buttons + paid-date line) without
-// touching/reloading anyone else's card.
 function updateFeeCellUI(studentId, status, paidDate) {
   updateFeeButtonsUI(studentId, status);
   const cell = document.getElementById('fee_' + studentId);
@@ -3476,7 +3138,6 @@ function updateFeeCellUI(studentId, status, paidDate) {
   }
 }
 
-// ---- Monthly fee (student's own view) ----
 function loadMonthlyFeesStudent() {
   const resultWrap = document.getElementById('feesResultWrap');
   if (!resultWrap) return;
@@ -3498,7 +3159,6 @@ function loadMonthlyFeesStudent() {
     });
 }
 
-// ---- One-time fee (ভর্তি/পরীক্ষা ফি ইত্যাদি, teacher) ----
 function renderOnetimeFeesControls(isTeacher) {
   const controlsWrap = document.getElementById('feesControlsWrap');
   if (!controlsWrap) return;
@@ -3584,7 +3244,6 @@ function deleteOnetimeFee(docId) {
   db.collection('fees_onetime').doc(docId).delete();
 }
 
-// ---- One-time fee (student's own view) ----
 function loadOnetimeFeesStudent() {
   const resultWrap = document.getElementById('feesResultWrap');
   if (!resultWrap) return;
@@ -3607,11 +3266,10 @@ function loadOnetimeFeesStudent() {
     });
 }
 // ===== মেধাক্রম: GPA → মোট নম্বর → রোল =====
-// এটি উপরের পুরাতন recomputeMeritRanks ফাংশনকে প্রতিস্থাপন করে
 function meritRollCompare(a, b) {
   const ra = a === undefined || a === null ? '' : String(a);
   const rb = b === undefined || b === null ? '' : String(b);
-  const na = Number(ra), nb = Number(rb);
+  const na = Number(toEnglishDigits(ra)), nb = Number(toEnglishDigits(rb));
   if (ra !== '' && rb !== '' && !isNaN(na) && !isNaN(nb)) return na - nb;
   return ra.localeCompare(rb, 'bn');
 }
