@@ -1122,6 +1122,14 @@ function renderAttendanceList() {
   students.forEach(s => loadAttendanceCell(s, date));
 }
 
+// হাজিরার তালিকায় শিক্ষার্থীর নামের পাশে রোল ও শ্রেণি দেখানোর জন্য (রোল বাংলা সংখ্যায়)
+function attendanceStudentLabel(s) {
+  const parts = [];
+  if (s.roll !== undefined && s.roll !== null && String(s.roll).trim() !== '') parts.push('রোল ' + toBanglaNumeral(String(s.roll).trim()));
+  parts.push(s.className || '-');
+  return `<b>${esc(s.name)}</b> <span class="muted">(${esc(parts.join(', '))})</span>`;
+}
+
 function loadAttendanceCell(s, date) {
   const cell = document.getElementById('att_' + s.id);
   if (cell) cell.innerHTML = 'লোড হচ্ছে...';
@@ -1142,7 +1150,7 @@ function loadAttendanceCell(s, date) {
       const liveCell = document.getElementById('att_' + s.id);
       if (!liveCell) return;
       liveCell.innerHTML = `
-        <b>${esc(s.name)}</b> <span class="muted">(${esc(s.className || '-')})</span>
+        ${attendanceStudentLabel(s)}
         <div class="row" style="margin-top:6px;">
           <button class="small ${d.status==='present'?'':'secondary'}" onclick="setAttendance('${jsq(s.id)}','${jsq(date)}','present')">উপস্থিত</button>
           <button class="small ${d.status==='absent'?'danger':'secondary'}" onclick="setAttendance('${jsq(s.id)}','${jsq(date)}','absent')">অনুপস্থিত</button>
@@ -1170,7 +1178,7 @@ function renderAttendanceCellError(s, date, e) {
   const cell = document.getElementById('att_' + s.id);
   if (!cell) return;
   cell.innerHTML = `
-    <b>${esc(s.name)}</b> <span class="muted">(${esc(s.className || '-')})</span>
+    ${attendanceStudentLabel(s)}
     <p class="muted" style="color:#dc2626;margin:6px 0;">লোড করতে সমস্যা হয়েছে${e && e.message ? ' (' + esc(e.message) + ')' : ''}</p>
     <button class="small secondary" onclick="retryAttendanceCell('${jsq(s.id)}','${jsq(date)}')">আবার চেষ্টা করুন</button>
   `;
