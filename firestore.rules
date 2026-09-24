@@ -1,5 +1,4 @@
 rules_version = '2';
-
 service cloud.firestore {
   match /databases/{database}/documents {
 
@@ -26,17 +25,20 @@ service cloud.firestore {
     function isTeacherAuth() {
       return request.auth != null && request.auth.token.firebase.sign_in_provider == 'password' &&
         (!exists(/databases/$(database)/documents/teachers/$(request.auth.uid)) ||
-         (get(/databases/$(database)/documents/teachers/$(request.auth.uid)).data.get('active', true) != false &&
-          isMadrasaActive(get(/databases/$(database)/documents/teachers/$(request.auth.uid)).data.madrasaId)));
+          (get(/databases/$(database)/documents/teachers/$(request.auth.uid)).data.get('active', true) != false &&
+           isMadrasaActive(get(/databases/$(database)/documents/teachers/$(request.auth.uid)).data.madrasaId)));
     }
+
     function isStudentAuth() {
       return request.auth != null && request.auth.token.firebase.sign_in_provider == 'anonymous' &&
         (!exists(/databases/$(database)/documents/sessions/$(request.auth.uid)) ||
-         isMadrasaActive(get(/databases/$(database)/documents/sessions/$(request.auth.uid)).data.madrasaId));
+          isMadrasaActive(get(/databases/$(database)/documents/sessions/$(request.auth.uid)).data.madrasaId));
     }
+
     function mySessionStudentId() {
       return get(/databases/$(database)/documents/sessions/$(request.auth.uid)).data.studentId;
     }
+
     function myClassName() {
       return get(/databases/$(database)/documents/students/$(mySessionStudentId())).data.className;
     }
@@ -67,24 +69,21 @@ service cloud.firestore {
         request.auth.uid == uid ||
         (isTeacherAuth() && resource.data.madrasaId == myMadrasaId() && isRequesterAdmin())
       );
-
       allow create: if isTeacherAuth() && (
         (isRequesterAdmin() && request.resource.data.madrasaId == myMadrasaId()) ||
         (request.auth.uid == uid &&
-          request.resource.data.get('isAdmin', false) == true &&
-          request.resource.data.get('active', true) == true &&
-          request.resource.data.madrasaId != 'madrasa-001' &&
-          !exists(/databases/$(database)/documents/madrasas/$(request.resource.data.madrasaId)))
+         request.resource.data.get('isAdmin', false) == true &&
+         request.resource.data.get('active', true) == true &&
+         request.resource.data.madrasaId != 'madrasa-001' &&
+         !exists(/databases/$(database)/documents/madrasas/$(request.resource.data.madrasaId)))
       );
-
       allow update: if isTeacherAuth() && (
         (isRequesterAdmin() && resource.data.madrasaId == myMadrasaId()) ||
         (request.auth.uid == uid &&
-          request.resource.data.madrasaId == resource.data.madrasaId &&
-          request.resource.data.get('isAdmin', false) == resource.data.get('isAdmin', false) &&
-          request.resource.data.get('active', true) == resource.data.get('active', true))
+         request.resource.data.madrasaId == resource.data.madrasaId &&
+         request.resource.data.get('isAdmin', false) == resource.data.get('isAdmin', false) &&
+         request.resource.data.get('active', true) == resource.data.get('active', true))
       );
-
       allow delete: if false;
     }
 
@@ -154,15 +153,13 @@ service cloud.firestore {
 
     match /attendance/{docId} {
       allow get: if resource == null ||
-        (isTeacherAuth() && resource.data.madrasaId == myMadrasaId()) ||
-        (isStudentAuth() && resource.data.studentId == mySessionStudentId());
+                    (isTeacherAuth() && resource.data.madrasaId == myMadrasaId()) ||
+                    (isStudentAuth() && resource.data.studentId == mySessionStudentId());
       allow list: if (isTeacherAuth() && resource.data.madrasaId == myMadrasaId()) ||
-        (isStudentAuth() && resource.data.studentId == mySessionStudentId());
-
+                     (isStudentAuth() && resource.data.studentId == mySessionStudentId());
       allow write: if isTeacherAuth() && request.resource.data.madrasaId == myMadrasaId() &&
         request.resource.data.get('timeLeftHome', null) ==
           (resource == null ? null : resource.data.get('timeLeftHome', null));
-
       allow write: if isStudentAuth() && request.resource.data.studentId == mySessionStudentId() &&
         (resource == null || !resource.data.get('timeLeftHome', null)) &&
         request.resource.data.get('status', null) ==
@@ -173,15 +170,25 @@ service cloud.firestore {
 
     match /leaves/{docId} {
       allow read: if (isTeacherAuth() && resource.data.madrasaId == myMadrasaId()) ||
-        (isStudentAuth() && resource.data.studentId == mySessionStudentId());
+                     (isStudentAuth() && resource.data.studentId == mySessionStudentId());
       allow create: if (isTeacherAuth() && request.resource.data.madrasaId == myMadrasaId()) ||
-        (isStudentAuth() && request.resource.data.studentId == mySessionStudentId());
+                       (isStudentAuth() && request.resource.data.studentId == mySessionStudentId());
       allow update, delete: if isTeacherAuth() && resource.data.madrasaId == myMadrasaId();
     }
 
+    // *** FIXED: মার্কশিট সংরক্ষণ ব্যর্থ (Missing or insufficient permissions) ***
+    // saveMarksheet() সেভ করার আগে ওই ডকুমেন্ট get() করে (আগে প্রকাশিত ছিল কি না
+    // দেখতে)। নতুন মার্কশিটের ডকুমেন্ট তখনো নেই, তাই resource null। আগের `allow read`
+    // সরাসরি resource.data পড়ত, ফলে null-এ ফেইল করত। attendance/fees_monthly-এর
+    // মতো এখানেও get আর list আলাদা করা হলো এবং get-এ `resource == null` যোগ হলো।
     match /results/{docId} {
-      allow read: if (isTeacherAuth() && resource.data.madrasaId == myMadrasaId()) ||
-        (isStudentAuth() && resource.data.studentId == mySessionStudentId());
+      allow get: if request.auth != null && (
+                      resource == null ||
+                      (isTeacherAuth() && resource.data.madrasaId == myMadrasaId()) ||
+                      (isStudentAuth() && resource.data.studentId == mySessionStudentId())
+                    );
+      allow list: if (isTeacherAuth() && resource.data.madrasaId == myMadrasaId()) ||
+                     (isStudentAuth() && resource.data.studentId == mySessionStudentId());
       allow create, update: if isTeacherAuth() && request.resource.data.madrasaId == myMadrasaId();
       allow delete: if isTeacherAuth() && resource.data.madrasaId == myMadrasaId();
     }
@@ -199,7 +206,7 @@ service cloud.firestore {
     // request.resource.data) and a separate delete (uses resource.data).
     match /diary/{docId} {
       allow read: if (isTeacherAuth() && resource.data.madrasaId == myMadrasaId()) ||
-        (isStudentAuth() && resource.data.madrasaId == myMadrasaId() && resource.data.className == myClassName());
+                     (isStudentAuth() && resource.data.madrasaId == myMadrasaId() && resource.data.className == myClassName());
       allow create, update: if isTeacherAuth() && request.resource.data.madrasaId == myMadrasaId();
       allow delete: if isTeacherAuth() && resource.data.madrasaId == myMadrasaId();
     }
@@ -213,7 +220,7 @@ service cloud.firestore {
     //  - update (admin reply) / delete: admin of the same madrasa only.
     match /suggestions/{docId} {
       allow read: if (isRequesterAdmin() && resource.data.madrasaId == myMadrasaId()) ||
-        (isStudentAuth() && resource.data.studentId == mySessionStudentId());
+                     (isStudentAuth() && resource.data.studentId == mySessionStudentId());
       allow create: if isStudentAuth() &&
         request.resource.data.studentId == mySessionStudentId() &&
         request.resource.data.madrasaId == myMadrasaId() &&
@@ -228,17 +235,17 @@ service cloud.firestore {
 
     match /fees_monthly/{docId} {
       allow get: if resource == null ||
-        (isTeacherAuth() && resource.data.madrasaId == myMadrasaId()) ||
-        (isStudentAuth() && resource.data.studentId == mySessionStudentId());
+                    (isTeacherAuth() && resource.data.madrasaId == myMadrasaId()) ||
+                    (isStudentAuth() && resource.data.studentId == mySessionStudentId());
       allow list: if (isTeacherAuth() && resource.data.madrasaId == myMadrasaId()) ||
-        (isStudentAuth() && resource.data.studentId == mySessionStudentId());
+                     (isStudentAuth() && resource.data.studentId == mySessionStudentId());
       allow create, update: if isTeacherAuth() && request.resource.data.madrasaId == myMadrasaId();
       allow delete: if isTeacherAuth() && resource.data.madrasaId == myMadrasaId();
     }
 
     match /fees_onetime/{docId} {
       allow read: if (isTeacherAuth() && resource.data.madrasaId == myMadrasaId()) ||
-        (isStudentAuth() && resource.data.studentId == mySessionStudentId());
+                     (isStudentAuth() && resource.data.studentId == mySessionStudentId());
       allow create, update: if isTeacherAuth() && request.resource.data.madrasaId == myMadrasaId();
       allow delete: if isTeacherAuth() && resource.data.madrasaId == myMadrasaId();
     }
