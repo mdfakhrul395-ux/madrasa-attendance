@@ -19,6 +19,17 @@ function escapeHtml(str) {
     .replace(/'/g, '&#39;');
 }
 
+// onclick="fn('...')"-এর '...' এর ভেতরে ডকুমেন্ট আইডি বসানোর জন্য।
+// পরামর্শের ডকুমেন্ট আইডি শিক্ষার্থী নিজে বেছে নিতে পারে, তাই এটি অবশ্যই নিরাপদ করতে হবে।
+// (শুধু escapeHtml যথেষ্ট নয়: ব্রাউজার HTML decode করলে ' আবার ফিরে আসে।)
+function suggJsq(v) {
+  const s = String(v === undefined || v === null ? '' : v)
+    .replace(/\\/g, '\\\\')
+    .replace(/'/g, "\\'")
+    .replace(/[\r\n\u2028\u2029]/g, ' ');
+  return escapeHtml(s);
+}
+
 function renderTeacherNav(activeKey) {
   const nav = document.getElementById('bottomNav');
   nav.style.display = 'block';
@@ -107,20 +118,20 @@ function renderSuggestionsScreen(isTeacher) {
         : 'আপনার পরামর্শ';
       const replyHtml = r.reply
         ? `<div style="margin-top:8px;padding:8px 10px;background:#eef2ff;border-radius:8px;">
-             <div class="muted" style="font-size:12px;">অ্যাডমিনের উত্তর${replyDate ? ' • ' + replyDate : ''}</div>
+             <div class="muted" style="font-size:12px;">অ্যাডমিনের উত্তর${replyDate ? ' • ' + escapeHtml(replyDate) : ''}</div>
              <div>${escapeHtml(r.reply).replace(/\n/g, '<br>')}</div>
            </div>`
         : '';
       return `<div class="student-row" style="display:block;">
         <div style="display:flex;justify-content:space-between;">
           <b>${title}</b>
-          <span class="muted">${date}</span>
+          <span class="muted">${escapeHtml(date)}</span>
         </div>
         <div style="margin-top:4px;">${escapeHtml(r.text).replace(/\n/g, '<br>')}</div>
         ${replyHtml}
         ${isTeacher ? `<div style="margin-top:6px;">
-          <button class="small secondary" onclick="replyToSuggestion('${d.id}')">${r.reply ? 'উত্তর সম্পাদনা' : 'উত্তর দিন'}</button>
-          <button class="small danger" onclick="deleteSuggestion('${d.id}')">মুছুন</button>
+          <button class="small secondary" onclick="replyToSuggestion('${suggJsq(d.id)}')">${r.reply ? 'উত্তর সম্পাদনা' : 'উত্তর দিন'}</button>
+          <button class="small danger" onclick="deleteSuggestion('${suggJsq(d.id)}')">মুছুন</button>
         </div>` : ''}
       </div>`;
     }).join('');

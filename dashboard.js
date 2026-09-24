@@ -17,6 +17,10 @@
  * তারিখের হিসাব app.js এর todayLocal() এর মতোই (ফোনের নিজস্ব সময় অনুযায়ী YYYY-MM-DD),
  * তাই হাজিরার সাথে মিলে যায়। আগে এখানে UTC তারিখ ব্যবহার হতো, যার ফলে বাংলাদেশে
  * রাত ১২টা থেকে ভোর ৬টা পর্যন্ত ড্যাশবোর্ডে আগের দিনের তারিখ ও হাজিরা দেখাত।
+ *
+ * XSS সুরক্ষা: ডেটাবেসের লেখা HTML-এ বসানোর আগে esc() দিয়ে, আর onclick="fn('...')"-এর
+ * ভেতরের আইডি jsq() দিয়ে নিরাপদ করা হয়। (esc() একা onclick-এর '...' স্ট্রিংয়ের জন্য
+ * যথেষ্ট নয়, কারণ ব্রাউজার HTML decode করার পর ' আবার ফিরে আসে।)
  */
 (function () {
   'use strict';
@@ -274,7 +278,10 @@
 
   const bn = n => toBanglaNumeral(n);
   const el = id => document.getElementById(id);
+  // HTML লেখা ও "..." অ্যাট্রিবিউটের জন্য
   const esc = s => String(s == null ? '' : s).replace(/[&<>"']/g, c => ({ '&': '&amp;', '<': '&lt;', '>': '&gt;', '"': '&quot;', "'": '&#39;' }[c]));
+  // onclick="fn('...')"-এর '...' স্ট্রিংয়ের ভেতরের জন্য: আগে JS স্ট্রিং হিসেবে, তারপর HTML হিসেবে নিরাপদ
+  const jsq = s => esc(String(s == null ? '' : s).replace(/\\/g, '\\\\').replace(/'/g, "\\'").replace(/[\r\n\u2028\u2029]/g, ' '));
   const trunc = (s, n) => { const a = Array.from(String(s || '')); return a.length > n ? a.slice(0, n).join('') + '…' : a.join(''); };
   // আজকের তারিখ, ফোনের নিজস্ব (বাংলাদেশ) সময় অনুযায়ী — app.js এর todayLocal() এর মতোই
   const todayStr = () => {
@@ -518,7 +525,8 @@
       const st = map[l.studentId];
       const name = st ? st.name : 'অজানা শিক্ষার্থী';
       const meta = [st && st.className ? esc(st.className) : '', l.date ? esc(fmtDay(l.date)) : ''].filter(Boolean).map(x => `<span>${x}</span>`).join(' &nbsp; ');
-      const id = esc(l.id);
+      // ছুটির ডকুমেন্টের আইডি শিক্ষার্থী নিজে বেছে নিতে পারে — তাই onclick-এর '...' এর ভেতরে jsq() (esc() নয়)
+      const id = jsq(l.id);
       return `
       <div class="dash-leave">
         <div class="dash-avatar">${esc(Array.from(name)[0] || '?')}</div>
@@ -715,7 +723,7 @@
             <div class="dash-rank-name">${esc(x.st.name)}</div>
             <div class="dash-rank-meta">রোল ${esc(bn(x.st.roll || '-'))}</div>
           </div>
-          <div class="dash-gpa">GPA ${esc(bn(x.r.totals.gpa))}<small>মোট ${bn(x.r.totals.totalObtained)}/${bn(x.r.totals.totalFull)}</small></div>
+          <div class="dash-gpa">GPA ${esc(bn(x.r.totals.gpa))}<small>মোট ${esc(bn(x.r.totals.totalObtained))}/${esc(bn(x.r.totals.totalFull))}</small></div>
         </div>`).join('');
     } else if (anyPass) {
       body = `<p class="dash-note-txt">মেধাক্রম এখনো হিসাব করা হয়নি। রেজাল্টের পাতায় গিয়ে "মেধাক্রম হালনাগাদ করুন" বাটন চাপুন।</p>`;
@@ -1153,13 +1161,13 @@
     }
     const t = computeMarksheetTotals(r.subjects);
     const gc = gradeColor(t.grade);
-    const rank = r.meritRank ? `<span class="dash-chip">মেধাক্রম ${banglaOrdinal(r.meritRank)}${r.meritTotal ? ' / ' + bn(r.meritTotal) : ''}</span>` : '';
+    const rank = r.meritRank ? `<span class="dash-chip">মেধাক্রম ${esc(banglaOrdinal(r.meritRank))}${r.meritTotal ? ' / ' + esc(bn(r.meritTotal)) : ''}</span>` : '';
     const fail = t.hasFailedSubject ? '<span class="dash-badge bad">অকৃতকার্য</span>' : '';
     const shown = r.subjects.slice(0, 6);
     const bars = shown.map((s, i) => {
       const pct = s.full > 0 ? s.obtained / s.full * 100 : 0;
       const sg = gradeFromPercent(pct);
-      return `<div class="dash-subj"><div class="dash-subj-top"><span>${esc(s.name)}</span><span><b>${bn(s.obtained)}</b>/${bn(s.full)} &nbsp;<em style="font-style:normal;color:${gradeColor(sg.grade).fg};font-weight:800">${esc(sg.grade)}</em></span></div>`
+      return `<div class="dash-subj"><div class="dash-subj-top"><span>${esc(s.name)}</span><span><b>${esc(bn(s.obtained))}</b>/${esc(bn(s.full))} &nbsp;<em style="font-style:normal;color:${gradeColor(sg.grade).fg};font-weight:800">${esc(sg.grade)}</em></span></div>`
         + `<div class="dash-subj-bar"><i style="width:${Math.max(3, Math.round(pct))}%;background:${gradeColor(sg.grade).fg};animation-delay:${i * 60}ms"></i></div></div>`;
     }).join('');
     const rest = r.subjects.length > shown.length ? `<div class="dash-note-txt" style="padding-top:10px">আরও ${bn(r.subjects.length - shown.length)}টি বিষয় মার্কশিটে আছে</div>` : '';
@@ -1178,7 +1186,7 @@
         <div class="dash-res-meta">
           <div class="dash-res-exam">${esc(r.examName || '')}</div>
           <div class="dash-res-sub">${r.academicYear ? 'শিক্ষাবর্ষ ' + esc(bn(r.academicYear)) : ''}</div>
-          <div class="dash-res-nums"><span><b>${bn(t.gpa)}</b>GPA</span><span><b>${bn(t.percentage)}%</b>শতাংশ</span><span><b>${bn(t.totalObtained)}</b>মোট নম্বর</span></div>
+          <div class="dash-res-nums"><span><b>${esc(bn(t.gpa))}</b>GPA</span><span><b>${esc(bn(t.percentage))}%</b>শতাংশ</span><span><b>${esc(bn(t.totalObtained))}</b>মোট নম্বর</span></div>
         </div>
       </div>
       <div style="display:flex;gap:8px;flex-wrap:wrap;margin-top:12px">${rank}${fail}</div>
@@ -1473,8 +1481,9 @@
     const shown = q ? all.filter(s => String(s.name || '').toLowerCase().indexOf(q) > -1 || String(s.roll == null ? '' : s.roll) === q || bn(s.roll == null ? '' : s.roll) === q) : all;
     const list = el('slList');
     if (!list) return;
+    // শিক্ষার্থীর ডকুমেন্ট আইডি onclick-এর '...' এর ভেতরে যায় — তাই jsq() (esc() নয়)
     list.innerHTML = shown.length ? shown.map(s => `
-      <button class="sl-stu${s.id === slSel ? ' on' : ''}" onclick="slPickStudent('${esc(s.id)}')">
+      <button class="sl-stu${s.id === slSel ? ' on' : ''}" onclick="slPickStudent('${jsq(s.id)}')">
         <span class="sl-av">${esc(Array.from(s.name || '?')[0])}</span>
         <span class="sl-nm"><b>${esc(s.name)}</b><small>${s.roll ? 'রোল ' + esc(bn(s.roll)) : ''}</small></span>
         <span class="sl-ck">${s.id === slSel ? '\u2713' : ''}</span>
