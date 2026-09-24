@@ -8,6 +8,37 @@ function todayLocal() {
     String(d.getDate()).padStart(2, '0');
 }
 
+// ================= XSS সুরক্ষা (HTML escape সহায়ক ফাংশন) =================
+// ডেটাবেস থেকে আসা বা ব্যবহারকারীর লেখা যেকোনো লেখা innerHTML-এ বসানোর আগে
+// অবশ্যই esc() দিয়ে পার হতে হবে। নইলে কেউ নাম/কারণ/পরামর্শ ইত্যাদিতে HTML বা
+// স্ক্রিপ্ট লিখে অন্য ব্যবহারকারীর (শিক্ষক/অ্যাডমিন) সেশনে কোড চালাতে পারে (XSS)।
+//
+// esc()  — HTML লেখা ও "..." অ্যাট্রিবিউটের ভেতরে বসানোর জন্য।
+// jsq()  — onclick="fn('...')" জাতীয় inline handler-এর '...' স্ট্রিংয়ের ভেতরে বসানোর জন্য
+//          (আগে JS স্ট্রিং হিসেবে escape, তারপর HTML হিসেবে escape)।
+// safeDataUrl() — ছবি/ফাইলের data: URL ছাড়া অন্য কিছু (যেমন javascript:) ঢুকতে দেয় না।
+function esc(v) {
+  return String(v === undefined || v === null ? '' : v)
+    .replace(/&/g, '&amp;')
+    .replace(/</g, '&lt;')
+    .replace(/>/g, '&gt;')
+    .replace(/"/g, '&quot;')
+    .replace(/'/g, '&#39;');
+}
+
+function jsq(v) {
+  const s = String(v === undefined || v === null ? '' : v)
+    .replace(/\\/g, '\\\\')
+    .replace(/'/g, "\\'")
+    .replace(/[\r\n\u2028\u2029]/g, ' ');
+  return esc(s);
+}
+
+function safeDataUrl(u) {
+  const s = String(u === undefined || u === null ? '' : u);
+  return /^data:/i.test(s) ? s : '';
+}
+
 // ================= MULTI-TENANT: MADRASA ID =================
 // Each madrasa gets its own link like yourapp.com/?m=abc123 — opening that
 // link once saves the id to this device permanently (localStorage). Existing
@@ -358,8 +389,9 @@ function renderTopBar() {
   const logoEl = document.getElementById('topBarLogo');
   if (nameEl) nameEl.textContent = (appSettings && appSettings.madrasaName) ? appSettings.madrasaName : 'মাদরাসা হাজিরা অ্যাপ';
   if (logoEl) {
-    if (appSettings && appSettings.logoDataUrl) {
-      logoEl.src = appSettings.logoDataUrl;
+    const logoSrc = safeDataUrl(appSettings && appSettings.logoDataUrl);
+    if (logoSrc) {
+      logoEl.src = logoSrc;
       logoEl.style.display = 'block';
     } else {
       logoEl.style.display = 'none';
@@ -369,19 +401,20 @@ function renderTopBar() {
 
 function renderSettingsScreen() {
   const s = appSettings || {};
+  const logoSrc = safeDataUrl(s.logoDataUrl);
   setScreen(`
     <div class="card">
       <h2>মাদরাসার সেটিংস</h2>
       <label>মাদরাসার নাম</label>
-      <input id="settingsName" placeholder="মাদরাসার নাম লিখুন" value="${(s.madrasaName || '').replace(/"/g,'&quot;')}">
+      <input id="settingsName" placeholder="মাদরাসার নাম লিখুন" value="${esc(s.madrasaName || '')}">
       <label>লোগো</label>
       <div style="margin:8px 0;">
-        ${s.logoDataUrl ? `<img src="${s.logoDataUrl}" style="width:80px;height:80px;border-radius:10px;object-fit:cover;">` : '<p class="muted">এখনো কোনো লোগো সেট করা হয়নি</p>'}
+        ${logoSrc ? `<img src="${esc(logoSrc)}" style="width:80px;height:80px;border-radius:10px;object-fit:cover;">` : '<p class="muted">এখনো কোনো লোগো সেট করা হয়নি</p>'}
       </div>
       <input type="file" id="settingsLogoFile" accept="image/*">
       <p id="settingsError" class="muted" style="color:#dc2626;"></p>
       <button onclick="saveSettings()" style="margin-top:10px;">সংরক্ষণ করুন</button>
-      ${s.logoDataUrl ? `<button class="small danger" onclick="removeLogo()" style="margin-top:8px;">লোগো মুছুন</button>` : ''}
+      ${logoSrc ? `<button class="small danger" onclick="removeLogo()" style="margin-top:8px;">লোগো মুছুন</button>` : ''}
     </div>
     <div class="card">
       <h2>ডিবাগ মোড</h2>
@@ -440,7 +473,7 @@ function getClassList() {
 
 function classFilterDropdownHtml(currentValue, onchangeFn) {
   const classes = getClassList();
-  const opts = classes.map(c => `<option value="${c}" ${currentValue === c ? 'selected' : ''}>${c}</option>`).join('');
+  const opts = classes.map(c => `<option value="${esc(c)}" ${currentValue === c ? 'selected' : ''}>${esc(c)}</option>`).join('');
   return `
     <label>শ্রেণি বাছাই করুন</label>
     <select onchange="${onchangeFn}(this.value)">
@@ -675,7 +708,7 @@ function submitSignup() {
 
 // ================= STUDENT PIN LOGIN =================
 function showStudentPicker() {
-  const opts = studentsCache.map(s => `<option value="${s.id}">${s.name} (${s.roll || ''})</option>`).join('');
+  const opts = studentsCache.map(s => `<option value="${esc(s.id)}">${esc(s.name)} (${esc(s.roll || '')})</option>`).join('');
   setScreen(`
     <div class="card">
       <h2>আপনার নাম নির্বাচন করুন</h2>
@@ -954,7 +987,7 @@ function renderStudentsList() {
       countWrap.innerHTML = `<p class="muted">মোট শিক্ষার্থী: <b>${total}</b> জন</p>`;
     } else {
       const filteredCount = studentsByClass(studentsClassFilter).length;
-      countWrap.innerHTML = `<p class="muted">${studentsClassFilter} শ্রেণিতে: <b>${filteredCount}</b> জন &nbsp; (সর্বমোট: ${total} জন)</p>`;
+      countWrap.innerHTML = `<p class="muted">${esc(studentsClassFilter)} শ্রেণিতে: <b>${filteredCount}</b> জন &nbsp; (সর্বমোট: ${total} জন)</p>`;
     }
   }
 
@@ -967,16 +1000,16 @@ function renderStudentsList() {
     return `
     <div class="student-row" style="display:block;">
       <div style="display:flex;justify-content:space-between;align-items:center;">
-        <span>${s.name} <span class="muted">(রোল ${s.roll || '-'}, ${s.className || '-'})</span></span>
-        ${contact.hasWhatsapp && contact.phone ? `<a href="https://wa.me/${normalizePhoneForWhatsapp(contact.phone)}" target="_blank" style="text-decoration:none;font-size:20px;" title="WhatsApp-এ মেসেজ পাঠান">💬</a>` : ''}
+        <span>${esc(s.name)} <span class="muted">(রোল ${esc(s.roll || '-')}, ${esc(s.className || '-')})</span></span>
+        ${contact.hasWhatsapp && contact.phone ? `<a href="https://wa.me/${esc(normalizePhoneForWhatsapp(contact.phone))}" target="_blank" rel="noopener noreferrer" style="text-decoration:none;font-size:20px;" title="WhatsApp-এ মেসেজ পাঠান">💬</a>` : ''}
       </div>
       <div class="muted" style="margin-top:2px;">
-        ${contact.phone ? '📱 ' + contact.phone : 'মোবাইল নম্বর নেই'} &nbsp; ${s.hasPinSet ? '✅ PIN সেট' : '❌ PIN নেই'}
+        ${contact.phone ? '📱 ' + esc(contact.phone) : 'মোবাইল নম্বর নেই'} &nbsp; ${s.hasPinSet ? '✅ PIN সেট' : '❌ PIN নেই'}
       </div>
       <div style="margin-top:6px;">
-        <button class="small secondary" onclick="setStudentPin('${s.id}')">PIN সেট/পরিবর্তন</button>
-        <button class="small secondary" onclick="setStudentPhone('${s.id}')">নম্বর সম্পাদনা</button>
-        <button class="small danger" onclick="deleteStudent('${s.id}')">মুছুন</button>
+        <button class="small secondary" onclick="setStudentPin('${jsq(s.id)}')">PIN সেট/পরিবর্তন</button>
+        <button class="small secondary" onclick="setStudentPhone('${jsq(s.id)}')">নম্বর সম্পাদনা</button>
+        <button class="small danger" onclick="deleteStudent('${jsq(s.id)}')">মুছুন</button>
       </div>
     </div>
   `;
@@ -1085,7 +1118,7 @@ function renderAttendanceList() {
   const date = dateEl.value;
   const students = studentsByClass(attClassFilter);
   if (students.length === 0) { list.innerHTML = '<p class="muted">শিক্ষার্থী তালিকা খালি</p>'; return; }
-  list.innerHTML = students.map(s => `<div class="card" id="att_${s.id}">লোড হচ্ছে...</div>`).join('');
+  list.innerHTML = students.map(s => `<div class="card" id="att_${esc(s.id)}">লোড হচ্ছে...</div>`).join('');
   students.forEach(s => loadAttendanceCell(s, date));
 }
 
@@ -1109,18 +1142,18 @@ function loadAttendanceCell(s, date) {
       const liveCell = document.getElementById('att_' + s.id);
       if (!liveCell) return;
       liveCell.innerHTML = `
-        <b>${s.name}</b> <span class="muted">(${s.className || '-'})</span>
+        <b>${esc(s.name)}</b> <span class="muted">(${esc(s.className || '-')})</span>
         <div class="row" style="margin-top:6px;">
-          <button class="small ${d.status==='present'?'':'secondary'}" onclick="setAttendance('${s.id}','${date}','present')">উপস্থিত</button>
-          <button class="small ${d.status==='absent'?'danger':'secondary'}" onclick="setAttendance('${s.id}','${date}','absent')">অনুপস্থিত</button>
+          <button class="small ${d.status==='present'?'':'secondary'}" onclick="setAttendance('${jsq(s.id)}','${jsq(date)}','present')">উপস্থিত</button>
+          <button class="small ${d.status==='absent'?'danger':'secondary'}" onclick="setAttendance('${jsq(s.id)}','${jsq(date)}','absent')">অনুপস্থিত</button>
         </div>
-        <div id="waRow_${s.id}" style="margin-top:8px;"></div>
+        <div id="waRow_${esc(s.id)}" style="margin-top:8px;"></div>
         <div class="muted" style="margin-top:8px;">
-          বাসা থেকে বের হওয়ার সময়: <b>${d.timeLeftHome ? d.timeLeftHome : 'এখনো শিক্ষার্থী নিজে সেট করেনি'}</b>
+          বাসা থেকে বের হওয়ার সময়: <b>${d.timeLeftHome ? esc(d.timeLeftHome) : 'এখনো শিক্ষার্থী নিজে সেট করেনি'}</b>
           <div style="font-size:11px;">(শুধু শিক্ষার্থী নিজে এটি একবার সেট করতে পারে, শিক্ষক পরিবর্তন করতে পারবেন না)</div>
         </div>
         <label>অনুপস্থিতির কারণ (যদি থাকে)</label>
-        <input value="${d.reason||''}" onchange="updateAttField('${s.id}','${date}','reason',this.value)">
+        <input value="${esc(d.reason||'')}" onchange="updateAttField('${jsq(s.id)}','${jsq(date)}','reason',this.value)">
       `;
       updateWaRow(s.id, d.status);
     })
@@ -1137,9 +1170,9 @@ function renderAttendanceCellError(s, date, e) {
   const cell = document.getElementById('att_' + s.id);
   if (!cell) return;
   cell.innerHTML = `
-    <b>${s.name}</b> <span class="muted">(${s.className || '-'})</span>
-    <p class="muted" style="color:#dc2626;margin:6px 0;">লোড করতে সমস্যা হয়েছে${e && e.message ? ' (' + e.message + ')' : ''}</p>
-    <button class="small secondary" onclick="retryAttendanceCell('${s.id}','${date}')">আবার চেষ্টা করুন</button>
+    <b>${esc(s.name)}</b> <span class="muted">(${esc(s.className || '-')})</span>
+    <p class="muted" style="color:#dc2626;margin:6px 0;">লোড করতে সমস্যা হয়েছে${e && e.message ? ' (' + esc(e.message) + ')' : ''}</p>
+    <button class="small secondary" onclick="retryAttendanceCell('${jsq(s.id)}','${jsq(date)}')">আবার চেষ্টা করুন</button>
   `;
 }
 
@@ -1244,8 +1277,9 @@ function absentMessageText(student, date, reason) {
 function absentMessageButtonHtml(studentId, date, reason) {
   const c = studentContactsCache[studentId] || {};
   const phone = (c.phone || '').trim();
+  // reason-কে encodeURIComponent করা হয়, তারপর jsq দিয়ে JS/HTML-নিরাপদ করা হয়
   const safeReason = encodeURIComponent(reason || '').replace(/'/g, '%27');
-  const args = "'" + studentId + "','" + date + "',decodeURIComponent('" + safeReason + "')";
+  const args = "'" + jsq(studentId) + "','" + jsq(date) + "',decodeURIComponent('" + jsq(safeReason) + "')";
   if (phone && c.hasWhatsapp) return '<button class="small" onclick="openAbsentMessage(' + args + ')">💬 অভিভাবককে জানান</button>';
   if (phone) return '<button class="small secondary" onclick="openAbsentMessage(' + args + ')">📱 SMS পাঠান</button>';
   return '<span class="muted" style="font-size:12px;">মোবাইল নম্বর নেই</span>';
@@ -1309,15 +1343,15 @@ function renderMyAttendance() {
       const rows = snap.docs.map(d => d.data()).sort((a,b) => (b.date||'').localeCompare(a.date||'')).slice(0,30);
       wrap.innerHTML = rows.map(r => {
         return `<div class="student-row">
-          <span>${r.date}</span>
-          <span class="badge ${r.status}">${r.status==='present'?'উপস্থিত':'অনুপস্থিত'}</span>
+          <span>${esc(r.date)}</span>
+          <span class="badge ${r.status==='present'?'present':'absent'}">${r.status==='present'?'উপস্থিত':'অনুপস্থিত'}</span>
         </div>
-        ${r.timeLeftHome ? `<div class="muted">বের হওয়ার সময়: ${r.timeLeftHome}</div>` : ''}
-        ${r.reason ? `<div class="muted">কারণ: ${r.reason}</div>` : ''}`;
+        ${r.timeLeftHome ? `<div class="muted">বের হওয়ার সময়: ${esc(r.timeLeftHome)}</div>` : ''}
+        ${r.reason ? `<div class="muted">কারণ: ${esc(r.reason)}</div>` : ''}`;
       }).join('<hr style="border:none;border-top:1px solid #eee;margin:6px 0;">');
     }, err => {
       const wrap = document.getElementById('myAttWrap');
-      if (wrap) wrap.innerHTML = '<p class="muted">লোড করতে সমস্যা হয়েছে: ' + err.message + '</p>';
+      if (wrap) wrap.innerHTML = '<p class="muted">লোড করতে সমস্যা হয়েছে: ' + esc(err.message) + '</p>';
       showDiagBanner('আমার উপস্থিতি লোড এরর: ' + err.message);
     });
 }
@@ -1332,7 +1366,7 @@ function loadMyTimeLeftBox(today) {
       const existing = doc.exists ? doc.data().timeLeftHome : null;
       if (existing) {
         liveWrap.innerHTML = `
-          <p style="font-size:18px;"><b>${existing}</b></p>
+          <p style="font-size:18px;"><b>${esc(existing)}</b></p>
           <p class="muted" style="font-size:12px;">একবার সেট করার পর এটি আর পরিবর্তন করা যাবে না।</p>
         `;
       } else {
@@ -1345,7 +1379,7 @@ function loadMyTimeLeftBox(today) {
     })
     .catch(e => {
       const liveWrap = document.getElementById('myTimeLeftWrap');
-      if (liveWrap) liveWrap.innerHTML = '<p class="muted">লোড করতে সমস্যা হয়েছে: ' + e.message + '</p>';
+      if (liveWrap) liveWrap.innerHTML = '<p class="muted">লোড করতে সমস্যা হয়েছে: ' + esc(e.message) + '</p>';
       showDiagBanner('বের হওয়ার সময় লোড এরর: ' + e.message);
     });
 }
@@ -1421,22 +1455,24 @@ function renderLeavesScreen(isTeacher) {
       const r = d.data();
       const student = studentsCache.find(s => s.id === r.studentId);
       const statusText = { pending: 'অপেক্ষমাণ', approved: 'অনুমোদিত', rejected: 'প্রত্যাখ্যাত' }[r.status] || 'অপেক্ষমাণ';
+      // status শিক্ষার্থী নিজে লিখতে পারে, তাই শুধু জানা তিনটি মানই CSS class হিসেবে ব্যবহার হবে
+      const statusClass = ['pending', 'approved', 'rejected'].includes(r.status) ? r.status : 'pending';
       return `<div class="student-row" style="display:block;">
         <div style="display:flex;justify-content:space-between;">
-          <b>${isTeacher ? (student ? student.name + (student.className ? ' (' + student.className + ')' : '') : 'অজানা') : r.date}</b>
-          <span class="badge ${r.status||'pending'}">${statusText}</span>
+          <b>${isTeacher ? (student ? esc(student.name) + (student.className ? ' (' + esc(student.className) + ')' : '') : 'অজানা') : esc(r.date)}</b>
+          <span class="badge ${statusClass}">${statusText}</span>
         </div>
-        <div class="muted">${isTeacher ? 'তারিখ: ' + r.date : ''}</div>
-        <div>${r.reason}</div>
+        <div class="muted">${isTeacher ? 'তারিখ: ' + esc(r.date) : ''}</div>
+        <div>${esc(r.reason)}</div>
         ${isTeacher ? `
-          <button class="small" onclick="setLeaveStatus('${d.id}','approved')">অনুমোদন</button>
-          <button class="small danger" onclick="setLeaveStatus('${d.id}','rejected')">প্রত্যাখ্যান</button>
+          <button class="small" onclick="setLeaveStatus('${jsq(d.id)}','approved')">অনুমোদন</button>
+          <button class="small danger" onclick="setLeaveStatus('${jsq(d.id)}','rejected')">প্রত্যাখ্যান</button>
         ` : ''}
       </div>`;
     }).join('');
   }, err => {
     const wrap = document.getElementById('leavesWrap');
-    if (wrap) wrap.innerHTML = '<p class="muted">লোড করতে সমস্যা হয়েছে: ' + err.message + '</p>';
+    if (wrap) wrap.innerHTML = '<p class="muted">লোড করতে সমস্যা হয়েছে: ' + esc(err.message) + '</p>';
     showDiagBanner('ছুটির আবেদন লোড এরর: ' + err.message);
   });
 }
@@ -1528,7 +1564,7 @@ function renderResultsScreen(isTeacher) {
   let html = '';
   if (isTeacher) {
     const students = studentsByClass(resultsClassFilter);
-    const opts = students.map(s => `<option value="${s.id}">${s.name} (${s.roll || ''})</option>`).join('');
+    const opts = students.map(s => `<option value="${esc(s.id)}">${esc(s.name)} (${esc(s.roll || '')})</option>`).join('');
     html += `
       <div class="card">
         <h2>নতুন মার্কশিট তৈরি করুন</h2>
@@ -1602,20 +1638,21 @@ function renderResultsScreen(isTeacher) {
     wrap.innerHTML = docs.map(d => {
       const r = d.data();
       const student = studentsCache.find(s => s.id === r.studentId);
-      const nameLine = isTeacher ? (student ? student.name + (student.className ? ' (' + student.className + ')' : '') : 'অজানা') : '';
+      const nameLine = isTeacher ? (student ? esc(student.name) + (student.className ? ' (' + esc(student.className) + ')' : '') : 'অজানা') : '';
       const hasMarksheet = Array.isArray(r.subjects) && r.subjects.length > 0;
       if (hasMarksheet) Object.assign(r, computeMarksheetTotals(r.subjects));
-      const rankBadge = r.meritRank ? ` &nbsp; <span class="badge">মেধাক্রম ${banglaOrdinal(r.meritRank)}</span>` : '';
+      const rankBadge = r.meritRank ? ` &nbsp; <span class="badge">মেধাক্রম ${esc(banglaOrdinal(r.meritRank))}</span>` : '';
       const failBadge = (hasMarksheet && r.hasFailedSubject) ? ` &nbsp; <span class="badge absent">অকৃতকার্য</span>` : '';
       const summary = hasMarksheet
-        ? `${r.totalObtained}/${r.totalFull} &nbsp; <span class="badge">${r.grade}</span>${failBadge}${rankBadge}`
-        : (r.marks !== undefined ? `${r.marks}` : '');
+        ? `${esc(r.totalObtained)}/${esc(r.totalFull)} &nbsp; <span class="badge">${esc(r.grade)}</span>${failBadge}${rankBadge}`
+        : (r.marks !== undefined ? `${esc(r.marks)}` : '');
       const isPublished = r.published === true;
-      const safeDocId = String(d.id).replace(/\\/g, '\\\\').replace(/'/g, "\\'");
-      const safeStudentId = String(r.studentId).replace(/\\/g, '\\\\').replace(/'/g, "\\'");
+      // docId-তে পরীক্ষার নাম থাকে (শিক্ষকের লেখা), তাই onclick-এর ভেতরে jsq() দিয়ে নিরাপদ করা হয়
+      const safeDocId = jsq(d.id);
+      const safeStudentId = jsq(r.studentId);
       return `<div class="student-row" style="display:block;">
         <div style="display:flex;justify-content:space-between;align-items:center;">
-          <span>${nameLine ? nameLine + ' - ' : ''}${r.examName}</span>
+          <span>${nameLine ? nameLine + ' - ' : ''}${esc(r.examName)}</span>
           <span>${summary}</span>
         </div>
         ${isTeacher ? `<div class="muted" style="margin-top:2px;">${isPublished ? '✅ প্রকাশিত (শিক্ষার্থী দেখতে পারবে)' : '🔒 অপ্রকাশিত (শুধু শিক্ষক দেখতে পারবে)'}</div>` : ''}
@@ -1629,7 +1666,7 @@ function renderResultsScreen(isTeacher) {
     }).join('');
   }, err => {
     const wrap = document.getElementById('resultsWrap');
-    if (wrap) wrap.innerHTML = '<p class="muted">লোড করতে সমস্যা হয়েছে: ' + err.message + '</p>';
+    if (wrap) wrap.innerHTML = '<p class="muted">লোড করতে সমস্যা হয়েছে: ' + esc(err.message) + '</p>';
     if (err.code !== 'permission-denied') showDiagBanner('রেজাল্ট লোড এরর: ' + err.message);
   });
 }
@@ -1702,8 +1739,8 @@ function renderSubjectRows() {
   }
   wrap.innerHTML = currentMarksheetSubjects.map((s, i) => `
     <div class="student-row">
-      <span>${s.name}</span>
-      <span>${s.obtained}/${s.full} <button class="small secondary" onclick="editSubjectRowValue(${i})">✎ সম্পাদনা</button> <button class="small danger" onclick="removeSubjectRow(${i})">✕</button></span>
+      <span>${esc(s.name)}</span>
+      <span>${esc(s.obtained)}/${esc(s.full)} <button class="small secondary" onclick="editSubjectRowValue(${i})">✎ সম্পাদনা</button> <button class="small danger" onclick="removeSubjectRow(${i})">✕</button></span>
     </div>
   `).join('');
 }
@@ -1806,8 +1843,9 @@ function viewMarksheet(studentId, docId) {
     const hasSubjects = Array.isArray(r.subjects) && r.subjects.length > 0;
     if (hasSubjects) Object.assign(r, computeMarksheetTotals(r.subjects));
     const instName = (appSettings && appSettings.madrasaName) ? appSettings.madrasaName : 'শিক্ষা প্রতিষ্ঠান';
-    const logoHtml = (appSettings && appSettings.logoDataUrl)
-      ? `<img src="${appSettings.logoDataUrl}" style="width:52px;height:52px;border-radius:10px;object-fit:cover;margin-right:10px;" alt="logo">`
+    const logoSrc = safeDataUrl(appSettings && appSettings.logoDataUrl);
+    const logoHtml = logoSrc
+      ? `<img src="${esc(logoSrc)}" style="width:52px;height:52px;border-radius:10px;object-fit:cover;margin-right:10px;" alt="logo">`
       : '';
 
     const rows = hasSubjects ? r.subjects.map((s, i) => {
@@ -1816,11 +1854,11 @@ function viewMarksheet(studentId, docId) {
       const subjGc = gradeColor(subjGrade.grade);
       return `
       <tr style="background:${i % 2 === 0 ? '#fff' : '#fafafa'};">
-        <td style="padding:8px 10px;border:1px solid #e5e7eb;">${s.name}</td>
-        <td style="padding:8px 10px;border:1px solid #e5e7eb;text-align:center;">${s.full}</td>
-        <td style="padding:8px 10px;border:1px solid #e5e7eb;text-align:center;">${s.obtained}</td>
-        <td style="padding:8px 10px;border:1px solid #e5e7eb;text-align:center;"><span style="background:${subjGc.bg};color:${subjGc.fg};border-radius:6px;padding:2px 8px;font-weight:bold;">${subjGrade.grade}</span></td>
-        <td style="padding:8px 10px;border:1px solid #e5e7eb;text-align:center;">${subjGrade.gpa}</td>
+        <td style="padding:8px 10px;border:1px solid #e5e7eb;">${esc(s.name)}</td>
+        <td style="padding:8px 10px;border:1px solid #e5e7eb;text-align:center;">${esc(s.full)}</td>
+        <td style="padding:8px 10px;border:1px solid #e5e7eb;text-align:center;">${esc(s.obtained)}</td>
+        <td style="padding:8px 10px;border:1px solid #e5e7eb;text-align:center;"><span style="background:${subjGc.bg};color:${subjGc.fg};border-radius:6px;padding:2px 8px;font-weight:bold;">${esc(subjGrade.grade)}</span></td>
+        <td style="padding:8px 10px;border:1px solid #e5e7eb;text-align:center;">${esc(subjGrade.gpa)}</td>
       </tr>
     `;
     }).join('') : `<tr><td colspan="5" style="padding:8px 10px;border:1px solid #e5e7eb;text-align:center;" class="muted">বিষয়ভিত্তিক তথ্য নেই (পুরাতন রেজাল্ট)</td></tr>`;
@@ -1828,10 +1866,10 @@ function viewMarksheet(studentId, docId) {
     const totalRow = hasSubjects ? `
       <tr style="background:#f3f4f6;">
         <td style="padding:8px 10px;border:1px solid #e5e7eb;"><b>মোট</b></td>
-        <td style="padding:8px 10px;border:1px solid #e5e7eb;text-align:center;"><b>${r.totalFull}</b></td>
-        <td style="padding:8px 10px;border:1px solid #e5e7eb;text-align:center;"><b>${r.totalObtained}</b></td>
-        <td style="padding:8px 10px;border:1px solid #e5e7eb;text-align:center;"><b>${r.grade}</b></td>
-        <td style="padding:8px 10px;border:1px solid #e5e7eb;text-align:center;"><b>${r.gpa}</b></td>
+        <td style="padding:8px 10px;border:1px solid #e5e7eb;text-align:center;"><b>${esc(r.totalFull)}</b></td>
+        <td style="padding:8px 10px;border:1px solid #e5e7eb;text-align:center;"><b>${esc(r.totalObtained)}</b></td>
+        <td style="padding:8px 10px;border:1px solid #e5e7eb;text-align:center;"><b>${esc(r.grade)}</b></td>
+        <td style="padding:8px 10px;border:1px solid #e5e7eb;text-align:center;"><b>${esc(r.gpa)}</b></td>
       </tr>
     ` : '';
 
@@ -1840,25 +1878,25 @@ function viewMarksheet(studentId, docId) {
       <div style="display:flex;gap:10px;margin-top:14px;flex-wrap:wrap;">
         <div style="flex:1;min-width:90px;background:#eef2ff;border-radius:10px;padding:10px;text-align:center;">
           <div class="muted" style="font-size:11px;">শতাংশ</div>
-          <div style="font-size:18px;font-weight:bold;color:#3730a3;">${r.percentage}%</div>
+          <div style="font-size:18px;font-weight:bold;color:#3730a3;">${esc(r.percentage)}%</div>
         </div>
         <div style="flex:1;min-width:90px;background:${gc.bg};border-radius:10px;padding:10px;text-align:center;">
           <div class="muted" style="font-size:11px;">গ্রেড</div>
-          <div style="font-size:18px;font-weight:bold;color:${gc.fg};">${r.grade}</div>
+          <div style="font-size:18px;font-weight:bold;color:${gc.fg};">${esc(r.grade)}</div>
           ${r.hasFailedSubject ? '<div style="font-size:10px;color:#991b1b;font-weight:bold;margin-top:2px;">(অকৃতকার্য)</div>' : ''}
         </div>
         ${r.gpa ? `
         <div style="flex:1;min-width:90px;background:#fef9c3;border-radius:10px;padding:10px;text-align:center;">
           <div class="muted" style="font-size:11px;">GPA</div>
-          <div style="font-size:18px;font-weight:bold;color:#854d0e;">${r.gpa}</div>
+          <div style="font-size:18px;font-weight:bold;color:#854d0e;">${esc(r.gpa)}</div>
         </div>` : ''}
         ${r.meritRank ? `
         <div style="flex:1;min-width:90px;background:#fce7f3;border-radius:10px;padding:10px;text-align:center;">
           <div class="muted" style="font-size:11px;">মেধাক্রম</div>
-          <div style="font-size:18px;font-weight:bold;color:#9d174d;">${banglaOrdinal(r.meritRank)}${r.meritTotal ? ' / ' + toBanglaNumeral(r.meritTotal) : ''}</div>
+          <div style="font-size:18px;font-weight:bold;color:#9d174d;">${esc(banglaOrdinal(r.meritRank))}${r.meritTotal ? ' / ' + esc(toBanglaNumeral(r.meritTotal)) : ''}</div>
         </div>` : ''}
       </div>
-    ` : `<p style="margin-top:10px;"><b>প্রাপ্ত নম্বর:</b> ${r.marks !== undefined ? r.marks : '-'}</p>`;
+    ` : `<p style="margin-top:10px;"><b>প্রাপ্ত নম্বর:</b> ${r.marks !== undefined ? esc(r.marks) : '-'}</p>`;
 
     setScreen(`
       <style id="marksheetPrintStyle">
@@ -1867,19 +1905,19 @@ function viewMarksheet(studentId, docId) {
         }
       </style>
       <div class="card" id="marksheetPrintArea" style="position:relative;border-top:5px solid #4f46e5;">
-        ${r.academicYear ? `<div style="position:absolute;top:10px;right:14px;background:#eef2ff;color:#3730a3;font-size:12px;font-weight:bold;padding:3px 10px;border-radius:20px;">শিক্ষাবর্ষ: ${r.academicYear}</div>` : ''}
+        ${r.academicYear ? `<div style="position:absolute;top:10px;right:14px;background:#eef2ff;color:#3730a3;font-size:12px;font-weight:bold;padding:3px 10px;border-radius:20px;">শিক্ষাবর্ষ: ${esc(r.academicYear)}</div>` : ''}
         <div style="display:flex;align-items:center;justify-content:center;margin-top:4px;">
           ${logoHtml}
           <div style="text-align:center;">
-            <div style="font-size:19px;font-weight:bold;">${instName}</div>
-            <div class="muted" style="font-size:13px;margin-top:2px;">${r.examName}</div>
+            <div style="font-size:19px;font-weight:bold;">${esc(instName)}</div>
+            <div class="muted" style="font-size:13px;margin-top:2px;">${esc(r.examName)}</div>
           </div>
         </div>
         <hr style="border:none;border-top:1px solid #eee;margin:12px 0;">
         <div style="display:flex;justify-content:space-between;flex-wrap:wrap;gap:4px;font-size:14px;">
-          <span><b>নাম:</b> ${student.name || '-'}</span>
-          <span><b>রোল:</b> ${student.roll || '-'}</span>
-          <span><b>শ্রেণি:</b> ${student.className || '-'}</span>
+          <span><b>নাম:</b> ${esc(student.name || '-')}</span>
+          <span><b>রোল:</b> ${esc(student.roll || '-')}</span>
+          <span><b>শ্রেণি:</b> ${esc(student.className || '-')}</span>
         </div>
         <table style="width:100%;border-collapse:collapse;margin-top:12px;">
           <thead>
@@ -1897,7 +1935,7 @@ function viewMarksheet(studentId, docId) {
           </tbody>
         </table>
         ${statBoxes}
-        <p class="muted" style="margin-top:12px;text-align:center;">প্রকাশের তারিখ: ${r.date || '-'}</p>
+        <p class="muted" style="margin-top:12px;text-align:center;">প্রকাশের তারিখ: ${esc(r.date || '-')}</p>
         <div class="no-print" style="margin-top:14px;">
           <button onclick="printMarksheet()">🖨️ প্রিন্ট করুন</button>
           <button class="secondary" onclick="renderResultsScreen(lastResultsIsTeacher)">ফিরে যান</button>
@@ -1943,7 +1981,7 @@ function loadTimeLeftReport() {
     if (students.length === 0) { wrap.innerHTML = '<p class="muted">এই শ্রেণিতে শিক্ষার্থী নেই</p>'; return; }
     wrap.innerHTML = students.map(s => {
       const r = rows[s.id] || {};
-      return `<div class="student-row"><span>${s.name} <span class="muted">(${s.className || '-'})</span></span><span>${r.timeLeftHome || '—'}</span></div>`;
+      return `<div class="student-row"><span>${esc(s.name)} <span class="muted">(${esc(s.className || '-')})</span></span><span>${esc(r.timeLeftHome || '—')}</span></div>`;
     }).join('');
   }).catch(e => showDiagBanner('বের হওয়ার সময় রিপোর্ট এরর: ' + e.message));
 }
@@ -1978,7 +2016,7 @@ function renderDailyReportControls() {
   if (!controlsWrap) return;
   controlsWrap.innerHTML = `
     <label>তারিখ</label>
-    <input type="date" id="reportDateInput" value="${reportDate}" onchange="onReportDateChange(this.value)">
+    <input type="date" id="reportDateInput" value="${esc(reportDate)}" onchange="onReportDateChange(this.value)">
     <div id="reportClassFilterWrap"></div>
   `;
   document.getElementById('reportClassFilterWrap').innerHTML = classFilterDropdownHtml(reportClassFilter, 'onReportClassFilterChange');
@@ -2020,12 +2058,12 @@ function loadDailyReport() {
         const badgeClass = status === 'present' ? 'present' : (status === 'absent' ? 'absent' : 'pending');
         return `
           <tr>
-            <td style="padding:6px;border:1px solid #ddd;">${s.roll || '-'}</td>
-            <td style="padding:6px;border:1px solid #ddd;">${s.name}</td>
-            <td style="padding:6px;border:1px solid #ddd;">${s.className || '-'}</td>
+            <td style="padding:6px;border:1px solid #ddd;">${esc(s.roll || '-')}</td>
+            <td style="padding:6px;border:1px solid #ddd;">${esc(s.name)}</td>
+            <td style="padding:6px;border:1px solid #ddd;">${esc(s.className || '-')}</td>
             <td style="padding:6px;border:1px solid #ddd;text-align:center;"><span class="badge ${badgeClass}">${statusText}</span></td>
-            <td style="padding:6px;border:1px solid #ddd;">${d.timeLeftHome || '-'}</td>
-            <td style="padding:6px;border:1px solid #ddd;">${d.reason || '-'}</td>
+            <td style="padding:6px;border:1px solid #ddd;">${esc(d.timeLeftHome || '-')}</td>
+            <td style="padding:6px;border:1px solid #ddd;">${esc(d.reason || '-')}</td>
             <td class="no-print" style="padding:6px;border:1px solid #ddd;text-align:center;">${status === 'absent' ? absentMessageButtonHtml(s.id, date, d.reason || '') : ''}</td>
           </tr>
         `;
@@ -2037,7 +2075,7 @@ function loadDailyReport() {
         </style>
         <div class="card" id="reportPrintArea">
           <h2 style="text-align:center;margin-bottom:2px;">দৈনিক উপস্থিতি রিপোর্ট</h2>
-          <p class="muted" style="text-align:center;margin-top:0;">তারিখ: ${date}${reportClassFilter !== 'all' ? ' | শ্রেণি: ' + reportClassFilter : ''}</p>
+          <p class="muted" style="text-align:center;margin-top:0;">তারিখ: ${esc(date)}${reportClassFilter !== 'all' ? ' | শ্রেণি: ' + esc(reportClassFilter) : ''}</p>
           <p style="text-align:center;">মোট: <b>${students.length}</b> &nbsp; উপস্থিত: <b>${presentCount}</b> &nbsp; অনুপস্থিত: <b>${absentCount}</b> &nbsp; চিহ্নিত হয়নি: <b>${unmarkedCount}</b></p>
           <table style="width:100%;border-collapse:collapse;margin-top:10px;">
             <thead>
@@ -2060,7 +2098,7 @@ function loadDailyReport() {
       `;
     })
     .catch(e => {
-      resultWrap.innerHTML = '<div class="card"><p class="muted">লোড করতে সমস্যা হয়েছে: ' + e.message + '</p></div>';
+      resultWrap.innerHTML = '<div class="card"><p class="muted">লোড করতে সমস্যা হয়েছে: ' + esc(e.message) + '</p></div>';
       if (e.code !== 'permission-denied') showDiagBanner('দৈনিক রিপোর্ট এরর: ' + e.message);
     });
 }
@@ -2074,7 +2112,7 @@ function renderMonthlyReportControls() {
     <label>শিক্ষার্থী</label>
     <select id="reportStudentSelect" onchange="onReportStudentChange(this.value)"></select>
     <label>মাস</label>
-    <input type="month" id="reportMonthInput" value="${reportMonth}" onchange="onReportMonthChange(this.value)">
+    <input type="month" id="reportMonthInput" value="${esc(reportMonth)}" onchange="onReportMonthChange(this.value)">
   `;
   document.getElementById('reportClassFilterWrap').innerHTML = classFilterDropdownHtml(reportClassFilter, 'onReportClassFilterChange');
   populateReportStudentSelect();
@@ -2099,7 +2137,7 @@ function populateReportStudentSelect() {
   if (!reportStudentId || !students.find(s => s.id === reportStudentId)) {
     reportStudentId = students[0].id;
   }
-  sel.innerHTML = students.map(s => `<option value="${s.id}" ${s.id === reportStudentId ? 'selected' : ''}>${s.name} (${s.roll || ''})</option>`).join('');
+  sel.innerHTML = students.map(s => `<option value="${esc(s.id)}" ${s.id === reportStudentId ? 'selected' : ''}>${esc(s.name)} (${esc(s.roll || '')})</option>`).join('');
 }
 
 function onReportStudentChange(value) {
@@ -2140,10 +2178,10 @@ function loadMonthlyReport() {
         const badgeClass = e.status === 'present' ? 'present' : (e.status === 'absent' ? 'absent' : 'pending');
         return `
           <tr>
-            <td style="padding:6px;border:1px solid #ddd;">${e.date}</td>
+            <td style="padding:6px;border:1px solid #ddd;">${esc(e.date)}</td>
             <td style="padding:6px;border:1px solid #ddd;text-align:center;"><span class="badge ${badgeClass}">${statusText}</span></td>
-            <td style="padding:6px;border:1px solid #ddd;">${e.timeLeftHome || '-'}</td>
-            <td style="padding:6px;border:1px solid #ddd;">${e.reason || '-'}</td>
+            <td style="padding:6px;border:1px solid #ddd;">${esc(e.timeLeftHome || '-')}</td>
+            <td style="padding:6px;border:1px solid #ddd;">${esc(e.reason || '-')}</td>
           </tr>
         `;
       }).join('') : `<tr><td colspan="4" style="padding:6px;border:1px solid #ddd;text-align:center;" class="muted">এই মাসে কোনো তথ্য নেই</td></tr>`;
@@ -2154,8 +2192,8 @@ function loadMonthlyReport() {
         </style>
         <div class="card" id="reportPrintArea">
           <h2 style="text-align:center;margin-bottom:2px;">মাসিক উপস্থিতি রিপোর্ট</h2>
-          <p class="muted" style="text-align:center;margin-top:0;">${student ? student.name + ' (রোল ' + (student.roll || '-') + ', ' + (student.className || '-') + ')' : ''}</p>
-          <p class="muted" style="text-align:center;margin-top:0;">মাস: ${month}</p>
+          <p class="muted" style="text-align:center;margin-top:0;">${student ? esc(student.name) + ' (রোল ' + esc(student.roll || '-') + ', ' + esc(student.className || '-') + ')' : ''}</p>
+          <p class="muted" style="text-align:center;margin-top:0;">মাস: ${esc(month)}</p>
           <p style="text-align:center;">উপস্থিত: <b>${presentCount}</b> &nbsp; অনুপস্থিত: <b>${absentCount}</b> &nbsp; চিহ্নিত দিন: <b>${markedCount}</b> &nbsp; উপস্থিতির হার: <b>${rate}%</b></p>
           <table style="width:100%;border-collapse:collapse;margin-top:10px;">
             <thead>
@@ -2175,7 +2213,7 @@ function loadMonthlyReport() {
       `;
     })
     .catch(e => {
-      resultWrap.innerHTML = '<div class="card"><p class="muted">লোড করতে সমস্যা হয়েছে: ' + e.message + '</p></div>';
+      resultWrap.innerHTML = '<div class="card"><p class="muted">লোড করতে সমস্যা হয়েছে: ' + esc(e.message) + '</p></div>';
       if (e.code !== 'permission-denied') showDiagBanner('মাসিক রিপোর্ট এরর: ' + e.message);
     });
 }
@@ -2188,7 +2226,7 @@ function renderSummaryReportControls() {
   if (!controlsWrap) return;
   controlsWrap.innerHTML = `
     <label>মাস</label>
-    <input type="month" id="reportMonthInput" value="${reportMonth}" onchange="onReportMonthChange(this.value)">
+    <input type="month" id="reportMonthInput" value="${esc(reportMonth)}" onchange="onReportMonthChange(this.value)">
     <div id="reportClassFilterWrap"></div>
   `;
   document.getElementById('reportClassFilterWrap').innerHTML = classFilterDropdownHtml(reportClassFilter, 'onReportClassFilterChange');
@@ -2268,9 +2306,9 @@ function loadSummaryReport() {
       const color = r.rate === null ? '#64748b' : r.rate < 75 ? '#b91c1c' : r.rate < 90 ? '#b45309' : '#15803d';
       return `
         <tr>
-          <td style="padding:6px;border:1px solid #ddd;">${r.s.roll || '-'}</td>
-          <td style="padding:6px;border:1px solid #ddd;">${r.s.name}</td>
-          <td style="padding:6px;border:1px solid #ddd;">${r.s.className || '-'}</td>
+          <td style="padding:6px;border:1px solid #ddd;">${esc(r.s.roll || '-')}</td>
+          <td style="padding:6px;border:1px solid #ddd;">${esc(r.s.name)}</td>
+          <td style="padding:6px;border:1px solid #ddd;">${esc(r.s.className || '-')}</td>
           <td style="padding:6px;border:1px solid #ddd;text-align:center;">${r.p}</td>
           <td style="padding:6px;border:1px solid #ddd;text-align:center;">${r.a}</td>
           <td style="padding:6px;border:1px solid #ddd;text-align:center;font-weight:bold;color:${color};">${r.rate === null ? '-' : r.rate + '%'}</td>
@@ -2283,7 +2321,7 @@ function loadSummaryReport() {
       </style>
       <div class="card" id="reportPrintArea">
         <h2 style="text-align:center;margin-bottom:2px;">মাসিক উপস্থিতির সারাংশ</h2>
-        <p class="muted" style="text-align:center;margin-top:0;">মাস: ${month}${reportClassFilter !== 'all' ? ' | শ্রেণি: ' + reportClassFilter : ''}</p>
+        <p class="muted" style="text-align:center;margin-top:0;">মাস: ${esc(month)}${reportClassFilter !== 'all' ? ' | শ্রেণি: ' + esc(reportClassFilter) : ''}</p>
         <p style="text-align:center;">শিক্ষার্থী: <b>${students.length}</b> &nbsp; কার্যদিবস: <b>${workCount}</b> &nbsp; গড় উপস্থিতি: <b>${avg === null ? '-' : avg + '%'}</b></p>
         ${lowCount ? `<p style="text-align:center;color:#b91c1c;font-size:13px;">৭৫% এর কম উপস্থিতি: <b>${lowCount}</b> জন</p>` : ''}
         ${workCount === 0 ? '<p class="muted" style="text-align:center;">এই মাসে এখনো কোনো হাজিরা নেওয়া হয়নি</p>' : ''}
@@ -2310,7 +2348,7 @@ function loadSummaryReport() {
     `;
   }).catch(e => {
     if (myToken !== summaryLoadToken) return;
-    resultWrap.innerHTML = '<div class="card"><p class="muted">লোড করতে সমস্যা হয়েছে: ' + e.message + '</p></div>';
+    resultWrap.innerHTML = '<div class="card"><p class="muted">লোড করতে সমস্যা হয়েছে: ' + esc(e.message) + '</p></div>';
     if (e.code !== 'permission-denied') showDiagBanner('মাসিক সারাংশ এরর: ' + e.message);
   });
 }
@@ -2339,16 +2377,16 @@ function renderNoticesScreen(isTeacher) {
       const date = n.createdAt ? new Date(n.createdAt).toLocaleDateString('bn-BD') : '';
       return `<div class="student-row" style="display:block;">
         <div style="display:flex;justify-content:space-between;">
-          <b>${n.title}</b>
-          <span class="muted">${date}</span>
+          <b>${esc(n.title)}</b>
+          <span class="muted">${esc(date)}</span>
         </div>
-        <div>${n.body}</div>
-        ${isTeacher ? `<button class="small danger" onclick="deleteNotice('${d.id}')">মুছুন</button>` : ''}
+        <div>${esc(n.body)}</div>
+        ${isTeacher ? `<button class="small danger" onclick="deleteNotice('${jsq(d.id)}')">মুছুন</button>` : ''}
       </div>`;
     }).join('');
   }, err => {
     const wrap = document.getElementById('noticesWrap');
-    if (wrap) wrap.innerHTML = '<p class="muted">লোড করতে সমস্যা হয়েছে: ' + err.message + '</p>';
+    if (wrap) wrap.innerHTML = '<p class="muted">লোড করতে সমস্যা হয়েছে: ' + esc(err.message) + '</p>';
     if (err.code !== 'permission-denied') showDiagBanner('নোটিশ লোড এরর: ' + err.message);
   });
 }
@@ -2418,7 +2456,7 @@ function renderDiarySubjectFieldsHtml() {
     const fieldsHtml = group.subjects.map(subj => {
       const html = `
         <div style="flex:1;min-width:0;">
-          <label style="font-size:12px;">${subj}</label>
+          <label style="font-size:12px;">${esc(subj)}</label>
           <input type="text" id="diarySubj_${idx}" placeholder="আজকের পড়া/হোমওয়ার্ক">
         </div>`;
       idx += 1;
@@ -2432,7 +2470,7 @@ function renderDiaryScreen(isTeacher) {
   let html = '';
   if (isTeacher) {
     const classes = getClassList();
-    const classOpts = classes.map(c => `<option value="${c}">${c}</option>`).join('');
+    const classOpts = classes.map(c => `<option value="${esc(c)}">${esc(c)}</option>`).join('');
     const today = todayLocal();
     html += `
       <div class="card">
@@ -2492,11 +2530,12 @@ function renderDiaryScreen(isTeacher) {
     wrap.innerHTML = docs.map(d => {
       const r = d.data();
       let attachmentHtml = '';
-      if (r.attachmentDataUrl) {
+      const attachUrl = safeDataUrl(r.attachmentDataUrl);
+      if (attachUrl) {
         if ((r.attachmentType || '').startsWith('image/')) {
-          attachmentHtml = `<div style="margin-top:6px;"><img src="${r.attachmentDataUrl}" style="max-width:100%;border-radius:8px;" alt="attachment"></div>`;
+          attachmentHtml = `<div style="margin-top:6px;"><img src="${esc(attachUrl)}" style="max-width:100%;border-radius:8px;" alt="attachment"></div>`;
         } else {
-          attachmentHtml = `<div style="margin-top:6px;"><a href="${r.attachmentDataUrl}" download="${r.attachmentName || 'file'}">📎 ${r.attachmentName || 'ফাইল ডাউনলোড করুন'}</a></div>`;
+          attachmentHtml = `<div style="margin-top:6px;"><a href="${esc(attachUrl)}" download="${esc(r.attachmentName || 'file')}">📎 ${esc(r.attachmentName || 'ফাইল ডাউনলোড করুন')}</a></div>`;
         }
       }
 
@@ -2510,29 +2549,29 @@ function renderDiaryScreen(isTeacher) {
           ? `<table style="width:100%;border-collapse:collapse;margin-top:6px;">
               ${filledSubjects.map(subj => `
                 <tr>
-                  <td style="padding:4px 6px;border:1px solid #e5e7eb;font-weight:bold;width:40%;vertical-align:top;">${subj}</td>
-                  <td style="padding:4px 6px;border:1px solid #e5e7eb;">${(r.subjects[subj] || '').replace(/\n/g, '<br>')}</td>
+                  <td style="padding:4px 6px;border:1px solid #e5e7eb;font-weight:bold;width:40%;vertical-align:top;">${esc(subj)}</td>
+                  <td style="padding:4px 6px;border:1px solid #e5e7eb;">${esc(r.subjects[subj] || '').replace(/\n/g, '<br>')}</td>
                 </tr>
               `).join('')}
             </table>`
           : '<p class="muted">কোনো বিষয়ে এন্ট্রি দেওয়া হয়নি</p>';
       } else {
-        subjectsHtml = `<div style="margin-top:4px;">${(r.text || '').replace(/\n/g, '<br>')}</div>`;
+        subjectsHtml = `<div style="margin-top:4px;">${esc(r.text || '').replace(/\n/g, '<br>')}</div>`;
       }
 
       return `<div class="student-row" style="display:block;">
         <div style="display:flex;justify-content:space-between;">
-          <b>${r.className || '-'}</b>
-          <span class="muted">${r.dayName ? r.dayName + ', ' : ''}${r.date || ''}</span>
+          <b>${esc(r.className || '-')}</b>
+          <span class="muted">${r.dayName ? esc(r.dayName) + ', ' : ''}${esc(r.date || '')}</span>
         </div>
         ${subjectsHtml}
         ${attachmentHtml}
-        ${isTeacher ? `<button class="small danger" onclick="deleteDiaryEntry('${d.id}')" style="margin-top:6px;">মুছুন</button>` : ''}
+        ${isTeacher ? `<button class="small danger" onclick="deleteDiaryEntry('${jsq(d.id)}')" style="margin-top:6px;">মুছুন</button>` : ''}
       </div>`;
     }).join('');
   }, err => {
     const wrap = document.getElementById('diaryWrap');
-    if (wrap) wrap.innerHTML = '<p class="muted">লোড করতে সমস্যা হয়েছে: ' + err.message + '</p>';
+    if (wrap) wrap.innerHTML = '<p class="muted">লোড করতে সমস্যা হয়েছে: ' + esc(err.message) + '</p>';
     if (err.code !== 'permission-denied') showDiagBanner('ডায়েরী লোড এরর: ' + err.message);
   });
 }
@@ -2652,16 +2691,16 @@ function renderSuggestionsScreen(isTeacher) {
       const date = r.createdAt ? new Date(r.createdAt).toLocaleDateString('bn-BD') : '';
       return `<div class="student-row" style="display:block;">
         <div style="display:flex;justify-content:space-between;">
-          <b>${isTeacher ? (student ? student.name + (student.className ? ' (' + student.className + ')' : '') : 'অজানা') : 'আপনার পরামর্শ'}</b>
-          <span class="muted">${date}</span>
+          <b>${isTeacher ? (student ? esc(student.name) + (student.className ? ' (' + esc(student.className) + ')' : '') : 'অজানা') : 'আপনার পরামর্শ'}</b>
+          <span class="muted">${esc(date)}</span>
         </div>
-        <div style="margin-top:4px;">${r.text}</div>
-        ${isTeacher ? `<button class="small danger" onclick="deleteSuggestion('${d.id}')" style="margin-top:6px;">মুছুন</button>` : ''}
+        <div style="margin-top:4px;">${esc(r.text)}</div>
+        ${isTeacher ? `<button class="small danger" onclick="deleteSuggestion('${jsq(d.id)}')" style="margin-top:6px;">মুছুন</button>` : ''}
       </div>`;
     }).join('');
   }, err => {
     const wrap = document.getElementById('suggestionsWrap');
-    if (wrap) wrap.innerHTML = '<p class="muted">লোড করতে সমস্যা হয়েছে: ' + err.message + '</p>';
+    if (wrap) wrap.innerHTML = '<p class="muted">লোড করতে সমস্যা হয়েছে: ' + esc(err.message) + '</p>';
     if (err.code !== 'permission-denied') showDiagBanner('পরামর্শ লোড এরর: ' + err.message);
   });
 }
@@ -2726,21 +2765,21 @@ function listenTeachersList() {
         const isActiveT = t.active !== false;
         return `<div class="student-row" style="display:block;">
           <div style="display:flex;justify-content:space-between;align-items:center;">
-            <span>${t.email || d.id}${isMe ? ' <span class="muted">(আপনি)</span>' : ''}</span>
+            <span>${esc(t.email || d.id)}${isMe ? ' <span class="muted">(আপনি)</span>' : ''}</span>
             <span class="badge ${isActiveT ? 'present' : 'absent'}">${isActiveT ? 'সক্রিয়' : 'নিষ্ক্রিয়'}</span>
           </div>
           <div class="muted" style="margin-top:2px;">${isAdminT ? '⭐ অ্যাডমিন' : 'সাধারণ শিক্ষক'}</div>
           ${!isMe ? `
             <div style="margin-top:6px;">
-              <button class="small secondary" onclick="toggleTeacherAdmin('${d.id}', ${isAdminT})">${isAdminT ? 'অ্যাডমিন বাতিল করুন' : 'অ্যাডমিন করুন'}</button>
-              <button class="small ${isActiveT ? 'danger' : ''}" onclick="toggleTeacherActive('${d.id}', ${isActiveT})">${isActiveT ? 'নিষ্ক্রিয় করুন' : 'পুনরায় সক্রিয় করুন'}</button>
+              <button class="small secondary" onclick="toggleTeacherAdmin('${jsq(d.id)}', ${isAdminT})">${isAdminT ? 'অ্যাডমিন বাতিল করুন' : 'অ্যাডমিন করুন'}</button>
+              <button class="small ${isActiveT ? 'danger' : ''}" onclick="toggleTeacherActive('${jsq(d.id)}', ${isActiveT})">${isActiveT ? 'নিষ্ক্রিয় করুন' : 'পুনরায় সক্রিয় করুন'}</button>
             </div>
           ` : '<p class="muted" style="margin-top:6px;">নিজের অ্যাকাউন্ট এখান থেকে পরিবর্তন করা যাবে না</p>'}
         </div>`;
       }).join('');
     }, err => {
       const wrap = document.getElementById('teachersListWrap');
-      if (wrap) wrap.innerHTML = '<p class="muted">লোড করতে সমস্যা হয়েছে: ' + err.message + '</p>';
+      if (wrap) wrap.innerHTML = '<p class="muted">লোড করতে সমস্যা হয়েছে: ' + esc(err.message) + '</p>';
       if (err.code !== 'permission-denied') showDiagBanner('শিক্ষক তালিকা লোড এরর: ' + err.message);
     });
 }
@@ -2809,7 +2848,7 @@ function renderSuperAdminScreen() {
   setScreen(`
     <div class="card">
       <h2>সুপার অ্যাডমিন — সকল মাদ্রাসা</h2>
-      <p class="muted">এই তালিকা শুধু আপনার (${SUPER_ADMIN_EMAIL}) অ্যাকাউন্ট দেখতে পাচ্ছে। অন্য কোনো মাদ্রাসার অ্যাডমিনও এটি দেখতে বা এতে প্রবেশ করতে পারবে না।</p>
+      <p class="muted">এই তালিকা শুধু আপনার (${esc(SUPER_ADMIN_EMAIL)}) অ্যাকাউন্ট দেখতে পাচ্ছে। অন্য কোনো মাদ্রাসার অ্যাডমিনও এটি দেখতে বা এতে প্রবেশ করতে পারবে না।</p>
       <div id="madrasasListWrap">লোড হচ্ছে...</div>
     </div>
   `);
@@ -2822,6 +2861,8 @@ function listenMadrasasList() {
     const wrap = document.getElementById('madrasasListWrap');
     if (!wrap) return;
     if (snap.empty) { wrap.innerHTML = '<p class="muted">কোনো মাদ্রাসা পাওয়া যায়নি</p>'; return; }
+    // মাদ্রাসার নাম ও আইডি যে কেউ নিবন্ধনের সময় নিজের ইচ্ছামতো দিতে পারে — তাই সুপার অ্যাডমিনের
+    // স্ক্রিনে সবকিছু esc()/jsq() দিয়ে নিরাপদ করা হয়েছে।
     wrap.innerHTML = snap.docs.map(d => {
       const m = d.data();
       const isActiveM = m.active !== false;
@@ -2829,18 +2870,18 @@ function listenMadrasasList() {
       const isCurrent = d.id === madrasaId;
       return `<div class="student-row" style="display:block;">
         <div style="display:flex;justify-content:space-between;align-items:center;">
-          <span>${m.madrasaName || d.id}${isCurrent ? ' <span class="muted">(আপনার বর্তমান)</span>' : ''}</span>
+          <span>${esc(m.madrasaName || d.id)}${isCurrent ? ' <span class="muted">(আপনার বর্তমান)</span>' : ''}</span>
           <span class="badge ${isActiveM ? 'present' : 'absent'}">${isActiveM ? 'সক্রিয়' : 'নিষ্ক্রিয়'}</span>
         </div>
-        <div class="muted" style="margin-top:2px;">নিবন্ধনের তারিখ: ${dateStr} &nbsp; আইডি: ${d.id}</div>
+        <div class="muted" style="margin-top:2px;">নিবন্ধনের তারিখ: ${esc(dateStr)} &nbsp; আইডি: ${esc(d.id)}</div>
         <div style="margin-top:6px;">
-          <button class="small ${isActiveM ? 'danger' : ''}" onclick="toggleMadrasaActive('${d.id}', ${isActiveM})">${isActiveM ? 'নিবন্ধন বাতিল করুন' : 'পুনরায় সক্রিয় করুন'}</button>
+          <button class="small ${isActiveM ? 'danger' : ''}" onclick="toggleMadrasaActive('${jsq(d.id)}', ${isActiveM})">${isActiveM ? 'নিবন্ধন বাতিল করুন' : 'পুনরায় সক্রিয় করুন'}</button>
         </div>
       </div>`;
     }).join('');
   }, err => {
     const wrap = document.getElementById('madrasasListWrap');
-    if (wrap) wrap.innerHTML = '<p class="muted">লোড করতে সমস্যা হয়েছে: ' + err.message + '</p>';
+    if (wrap) wrap.innerHTML = '<p class="muted">লোড করতে সমস্যা হয়েছে: ' + esc(err.message) + '</p>';
     showDiagBanner('মাদ্রাসা তালিকা লোড এরর: ' + err.message);
   });
 }
@@ -2974,6 +3015,7 @@ function loadDuesReport() {
       const parts = [];
       if (x.r.months.length) parts.push(toBanglaNumeral(x.r.months.length) + ' মাসের বেতন (' + monthsText + ')');
       if (x.r.extras.length) parts.push(extrasText);
+      // এটি HTML নয়, শুধু WhatsApp/SMS-এর সাধারণ লেখা — তাই এখানে esc() লাগে না
       duesMsgCache[x.st.id] = 'আসসালামু আলাইকুম। ' + inst + '-এর পক্ষ থেকে জানাচ্ছি, আপনার সন্তান ' + x.st.name
         + (x.st.className ? ' (' + x.st.className + ')' : '') + '-এর ' + parts.join(' এবং ') + ' বাবদ মোট '
         + feeMoney(x.total) + ' বকেয়া আছে। অনুগ্রহ করে পরিশোধের ব্যবস্থা করবেন। জাযাকুমুল্লাহু খাইরান।';
@@ -2981,14 +3023,14 @@ function loadDuesReport() {
       const c = studentContactsCache[x.st.id] || {};
       const phone = (c.phone || '').trim();
       const btn = phone
-        ? '<button class="small ' + (c.hasWhatsapp ? '' : 'secondary') + '" onclick="sendDuesMessage(\'' + x.st.id + '\')">' + (c.hasWhatsapp ? '💬 জানান' : '📱 SMS') + '</button>'
+        ? '<button class="small ' + (c.hasWhatsapp ? '' : 'secondary') + '" onclick="sendDuesMessage(\'' + jsq(x.st.id) + '\')">' + (c.hasWhatsapp ? '💬 জানান' : '📱 SMS') + '</button>'
         : '<span class="muted" style="font-size:12px;">নম্বর নেই</span>';
 
       return `
         <tr>
-          <td style="padding:6px;border:1px solid #ddd;">${x.st.roll || '-'}</td>
-          <td style="padding:6px;border:1px solid #ddd;">${x.st.name}<div class="muted" style="font-size:11px;">${x.st.className || '-'}</div></td>
-          <td style="padding:6px;border:1px solid #ddd;font-size:12px;">${detail}</td>
+          <td style="padding:6px;border:1px solid #ddd;">${esc(x.st.roll || '-')}</td>
+          <td style="padding:6px;border:1px solid #ddd;">${esc(x.st.name)}<div class="muted" style="font-size:11px;">${esc(x.st.className || '-')}</div></td>
+          <td style="padding:6px;border:1px solid #ddd;font-size:12px;">${esc(detail)}</td>
           <td style="padding:6px;border:1px solid #ddd;text-align:right;font-weight:bold;color:#b91c1c;white-space:nowrap;">${feeMoney(x.total)}</td>
           <td class="no-print" style="padding:6px;border:1px solid #ddd;text-align:center;">${btn}</td>
         </tr>`;
@@ -3000,7 +3042,7 @@ function loadDuesReport() {
       </style>
       <div class="card" id="reportPrintArea">
         <h2 style="text-align:center;margin-bottom:2px;">বকেয়া তালিকা</h2>
-        <p class="muted" style="text-align:center;margin-top:0;">${feesClassFilter !== 'all' ? 'শ্রেণি: ' + feesClassFilter + ' | ' : ''}তারিখ: ${todayLocal()}</p>
+        <p class="muted" style="text-align:center;margin-top:0;">${feesClassFilter !== 'all' ? 'শ্রেণি: ' + esc(feesClassFilter) + ' | ' : ''}তারিখ: ${todayLocal()}</p>
         <p style="text-align:center;">বকেয়া আছে: <b>${toBanglaNumeral(rows.length)}</b> জনের &nbsp; মোট বকেয়া: <b style="color:#b91c1c;">${feeMoney(grand)}</b></p>
         <div style="overflow-x:auto;">
           <table style="width:100%;border-collapse:collapse;margin-top:10px;">
@@ -3024,7 +3066,7 @@ function loadDuesReport() {
     `;
   }).catch(e => {
     if (myToken !== duesLoadToken) return;
-    resultWrap.innerHTML = '<div class="card"><p class="muted">লোড করতে সমস্যা হয়েছে: ' + e.message + '</p></div>';
+    resultWrap.innerHTML = '<div class="card"><p class="muted">লোড করতে সমস্যা হয়েছে: ' + esc(e.message) + '</p></div>';
     if (e.code !== 'permission-denied') showDiagBanner('বকেয়া তালিকা এরর: ' + e.message);
   });
 }
@@ -3048,7 +3090,7 @@ function renderMonthlyFeesControls(isTeacher) {
   if (isTeacher) {
     controlsWrap.innerHTML = `
       <label>মাস</label>
-      <input type="month" id="feesMonthInput" value="${feesMonth}" onchange="onFeesMonthChange(this.value)">
+      <input type="month" id="feesMonthInput" value="${esc(feesMonth)}" onchange="onFeesMonthChange(this.value)">
       <div id="feesClassFilterWrap"></div>
     `;
     document.getElementById('feesClassFilterWrap').innerHTML = classFilterDropdownHtml(feesClassFilter, 'onFeesClassFilterChange');
@@ -3069,7 +3111,7 @@ function loadMonthlyFeesTeacher() {
   if (!resultWrap) return;
   const students = studentsByClass(feesClassFilter);
   if (students.length === 0) { resultWrap.innerHTML = '<div class="card"><p class="muted">কোনো শিক্ষার্থী নেই</p></div>'; return; }
-  resultWrap.innerHTML = students.map(s => `<div class="card" id="fee_${s.id}">লোড হচ্ছে...</div>`).join('');
+  resultWrap.innerHTML = students.map(s => `<div class="card" id="fee_${esc(s.id)}">লোড হচ্ছে...</div>`).join('');
   const month = feesMonth;
   students.forEach(s => {
     db.collection('fees_monthly').doc(s.id + '_' + month).get().then(doc => {
@@ -3078,21 +3120,21 @@ function loadMonthlyFeesTeacher() {
       if (!cell) return;
       const status = d.status || 'due';
       cell.innerHTML = `
-        <b>${s.name}</b> <span class="muted">(${s.className || '-'})</span>
+        <b>${esc(s.name)}</b> <span class="muted">(${esc(s.className || '-')})</span>
         <label>বেতনের পরিমাণ</label>
-        <input type="number" value="${d.amount || ''}" onchange="updateFeeAmount('${s.id}','${month}',this.value)">
+        <input type="number" value="${esc(d.amount || '')}" onchange="updateFeeAmount('${jsq(s.id)}','${jsq(month)}',this.value)">
         <div class="row" style="margin-top:6px;">
-          <button class="small ${status==='paid'?'':'secondary'}" onclick="setFeeStatus('${s.id}','${month}','paid')">পরিশোধিত</button>
-          <button class="small ${status==='due'?'danger':'secondary'}" onclick="setFeeStatus('${s.id}','${month}','due')">বকেয়া</button>
+          <button class="small ${status==='paid'?'':'secondary'}" onclick="setFeeStatus('${jsq(s.id)}','${jsq(month)}','paid')">পরিশোধিত</button>
+          <button class="small ${status==='due'?'danger':'secondary'}" onclick="setFeeStatus('${jsq(s.id)}','${jsq(month)}','due')">বকেয়া</button>
         </div>
-        <div class="muted fee-paid-date-line" style="margin-top:4px;${d.paidDate ? '' : 'display:none;'}">পরিশোধের তারিখ: ${d.paidDate || ''}</div>
+        <div class="muted fee-paid-date-line" style="margin-top:4px;${d.paidDate ? '' : 'display:none;'}">পরিশোধের তারিখ: ${esc(d.paidDate || '')}</div>
       `;
     }).catch(e => {
       const cell = document.getElementById('fee_' + s.id);
       if (cell) {
         cell.innerHTML = `
-          <b>${s.name}</b> <span class="muted">(${s.className || '-'})</span>
-          <p class="muted" style="color:#dc2626;margin:6px 0;">লোড করতে সমস্যা হয়েছে${e && e.message ? ' (' + e.message + ')' : ''}</p>
+          <b>${esc(s.name)}</b> <span class="muted">(${esc(s.className || '-')})</span>
+          <p class="muted" style="color:#dc2626;margin:6px 0;">লোড করতে সমস্যা হয়েছে${e && e.message ? ' (' + esc(e.message) + ')' : ''}</p>
           <button class="small secondary" onclick="loadMonthlyFeesTeacher()">আবার চেষ্টা করুন</button>
         `;
       }
@@ -3148,13 +3190,13 @@ function loadMonthlyFeesStudent() {
       const rows = snap.docs.map(d => d.data()).sort((a,b) => (b.month||'').localeCompare(a.month||''));
       resultWrap.innerHTML = `<div class="card">${rows.map(r => `
         <div class="student-row">
-          <span>${r.month}</span>
+          <span>${esc(r.month)}</span>
           <span class="badge ${r.status==='paid'?'present':'absent'}">${r.status==='paid'?'পরিশোধিত':'বকেয়া'}</span>
         </div>
-        <div class="muted">পরিমাণ: ${r.amount || 0} টাকা${r.paidDate ? ' | পরিশোধের তারিখ: ' + r.paidDate : ''}</div>
+        <div class="muted">পরিমাণ: ${esc(r.amount || 0)} টাকা${r.paidDate ? ' | পরিশোধের তারিখ: ' + esc(r.paidDate) : ''}</div>
       `).join('<hr style="border:none;border-top:1px solid #eee;margin:6px 0;">')}</div>`;
     }, err => {
-      resultWrap.innerHTML = '<div class="card"><p class="muted">লোড করতে সমস্যা হয়েছে: ' + err.message + '</p></div>';
+      resultWrap.innerHTML = '<div class="card"><p class="muted">লোড করতে সমস্যা হয়েছে: ' + esc(err.message) + '</p></div>';
       showDiagBanner('আমার বেতন লোড এরর: ' + err.message);
     });
 }
@@ -3164,7 +3206,7 @@ function renderOnetimeFeesControls(isTeacher) {
   if (!controlsWrap) return;
   if (isTeacher) {
     const students = studentsByClass(feesClassFilter);
-    const opts = students.map(s => `<option value="${s.id}">${s.name} (${s.roll || ''})</option>`).join('');
+    const opts = students.map(s => `<option value="${esc(s.id)}">${esc(s.name)} (${esc(s.roll || '')})</option>`).join('');
     controlsWrap.innerHTML = `
       <div id="feesClassFilterWrap"></div>
       <h2 style="margin-top:10px;">নতুন ফি যোগ করুন</h2>
@@ -3218,18 +3260,18 @@ function loadOnetimeFeesTeacher() {
         const isPaid = r.status === 'paid';
         return `<div class="student-row" style="display:block;">
           <div style="display:flex;justify-content:space-between;">
-            <span>${student ? student.name + (student.className ? ' (' + student.className + ')' : '') : 'অজানা'} - ${r.feeType}</span>
+            <span>${student ? esc(student.name) + (student.className ? ' (' + esc(student.className) + ')' : '') : 'অজানা'} - ${esc(r.feeType)}</span>
             <span class="badge ${isPaid ? 'present' : 'absent'}">${isPaid ? 'পরিশোধিত' : 'বকেয়া'}</span>
           </div>
-          <div class="muted">পরিমাণ: ${r.amount} টাকা | তারিখ: ${r.date}</div>
+          <div class="muted">পরিমাণ: ${esc(r.amount)} টাকা | তারিখ: ${esc(r.date)}</div>
           <div style="margin-top:6px;">
-            <button class="small ${isPaid ? 'secondary' : ''}" onclick="toggleOnetimeFeeStatus('${d.id}', ${isPaid})">${isPaid ? 'বকেয়া করুন' : 'পরিশোধিত চিহ্নিত করুন'}</button>
-            <button class="small danger" onclick="deleteOnetimeFee('${d.id}')">মুছুন</button>
+            <button class="small ${isPaid ? 'secondary' : ''}" onclick="toggleOnetimeFeeStatus('${jsq(d.id)}', ${isPaid})">${isPaid ? 'বকেয়া করুন' : 'পরিশোধিত চিহ্নিত করুন'}</button>
+            <button class="small danger" onclick="deleteOnetimeFee('${jsq(d.id)}')">মুছুন</button>
           </div>
         </div>`;
       }).join('');
     }, err => {
-      resultWrap.innerHTML = '<div class="card"><p class="muted">লোড করতে সমস্যা হয়েছে: ' + err.message + '</p></div>';
+      resultWrap.innerHTML = '<div class="card"><p class="muted">লোড করতে সমস্যা হয়েছে: ' + esc(err.message) + '</p></div>';
       if (err.code !== 'permission-denied') showDiagBanner('ফি লোড এরর: ' + err.message);
     });
 }
@@ -3255,13 +3297,13 @@ function loadOnetimeFeesStudent() {
       resultWrap.innerHTML = `<div class="card">${rows.map(r => {
         const isPaid = r.status === 'paid';
         return `<div class="student-row">
-          <span>${r.feeType}</span>
+          <span>${esc(r.feeType)}</span>
           <span class="badge ${isPaid ? 'present' : 'absent'}">${isPaid ? 'পরিশোধিত' : 'বকেয়া'}</span>
         </div>
-        <div class="muted">পরিমাণ: ${r.amount} টাকা | তারিখ: ${r.date}</div>`;
+        <div class="muted">পরিমাণ: ${esc(r.amount)} টাকা | তারিখ: ${esc(r.date)}</div>`;
       }).join('<hr style="border:none;border-top:1px solid #eee;margin:6px 0;">')}</div>`;
     }, err => {
-      resultWrap.innerHTML = '<div class="card"><p class="muted">লোড করতে সমস্যা হয়েছে: ' + err.message + '</p></div>';
+      resultWrap.innerHTML = '<div class="card"><p class="muted">লোড করতে সমস্যা হয়েছে: ' + esc(err.message) + '</p></div>';
       showDiagBanner('আমার ফি লোড এরর: ' + err.message);
     });
 }
