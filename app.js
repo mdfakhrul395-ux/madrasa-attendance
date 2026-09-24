@@ -364,6 +364,7 @@ function listenSettings() {
     settingsUnsub = ref.onSnapshot(doc => {
       appSettings = doc.exists ? (doc.data() || {}) : {};
       renderTopBar();
+      if (typeof window.dashOnSettings === 'function') window.dashOnSettings();
     }, err => {
       if (err.code !== 'permission-denied') showDiagBanner('Settings লোড এরর: ' + err.message);
       renderTopBar();
@@ -416,6 +417,7 @@ function renderSettingsScreen() {
       <button onclick="saveSettings()" style="margin-top:10px;">সংরক্ষণ করুন</button>
       ${logoSrc ? `<button class="small danger" onclick="removeLogo()" style="margin-top:8px;">লোগো মুছুন</button>` : ''}
     </div>
+    ${holidaysCardHtml()}
     <div class="card">
       <h2>ডিবাগ মোড</h2>
       <p class="muted">চালু থাকলে অ্যাপে কোনো টেকনিক্যাল এরর হলে স্ক্রিনে লাল ব্যানারে দেখাবে — সমস্যা খুঁজে বের করতে সাহায্য করার জন্য। সাধারণ ব্যবহারের জন্য এটি বন্ধ রাখাই ভালো।</p>
@@ -463,6 +465,160 @@ function removeLogo() {
   db.collection('madrasas').doc(madrasaId).set({ logoDataUrl: '' }, { merge: true })
     .then(() => renderSettingsScreen())
     .catch(e => alert('মুছতে ব্যর্থ: ' + e.message));
+}
+
+// ================= প্রাতিষ্ঠানিক ছুটি / বন্ধের দিন =================
+// অ্যাডমিন সেটিংস থেকে (ক) সাপ্তাহিক বন্ধ (যেমন শুক্রবার) এবং (খ) নির্দিষ্ট তারিখের ছুটি (একদিন বা একসাথে অনেকদিন) ঠিক করেন।
+// তথ্য মাদ্রাসার নিজস্ব ডকুমেন্টে (madrasas/{id}) জমা থাকে: holidays = [{date, reason}], weeklyOff = [0-6] (রবি=0 ... শনি=6)।
+// বন্ধের দিন কার্যদিবসে ধরা হয় না এবং রিপোর্টে "বন্ধ" হিসেবে দেখানো হয়।
+function holidayMap() {
+  const m = {};
+  const list = (appSettings && Array.isArray(appSettings.holidays)) ? appSettings.holidays : [];
+  list.forEach(h => { if (h && typeof h.date === 'string') m[h.date] = String(h.reason || ''); });
+  return m;
+}
+
+// ds = 'YYYY-MM-DD'। বন্ধের দিন হলে { reason, weekly } ফেরত দেয়, নইলে null।
+function holidayInfo(ds) {
+  if (!ds) return null;
+  const hm = holidayMap();
+  if (Object.prototype.hasOwnProperty.call(hm, ds)) return { reason: hm[ds] || 'বন্ধের দিন', weekly: false };
+  const off = (appSettings && Array.isArray(appSettings.weeklyOff)) ? appSettings.weeklyOff : [];
+  const p = String(ds).split('-').map(Number);
+  if (p.length === 3 && !p.some(isNaN) && off.indexOf(new Date(Date.UTC(p[0], p[1] - 1, p[2])).getUTCDay()) > -1) {
+    return { reason: 'সাপ্তাহিক বন্ধ', weekly: true };
+  }
+  return null;
+}
+
+function fmtHolidayDate(ds, withWeekday) {
+  const p = String(ds).split('-').map(Number);
+  if (p.length !== 3 || p.some(isNaN)) return String(ds);
+  const opt = { day: 'numeric', month: 'long', year: 'numeric', timeZone: 'UTC' };
+  if (withWeekday) opt.weekday = 'long';
+  try { return new Date(Date.UTC(p[0], p[1] - 1, p[2])).toLocaleDateString('bn-BD', opt); } catch (e) { return String(ds); }
+}
+
+// কোনো মাসের (আজ পর্যন্ত) সব বন্ধের দিন
+function monthHolidays(month) {
+  const p = String(month).split('-').map(Number);
+  if (p.length < 2 || isNaN(p[0]) || isNaN(p[1])) return [];
+  const daysInMonth = new Date(p[0], p[1], 0).getDate();
+  const today = todayLocal();
+  const out = [];
+  for (let d = 1; d <= daysInMonth; d++) {
+    const ds = String(month).slice(0, 7) + '-' + String(d).padStart(2, '0');
+    if (ds > today) break;
+    const hi = holidayInfo(ds);
+    if (hi) out.push({ ds, reason: hi.reason, weekly: hi.weekly });
+  }
+  return out;
+}
+
+// একটি নির্দিষ্ট দিনের জন্য ছোট ব্যানার (বন্ধ না হলে ফাঁকা)
+function holidayBannerHtml(ds) {
+  const hi = holidayInfo(ds);
+  if (!hi) return '';
+  return `<p style="text-align:center;color:#4f46e5;font-weight:bold;margin:6px 0;">🚫 এই দিন বন্ধের দিন (${esc(hi.reason)})</p>`;
+}
+
+// মাসিক সারাংশের ওপরের অংশে বন্ধের দিনগুলোর তালিকা
+function holidaySummaryHtml(days) {
+  if (!days || !days.length) return '';
+  const special = days.filter(x => !x.weekly);
+  const weekly = days.length - special.length;
+  const off = (appSettings && Array.isArray(appSettings.weeklyOff)) ? appSettings.weeklyOff.slice().sort() : [];
+  const parts = special.map(x => esc(fmtHolidayDate(x.ds, false)) + (x.reason && x.reason !== 'বন্ধের দিন' ? ' (' + esc(x.reason) + ')' : ''));
+  if (weekly) parts.push('সাপ্তাহিক বন্ধ (' + esc(off.map(i => BANGLA_WEEKDAYS[i]).join(', ')) + '): ' + toBanglaNumeral(weekly) + ' দিন');
+  return `<p style="text-align:center;color:#4f46e5;font-size:13px;margin:4px 0;">বন্ধের দিন (কার্যদিবসে ধরা হয়নি): <b>${toBanglaNumeral(days.length)}</b> দিন</p>
+        <p class="muted" style="text-align:center;font-size:12px;margin:0 0 6px;">${parts.join(' • ')}</p>`;
+}
+
+function canManageHolidays() {
+  return !!(myTeacherIsAdmin || isSuperAdminUser);
+}
+
+function holidaysCardHtml() {
+  if (!canManageHolidays()) return '';
+  const off = (appSettings && Array.isArray(appSettings.weeklyOff)) ? appSettings.weeklyOff : [];
+  const order = [6, 0, 1, 2, 3, 4, 5]; // শনিবার থেকে শুরু
+  const wk = order.map(i => `<label style="display:inline-flex;align-items:center;gap:4px;margin:4px 14px 4px 0;"><input type="checkbox" id="hwk_${i}" style="width:auto;" ${off.indexOf(i) > -1 ? 'checked' : ''}> ${esc(BANGLA_WEEKDAYS[i])}</label>`).join('');
+  const all = Object.keys(holidayMap()).sort().reverse();
+  const hm = holidayMap();
+  const rows = all.slice(0, 40).map(ds => `
+      <div class="student-row">
+        <span>${esc(fmtHolidayDate(ds, true))}${hm[ds] ? ' <span class="muted">(' + esc(hm[ds]) + ')</span>' : ''}</span>
+        <button class="small danger" onclick="removeHoliday('${jsq(ds)}')">✕</button>
+      </div>`).join('');
+  const more = all.length > 40 ? `<p class="muted">সর্বশেষ ৪০টি দেখানো হচ্ছে (মোট ${toBanglaNumeral(all.length)}টি)</p>` : '';
+  return `
+    <div class="card">
+      <h2>বন্ধের দিন / প্রাতিষ্ঠানিক ছুটি</h2>
+      <p class="muted">এই দিনগুলো মাসিক উপস্থিতির কার্যদিবসে ধরা হয় না এবং রিপোর্টে "বন্ধ" হিসেবে দেখায়।</p>
+      <label>সাপ্তাহিক বন্ধ (প্রতি সপ্তাহে)</label>
+      <div>${wk}</div>
+      <button class="secondary" onclick="saveWeeklyOff()" style="margin-top:6px;">সাপ্তাহিক বন্ধ সংরক্ষণ করুন</button>
+      <hr style="border:none;border-top:1px solid #eee;margin:14px 0;">
+      <label>নির্দিষ্ট তারিখের ছুটি যোগ করুন</label>
+      <label style="font-size:12px;">শুরুর তারিখ</label><input type="date" id="hFrom">
+      <label style="font-size:12px;">শেষ তারিখ (একদিন হলে ফাঁকা রাখুন)</label><input type="date" id="hTo">
+      <label style="font-size:12px;">কারণ (ঐচ্ছিক)</label><input id="hReason" maxlength="60" placeholder="যেমন: ঈদুল ফিতর, বার্ষিক পরীক্ষার ছুটি">
+      <p id="holidayError" class="muted" style="color:#dc2626;"></p>
+      <button onclick="addHolidays()">ছুটি যোগ করুন</button>
+      <div style="margin-top:12px;">${rows || '<p class="muted">এখনো কোনো নির্দিষ্ট তারিখের ছুটি যোগ করা হয়নি</p>'}${more}</div>
+    </div>`;
+}
+
+// holidays ও weeklyOff মাদ্রাসার ডকুমেন্টে লেখা (শুধু অ্যাডমিন, firestore.rules-এও একই নিয়ম)
+function saveHolidayPatch(patch) {
+  if (!canManageHolidays()) { alert('বন্ধের দিন ঠিক করা শুধু অ্যাডমিন শিক্ষক করতে পারেন'); return; }
+  const prev = {};
+  Object.keys(patch).forEach(k => { prev[k] = appSettings[k]; appSettings[k] = patch[k]; });
+  db.collection('madrasas').doc(madrasaId).set(patch, { merge: true })
+    .then(() => renderSettingsScreen())
+    .catch(e => {
+      Object.keys(prev).forEach(k => { appSettings[k] = prev[k]; });
+      alert('সংরক্ষণ ব্যর্থ: ' + e.message);
+      showDiagBanner('বন্ধের দিন সংরক্ষণ ব্যর্থ: ' + e.message);
+      renderSettingsScreen();
+    });
+}
+
+function saveWeeklyOff() {
+  const off = [];
+  for (let i = 0; i <= 6; i++) {
+    const c = document.getElementById('hwk_' + i);
+    if (c && c.checked) off.push(i);
+  }
+  saveHolidayPatch({ weeklyOff: off });
+}
+
+function addHolidays() {
+  const errEl = document.getElementById('holidayError');
+  if (errEl) errEl.textContent = '';
+  const from = document.getElementById('hFrom').value;
+  const to = document.getElementById('hTo').value || from;
+  const reason = document.getElementById('hReason').value.trim().slice(0, 60);
+  const fail = msg => { if (errEl) errEl.textContent = msg; };
+  if (!from) return fail('শুরুর তারিখ দিন');
+  if (to < from) return fail('শেষ তারিখ শুরুর তারিখের আগে হতে পারে না');
+  const a = from.split('-').map(Number), b = to.split('-').map(Number);
+  const start = Date.UTC(a[0], a[1] - 1, a[2]), end = Date.UTC(b[0], b[1] - 1, b[2]);
+  const days = Math.round((end - start) / 86400000) + 1;
+  if (isNaN(days) || days < 1) return fail('তারিখ সঠিক নয়');
+  if (days > 60) return fail('একসাথে সর্বোচ্চ ৬০ দিন যোগ করা যাবে');
+  const map = holidayMap();
+  for (let i = 0; i < days; i++) map[new Date(start + i * 86400000).toISOString().slice(0, 10)] = reason;
+  const arr = Object.keys(map).sort().map(d => ({ date: d, reason: map[d] }));
+  saveHolidayPatch({ holidays: arr });
+}
+
+function removeHoliday(ds) {
+  if (!confirm('এই বন্ধের দিনটি তালিকা থেকে মুছতে চান?')) return;
+  const map = holidayMap();
+  delete map[ds];
+  const arr = Object.keys(map).sort().map(d => ({ date: d, reason: map[d] }));
+  saveHolidayPatch({ holidays: arr });
 }
 
 // ================= CLASS FILTER HELPERS =================
@@ -1089,6 +1245,7 @@ function renderAttendanceScreen() {
       <div class="card">
         <h2>উপস্থিতি নেওয়ার তারিখ</h2>
         <input type="date" id="attDate" value="${today}" onchange="loadAttendanceForDate()">
+        <div id="attHolidayNote"></div>
         <div id="attFilterWrap"></div>
         <button id="markAllBtn" class="secondary" onclick="markAllPresent()" style="margin-top:10px;">✅ সবাইকে উপস্থিত করুন</button>
         <p class="muted" style="font-size:12px;margin:6px 0 0;">যাদের হাজিরা আগে নেওয়া হয়েছে তাদের বদলাবে না। এরপর যারা অনুপস্থিত, শুধু তাদের "অনুপস্থিত" চাপুন।</p>
@@ -1116,6 +1273,9 @@ function renderAttendanceList() {
   const list = document.getElementById('attList');
   if (!dateEl || !list) return;
   const date = dateEl.value;
+  const holNote = document.getElementById('attHolidayNote');
+  const holBanner = holidayBannerHtml(date);
+  if (holNote) holNote.innerHTML = holBanner ? holBanner + '<p class="muted" style="text-align:center;font-size:12px;margin:0;">হাজিরা নেওয়ার দরকার নেই।</p>' : '';
   const students = studentsByClass(attClassFilter);
   if (students.length === 0) { list.innerHTML = '<p class="muted">শিক্ষার্থী তালিকা খালি</p>'; return; }
   list.innerHTML = students.map(s => `<div class="card" id="att_${esc(s.id)}">লোড হচ্ছে...</div>`).join('');
@@ -1196,6 +1356,8 @@ function markAllPresent() {
   const dateEl = document.getElementById('attDate');
   const date = dateEl ? dateEl.value : '';
   if (!date) return alert('আগে তারিখ বাছাই করুন');
+  const holToday = holidayInfo(date);
+  if (holToday && !confirm('এই দিন (' + holToday.reason + ') বন্ধের দিন হিসেবে চিহ্নিত। তবুও সবাইকে উপস্থিত করতে চান?')) return;
   const students = studentsByClass(attClassFilter);
   if (students.length === 0) return alert('এই শ্রেণিতে কোনো শিক্ষার্থী নেই');
 
@@ -2084,6 +2246,7 @@ function loadDailyReport() {
         <div class="card" id="reportPrintArea">
           <h2 style="text-align:center;margin-bottom:2px;">দৈনিক উপস্থিতি রিপোর্ট</h2>
           <p class="muted" style="text-align:center;margin-top:0;">তারিখ: ${esc(date)}${reportClassFilter !== 'all' ? ' | শ্রেণি: ' + esc(reportClassFilter) : ''}</p>
+          ${holidayBannerHtml(date)}
           <p style="text-align:center;">মোট: <b>${students.length}</b> &nbsp; উপস্থিত: <b>${presentCount}</b> &nbsp; অনুপস্থিত: <b>${absentCount}</b> &nbsp; চিহ্নিত হয়নি: <b>${unmarkedCount}</b></p>
           <table style="width:100%;border-collapse:collapse;margin-top:10px;">
             <thead>
@@ -2173,15 +2336,30 @@ function loadMonthlyReport() {
     .then(snap => {
       const entries = snap.docs
         .map(d => d.data())
-        .filter(d => (d.date || '').startsWith(month))
+        .filter(d => (d.date || '').startsWith(month) && !holidayInfo(d.date))
         .sort((a, b) => (a.date || '').localeCompare(b.date || ''));
+      const holList = monthHolidays(month);
 
       const presentCount = entries.filter(e => e.status === 'present').length;
       const absentCount = entries.filter(e => e.status === 'absent').length;
       const markedCount = presentCount + absentCount;
       const rate = markedCount > 0 ? Math.round((presentCount / markedCount) * 1000) / 10 : 0;
 
-      const rows = entries.length > 0 ? entries.map(e => {
+      // উপস্থিতির সারি ও বন্ধের দিনের সারি তারিখ অনুযায়ী একসাথে সাজানো
+      const combined = entries.map(e => ({ kind: 'att', date: e.date || '', e }))
+        .concat(holList.map(h => ({ kind: 'hol', date: h.ds, h })))
+        .sort((a, b) => a.date.localeCompare(b.date));
+      const rows = combined.length > 0 ? combined.map(x => {
+        if (x.kind === 'hol') {
+          return `
+          <tr style="background:#eef2ff;">
+            <td style="padding:6px;border:1px solid #ddd;">${esc(x.date)}</td>
+            <td style="padding:6px;border:1px solid #ddd;text-align:center;"><span class="badge" style="background:#e0e7ff;color:#3730a3;">বন্ধ</span></td>
+            <td style="padding:6px;border:1px solid #ddd;">-</td>
+            <td style="padding:6px;border:1px solid #ddd;">${esc(x.h.reason)}</td>
+          </tr>`;
+        }
+        const e = x.e;
         const statusText = e.status === 'present' ? 'উপস্থিত' : (e.status === 'absent' ? 'অনুপস্থিত' : 'চিহ্নিত হয়নি');
         const badgeClass = e.status === 'present' ? 'present' : (e.status === 'absent' ? 'absent' : 'pending');
         return `
@@ -2202,7 +2380,7 @@ function loadMonthlyReport() {
           <h2 style="text-align:center;margin-bottom:2px;">মাসিক উপস্থিতি রিপোর্ট</h2>
           <p class="muted" style="text-align:center;margin-top:0;">${student ? esc(student.name) + ' (রোল ' + esc(student.roll || '-') + ', ' + esc(student.className || '-') + ')' : ''}</p>
           <p class="muted" style="text-align:center;margin-top:0;">মাস: ${esc(month)}</p>
-          <p style="text-align:center;">উপস্থিত: <b>${presentCount}</b> &nbsp; অনুপস্থিত: <b>${absentCount}</b> &nbsp; চিহ্নিত দিন: <b>${markedCount}</b> &nbsp; উপস্থিতির হার: <b>${rate}%</b></p>
+          <p style="text-align:center;">উপস্থিত: <b>${presentCount}</b> &nbsp; অনুপস্থিত: <b>${absentCount}</b> &nbsp; চিহ্নিত দিন: <b>${markedCount}</b> &nbsp; উপস্থিতির হার: <b>${rate}%</b>${holList.length ? ' &nbsp; বন্ধের দিন: <b>' + holList.length + '</b>' : ''}</p>
           <table style="width:100%;border-collapse:collapse;margin-top:10px;">
             <thead>
               <tr>
@@ -2256,11 +2434,17 @@ function loadSummaryReport() {
   const daysInMonth = new Date(y, m, 0).getDate();
   const today = todayLocal();
   const dates = [];
+  const holidayDays = monthHolidays(month); // বন্ধের দিন কার্যদিবসে ধরা হয় না
   for (let d = 1; d <= daysInMonth; d++) {
     const ds = month + '-' + String(d).padStart(2, '0');
-    if (ds <= today) dates.push(ds);
+    if (ds <= today && !holidayInfo(ds)) dates.push(ds);
   }
-  if (dates.length === 0) { resultWrap.innerHTML = '<div class="card"><p class="muted">এই মাস এখনো শুরু হয়নি</p></div>'; return; }
+  if (dates.length === 0) {
+    resultWrap.innerHTML = holidayDays.length
+      ? '<div class="card">' + holidaySummaryHtml(holidayDays) + '<p class="muted" style="text-align:center;">এই মাসে এখন পর্যন্ত সব দিনই বন্ধ ছিল</p></div>'
+      : '<div class="card"><p class="muted">এই মাস এখনো শুরু হয়নি</p></div>';
+    return;
+  }
 
   Promise.all(dates.map(ds =>
     db.collection('attendance').where('madrasaId', '==', madrasaId).where('date', '==', ds).get()
@@ -2331,6 +2515,7 @@ function loadSummaryReport() {
         <h2 style="text-align:center;margin-bottom:2px;">মাসিক উপস্থিতির সারাংশ</h2>
         <p class="muted" style="text-align:center;margin-top:0;">মাস: ${esc(month)}${reportClassFilter !== 'all' ? ' | শ্রেণি: ' + esc(reportClassFilter) : ''}</p>
         <p style="text-align:center;">শিক্ষার্থী: <b>${students.length}</b> &nbsp; কার্যদিবস: <b>${workCount}</b> &nbsp; গড় উপস্থিতি: <b>${avg === null ? '-' : avg + '%'}</b></p>
+        ${holidaySummaryHtml(holidayDays)}
         ${lowCount ? `<p style="text-align:center;color:#b91c1c;font-size:13px;">৭৫% এর কম উপস্থিতি: <b>${lowCount}</b> জন</p>` : ''}
         ${workCount === 0 ? '<p class="muted" style="text-align:center;">এই মাসে এখনো কোনো হাজিরা নেওয়া হয়নি</p>' : ''}
         <div style="overflow-x:auto;">
@@ -2348,7 +2533,7 @@ function loadSummaryReport() {
             <tbody>${body}</tbody>
           </table>
         </div>
-        <p class="muted" style="font-size:12px;margin-top:8px;">হার = উপস্থিত ÷ (উপস্থিত + অনুপস্থিত)। যেদিন কারও হাজিরা নেওয়া হয়নি, সেদিন তার হিসাবে ধরা হয়নি।</p>
+        <p class="muted" style="font-size:12px;margin-top:8px;">হার = উপস্থিত ÷ (উপস্থিত + অনুপস্থিত)। যেদিন কারও হাজিরা নেওয়া হয়নি, সেদিন তার হিসাবে ধরা হয়নি। বন্ধের দিন কার্যদিবসে ধরা হয় না।</p>
         <div class="no-print" style="margin-top:14px;text-align:center;">
           <button onclick="window.print()">🖨️ প্রিন্ট করুন</button>
         </div>

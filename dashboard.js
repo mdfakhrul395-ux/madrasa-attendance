@@ -466,13 +466,17 @@
     else { u.style.display = ''; setNum('dashRingN', pct); }
     ring.style.strokeDashoffset = pct == null ? RING_C : RING_C * (1 - pct / 100);
 
+    // আজ বন্ধের দিন হলে (এবং কারও হাজিরা নেওয়া না হলে) সেটাই জানানো হয়
+    const holToday = (typeof holidayInfo === 'function') ? holidayInfo(todayStr()) : null;
+    const holidayNow = !!(holToday && st.total && !st.marked);
     let msg;
     if (!st.total) msg = 'এখনো কোনো শিক্ষার্থী যোগ করা হয়নি';
+    else if (holidayNow) msg = 'আজ বন্ধের দিন (' + holToday.reason + '), হাজিরা নেওয়ার দরকার নেই';
     else if (!st.marked) msg = 'আজকের হাজিরা এখনো নেওয়া হয়নি';
     else if (st.unmarked) msg = bn(st.marked) + ' জনের হাজিরা নেওয়া হয়েছে, বাকি ' + bn(st.unmarked) + ' জন';
     else msg = 'আজ সবার হাজিরা নেওয়া হয়েছে';
     status.textContent = msg;
-    cta.style.display = (st.total && st.unmarked) ? '' : 'none';
+    cta.style.display = (st.total && st.unmarked && !holidayNow) ? '' : 'none';
     cta.textContent = st.marked ? 'বাকি হাজিরা নিন' : 'হাজিরা নিন';
   }
 
@@ -882,6 +886,8 @@
     start(tok);
   }
 
+  // মাদ্রাসার সেটিংস (বন্ধের দিন ইত্যাদি) দেরিতে লোড হলে হিরো আবার আঁকা
+  window.dashOnSettings = function () { if (S && el('dashboardScreen')) updateHero(); };
   window.renderTeacherDashboard = render;
   window.stopTeacherDashboard = stop;
   window.dashRefresh = function () {
