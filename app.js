@@ -159,6 +159,7 @@ let appSettings = {};
 // has isAdmin:true on their teachers/{uid} doc. Only admin teachers can see
 // the "শিক্ষকগণ" tab and add/deactivate/promote other teacher accounts.
 let myTeacherIsAdmin = false;
+let myTeacherPending = false;
 
 // unread notification badges (student side)
 let unreadCounts = { notices: 0, diary: 0 };
@@ -221,8 +222,10 @@ window.addEventListener('DOMContentLoaded', () => {
       if (isTeacherAccount) listenStudentContacts(); else stopStudentContactsListener();
 
       if (role === 'teacher') {
-        if (isTeacherAccount) showTeacherApp();
-        else showTeacherLogin();
+        if (isTeacherAccount) {
+          if (myTeacherPending) renderPendingApprovalScreen();
+          else showTeacherApp();
+        } else showTeacherLogin();
       } else if (role === 'student' && myStudentId) {
         // verify this device's session still matches the signed-in anonymous user
         db.collection('sessions').doc(user.uid).get().then(doc => {
@@ -261,6 +264,7 @@ function ensureTeacherDoc(user) {
       madrasaId = doc.data().madrasaId;
       localStorage.setItem('madrasaId', madrasaId);
       myTeacherIsAdmin = doc.data().isAdmin === true;
+      myTeacherPending = doc.data().pending === true;
       if (doc.data().active === false) {
         myTeacherIsAdmin = false;
         showDiagBanner('এই শিক্ষক অ্যাকাউন্টটি নিষ্ক্রিয় করা হয়েছে — অ্যাডমিনের সাথে যোগাযোগ করুন');
@@ -268,6 +272,7 @@ function ensureTeacherDoc(user) {
       return;
     }
     myTeacherIsAdmin = false;
+    myTeacherPending = false;
     return ref.set({ madrasaId, email: user.email || '', createdAt: Date.now() }, { merge: true });
   }).catch(err => { console.error('ensureTeacherDoc failed:', err); showDiagBanner('ensureTeacherDoc এরর: ' + err.message); });
 }
@@ -417,6 +422,16 @@ function renderSettingsScreen() {
       <button onclick="saveSettings()" style="margin-top:10px;">সংরক্ষণ করুন</button>
       ${logoSrc ? `<button class="small danger" onclick="removeLogo()" style="margin-top:8px;">লোগো মুছুন</button>` : ''}
     </div>
+    ${myTeacherIsAdmin ? `
+    <div class="card">
+      <h2>মাদ্রাসা কোড (অন্য শিক্ষক যোগদানের জন্য)</h2>
+      <p class="muted">এই কোডটি আপনার মাদ্রাসার অন্য শিক্ষকদের দিন। তারা "নতুন মাদ্রাসা নিবন্ধন" স্ক্রিনে "বিদ্যমান মাদ্রাসায় যোগ দিন" অপশনে এই কোড দিয়ে নিজেই যোগ দিতে পারবেন (সাধারণ শিক্ষক হিসেবে, অ্যাডমিন নয়, এবং অনুমোদনের আগ পর্যন্ত অ্যাপে ঢুকতে পারবেন না)।</p>
+      <div style="display:flex;align-items:center;gap:8px;">
+        <input id="madrasaCodeDisplay" readonly value="${esc(madrasaId)}" style="flex:1;">
+        <button class="small secondary" onclick="copyMadrasaCode()">কপি করুন</button>
+      </div>
+    </div>
+    ` : ''}
     ${holidaysCardHtml()}
     <div class="card">
       <h2>ডিবাগ মোড</h2>
@@ -426,6 +441,22 @@ function renderSettingsScreen() {
       </label>
     </div>
   `);
+}
+
+function copyMadrasaCode() {
+  const el = document.getElementById('madrasaCodeDisplay');
+  if (!el) return;
+  el.select();
+  el.setSelectionRange(0, 99999);
+  try {
+    navigator.clipboard.writeText(el.value).then(() => alert('কপি হয়েছে')).catch(() => {
+      document.execCommand('copy');
+      alert('কপি হয়েছে');
+    });
+  } catch (e) {
+    try { document.execCommand('copy'); alert('কপি হয়েছে'); }
+    catch (e2) { alert('কপি করা যায়নি, ম্যানুয়ালি সিলেক্ট করে কপি করুন'); }
+  }
 }
 
 function toggleDebugMode(on) {
@@ -780,7 +811,10 @@ function teacherLogin() {
     .then(() => runMigrationIfNeeded())
     .then(() => migratePinsIfNeeded())
     .then(() => migrateContactsIfNeeded())
-    .then(() => { listenStudents(); listenSettings(); listenStudentContacts(); showTeacherApp(); })
+    .then(() => {
+      listenStudents(); listenSettings(); listenStudentContacts();
+      if (myTeacherPending) renderPendingApprovalScreen(); else showTeacherApp();
+    })
     .catch(err => {
       errEl.textContent = err.code === 'auth/invalid-credential' || err.code === 'auth/wrong-password' || err.code === 'auth/user-not-found'
         ? 'ইমেইল বা পাসওয়ার্ড সঠিক নয়'
@@ -789,11 +823,35 @@ function teacherLogin() {
     });
 }
 
-// ================= SELF-SIGNUP (নতুন মাদ্রাসা নিবন্ধন) =================
+// ================= SELF-SIGNUP (নতুন মাদ্রাসা নিবন্ধন / বিদ্যমান মাদ্রাসায় যোগদান) =================
+let signupMode = 'new';
+
 function showSignupScreen() {
   setScreen(`
     <div class="card" style="margin-top:30px;">
-      <h2>নতুন মাদ্রাসা নিবন্ধন করুন</h2>
+      <h2>মাদ্রাসা নিবন্ধন / যোগদান</h2>
+      <div class="row" style="margin-bottom:10px;">
+        <button id="signupModeNewBtn" class="small" onclick="setSignupMode('new')">নতুন মাদ্রাসা</button>
+        <button id="signupModeJoinBtn" class="small secondary" onclick="setSignupMode('join')">বিদ্যমান মাদ্রাসায় যোগ দিন</button>
+      </div>
+      <div id="signupFieldsWrap"></div>
+    </div>
+  `);
+  hideNav();
+  setSignupMode('new');
+}
+
+function setSignupMode(mode) {
+  signupMode = mode;
+  const newBtn = document.getElementById('signupModeNewBtn');
+  const joinBtn = document.getElementById('signupModeJoinBtn');
+  if (newBtn) newBtn.className = 'small' + (mode === 'new' ? '' : ' secondary');
+  if (joinBtn) joinBtn.className = 'small' + (mode === 'join' ? '' : ' secondary');
+  const wrap = document.getElementById('signupFieldsWrap');
+  if (!wrap) return;
+
+  if (mode === 'new') {
+    wrap.innerHTML = `
       <p class="muted">নিজের মাদ্রাসার জন্য একটি নতুন, আলাদা অ্যাকাউন্ট তৈরি হবে — আপনার ডেটা অন্য কোনো মাদ্রাসার সাথে মিশবে না।</p>
       <label>মাদ্রাসার নাম</label><input id="signupMadrasaName" placeholder="যেমন: দারুল উলুম মাদ্রাসা">
       <label>আপনার নাম (অ্যাডমিন)</label><input id="signupAdminName" placeholder="আপনার নাম">
@@ -802,9 +860,19 @@ function showSignupScreen() {
       <p id="signupError" class="muted" style="color:#dc2626;"></p>
       <button onclick="submitSignup()">নিবন্ধন করুন</button>
       <button class="secondary" onclick="showTeacherLogin()" style="margin-top:8px;">আগে থেকে অ্যাকাউন্ট আছে? লগইন করুন</button>
-    </div>
-  `);
-  hideNav();
+    `;
+  } else {
+    wrap.innerHTML = `
+      <p class="muted">আপনার মাদ্রাসার অ্যাডমিনের কাছ থেকে পাওয়া "মাদ্রাসা কোড" দিয়ে যোগ দিন — সাধারণ (অ্যাডমিন নয়) শিক্ষক হিসেবে অ্যাকাউন্ট তৈরি হবে, অ্যাডমিন অনুমোদনের পর অ্যাপে প্রবেশ করা যাবে।</p>
+      <label>মাদ্রাসা কোড</label><input id="signupJoinCode" placeholder="অ্যাডমিনের কাছ থেকে নিন">
+      <label>আপনার নাম</label><input id="signupAdminName" placeholder="আপনার নাম">
+      <label>ইমেইল</label><input id="signupEmail" type="email" placeholder="আপনার ইমেইল">
+      <label>পাসওয়ার্ড</label><input id="signupPassword" type="password" placeholder="কমপক্ষে ৬ অক্ষর">
+      <p id="signupError" class="muted" style="color:#dc2626;"></p>
+      <button onclick="submitJoinMadrasa()">যোগ দিন</button>
+      <button class="secondary" onclick="showTeacherLogin()" style="margin-top:8px;">আগে থেকে অ্যাকাউন্ট আছে? লগইন করুন</button>
+    `;
+  }
 }
 
 function submitSignup() {
@@ -860,6 +928,86 @@ function submitSignup() {
       if (errEl) errEl.textContent = msg;
       showDiagBanner('মাদ্রাসা নিবন্ধন ব্যর্থ: ' + e.message);
     });
+}
+
+function submitJoinMadrasa() {
+  const code = document.getElementById('signupJoinCode').value.trim();
+  const adminName = document.getElementById('signupAdminName').value.trim();
+  const email = document.getElementById('signupEmail').value.trim();
+  const password = document.getElementById('signupPassword').value;
+  const errEl = document.getElementById('signupError');
+  if (errEl) errEl.textContent = '';
+
+  if (!code) { if (errEl) errEl.textContent = 'মাদ্রাসা কোড দিন'; return; }
+  if (!email || !password) { if (errEl) errEl.textContent = 'ইমেইল ও পাসওয়ার্ড দিন'; return; }
+  if (password.length < 6) { if (errEl) errEl.textContent = 'পাসওয়ার্ড কমপক্ষে ৬ অক্ষরের হতে হবে'; return; }
+
+  const btn = event && event.target;
+  if (btn) { btn.disabled = true; btn.textContent = 'যাচাই করা হচ্ছে...'; }
+
+  signupInProgress = true;
+
+  db.collection('madrasas').doc(code).get()
+    .then(doc => {
+      if (!doc.exists) { const err = new Error('not-found'); err.code = 'not-found'; throw err; }
+      return auth.createUserWithEmailAndPassword(email, password);
+    })
+    .then(cred => {
+      const uid = cred.user.uid;
+      return db.collection('teachers').doc(uid).set({
+        madrasaId: code, email, name: adminName, isAdmin: false, active: true, pending: true, createdAt: Date.now()
+      });
+    })
+    .then(() => {
+      madrasaId = code;
+      localStorage.setItem('madrasaId', madrasaId);
+      role = 'teacher';
+      localStorage.setItem('role', 'teacher');
+      myTeacherIsAdmin = false;
+      myTeacherPending = true;
+      signupInProgress = false;
+      renderPendingApprovalScreen();
+    })
+    .catch(e => {
+      signupInProgress = false;
+      if (btn) { btn.disabled = false; btn.textContent = 'যোগ দিন'; }
+      const msg = e.code === 'not-found' ? 'এই কোডে কোনো মাদ্রাসা খুঁজে পাওয়া যায়নি, কোডটি আবার যাচাই করুন'
+        : e.code === 'auth/email-already-in-use' ? 'এই ইমেইল দিয়ে আগে থেকেই অ্যাকাউন্ট আছে, লগইন করুন'
+        : e.code === 'auth/invalid-email' ? 'ইমেইলটি সঠিক নয়'
+        : e.code === 'auth/weak-password' ? 'পাসওয়ার্ড দুর্বল, আরেকটু শক্তিশালী দিন'
+        : 'যোগ দিতে ব্যর্থ: ' + e.message;
+      if (errEl) errEl.textContent = msg;
+      showDiagBanner('মাদ্রাসায় যোগদান ব্যর্থ: ' + (e.message || e.code));
+    });
+}
+
+// ================= PENDING APPROVAL (কোড দিয়ে যোগদানকারী শিক্ষক) =================
+function renderPendingApprovalScreen() {
+  setScreen(`
+    <div class="card" style="text-align:center;margin-top:60px;">
+      <h2>⏳ অনুমোদনের অপেক্ষায়</h2>
+      <p class="muted">আপনার অ্যাকাউন্ট তৈরি হয়েছে কিন্তু এখনো মাদ্রাসার অ্যাডমিন অনুমোদন করেননি। অনুমোদনের পর আবার চেষ্টা করুন।</p>
+      <button onclick="recheckPendingApproval()" style="margin-top:10px;">আবার চেষ্টা করুন</button>
+      <button class="secondary" onclick="logout()" style="margin-top:8px;">লগ-আউট</button>
+    </div>
+  `);
+  hideNav();
+}
+
+function recheckPendingApproval() {
+  const user = auth.currentUser;
+  if (!user) { showRoleSelect(); return; }
+  ensureTeacherDoc(user).then(() => {
+    if (myTeacherPending) {
+      alert('এখনো অনুমোদিত হয়নি। কিছুক্ষণ পর আবার চেষ্টা করুন।');
+      renderPendingApprovalScreen();
+    } else {
+      listenStudents();
+      listenSettings();
+      listenStudentContacts();
+      showTeacherApp();
+    }
+  });
 }
 
 // ================= STUDENT PIN LOGIN =================
@@ -929,7 +1077,7 @@ function logout() {
   if (role === 'teacher' && auth.currentUser && auth.currentUser.providerData.length > 0) auth.signOut();
   localStorage.removeItem('role');
   localStorage.removeItem('myStudentId');
-  role = null; myStudentId = null; myTeacherIsAdmin = false; isSuperAdminUser = false;
+  role = null; myStudentId = null; myTeacherIsAdmin = false; isSuperAdminUser = false; myTeacherPending = false;
   showRoleSelect();
 }
 
@@ -2956,14 +3104,16 @@ function listenTeachersList() {
         const isMe = d.id === myUid;
         const isAdminT = t.isAdmin === true;
         const isActiveT = t.active !== false;
+        const isPendingT = t.pending === true;
         return `<div class="student-row" style="display:block;">
           <div style="display:flex;justify-content:space-between;align-items:center;">
             <span>${esc(t.email || d.id)}${isMe ? ' <span class="muted">(আপনি)</span>' : ''}</span>
-            <span class="badge ${isActiveT ? 'present' : 'absent'}">${isActiveT ? 'সক্রিয়' : 'নিষ্ক্রিয়'}</span>
+            <span class="badge ${isPendingT ? 'pending' : (isActiveT ? 'present' : 'absent')}">${isPendingT ? 'অনুমোদনের অপেক্ষায়' : (isActiveT ? 'সক্রিয়' : 'নিষ্ক্রিয়')}</span>
           </div>
           <div class="muted" style="margin-top:2px;">${isAdminT ? '⭐ অ্যাডমিন' : 'সাধারণ শিক্ষক'}</div>
           ${!isMe ? `
             <div style="margin-top:6px;">
+              ${isPendingT ? `<button class="small" onclick="approveTeacher('${jsq(d.id)}')">✅ অনুমোদন করুন</button>` : ''}
               <button class="small secondary" onclick="toggleTeacherAdmin('${jsq(d.id)}', ${isAdminT})">${isAdminT ? 'অ্যাডমিন বাতিল করুন' : 'অ্যাডমিন করুন'}</button>
               <button class="small ${isActiveT ? 'danger' : ''}" onclick="toggleTeacherActive('${jsq(d.id)}', ${isActiveT})">${isActiveT ? 'নিষ্ক্রিয় করুন' : 'পুনরায় সক্রিয় করুন'}</button>
             </div>
@@ -2975,6 +3125,11 @@ function listenTeachersList() {
       if (wrap) wrap.innerHTML = '<p class="muted">লোড করতে সমস্যা হয়েছে: ' + esc(err.message) + '</p>';
       if (err.code !== 'permission-denied') showDiagBanner('শিক্ষক তালিকা লোড এরর: ' + err.message);
     });
+}
+
+function approveTeacher(uid) {
+  db.collection('teachers').doc(uid).set({ pending: false }, { merge: true })
+    .catch(e => { alert('অনুমোদন ব্যর্থ: ' + e.message); showDiagBanner('শিক্ষক অনুমোদন ব্যর্থ: ' + e.message); });
 }
 
 function addTeacherAccount() {
