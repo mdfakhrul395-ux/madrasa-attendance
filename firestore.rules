@@ -105,12 +105,27 @@ service cloud.firestore {
       allow delete: if false;
     }
 
-    // *** CHANGED: any teacher can ADD a student; only an admin can edit or
-    // delete one. (`create` only applies when the document does not exist
-    // yet, so an ordinary teacher cannot overwrite an existing student.
-    // request.resource is null on delete, so delete has its own rule.)
+    // *** CHANGED (cross-tenant read fix): a TEACHER can now only read a
+    // student that belongs to their own madrasa (get or list) — this closes
+    // the gap where a logged-in teacher of one madrasa could query the
+    // students collection directly (bypassing the app's UI) and pull back
+    // every other madrasa's student roster (name/roll/class).
+    // An anonymous/STUDENT read (isTeacherAuth() == false) is left exactly
+    // as before: unrestricted by madrasaId. This is intentional — the
+    // class-then-name student login picker reads this collection BEFORE a
+    // session document exists (i.e. before the student's own madrasaId can
+    // be verified server-side), so it cannot be scoped without breaking
+    // that login flow. Closing that remaining half of the gap needs
+    // per-tenant custom auth claims, which requires the paid Blaze plan
+    // (already tracked as a deferred item) — this rule only tightens the
+    // teacher-side exposure, which was the larger risk (an authenticated
+    // teacher account, not just anonymous, being able to enumerate other
+    // madrasas' rosters).
+    // `create` (any teacher can ADD a student) and `update`/`delete`
+    // (admin-only) are unchanged.
     match /students/{studentId} {
-      allow read: if request.auth != null;
+      allow read: if request.auth != null &&
+        (!isTeacherAuth() || resource.data.madrasaId == myMadrasaId());
       allow create: if isTeacherAuth() && request.resource.data.madrasaId == myMadrasaId();
       allow update: if isStudentManager() && request.resource.data.madrasaId == myMadrasaId();
       allow delete: if isStudentManager() && resource.data.madrasaId == myMadrasaId();
