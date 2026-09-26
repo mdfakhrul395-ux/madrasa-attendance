@@ -3,20 +3,11 @@ service cloud.firestore {
   match /databases/{database}/documents {
 
     // ================= SUPER ADMIN =================
-    // The one hardcoded owner account that can list ALL madrasas and
-    // deactivate/reactivate any of them. Checked via the email claim on the
-    // ID token (available for email/password sign-in) — never stored in
-    // Firestore, so it can't be granted or escalated by anyone through the
-    // app itself.
     function isSuperAdmin() {
       return request.auth != null &&
         request.auth.token.get('email', '') == 'mdfakhrul395@gmail.com';
     }
 
-    // A madrasa with active:false (deactivated by the super admin) blocks
-    // ALL of its teachers and students instantly, everywhere in the app —
-    // same instant-cutoff pattern already used for a single deactivated
-    // teacher account, just applied at the whole-madrasa level.
     function isMadrasaActive(id) {
       return !exists(/databases/$(database)/documents/madrasas/$(id)) ||
         get(/databases/$(database)/documents/madrasas/$(id)).data.get('active', true) != false;
@@ -54,12 +45,6 @@ service cloud.firestore {
         get(/databases/$(database)/documents/teachers/$(request.auth.uid)).data.get('isAdmin', false) == true;
     }
 
-    // *** NEW: who may EDIT or DELETE students, and change PINs / phones ***
-    // Only an admin teacher of the madrasa, or the super admin (the owner
-    // account, so the owner can never be locked out even if their own
-    // teachers/{uid} doc has no isAdmin flag). Any teacher may still ADD
-    // (create) a student together with that student's PIN and phone number,
-    // but an ordinary teacher can no longer edit, overwrite or delete them.
     function isStudentManager() {
       return isTeacherAuth() && (isRequesterAdmin() || isSuperAdmin());
     }
@@ -87,16 +72,6 @@ service cloud.firestore {
       allow delete: if false;
     }
 
-    // ================= MADRASAS (settings + super-admin registry) =================
-    // - Any signed-in device can `get` a single madrasa doc (needed to show
-    //   its name/logo in the top bar).
-    // - Only the super admin can `list` the whole collection — this is what
-    //   keeps the "all registered madrasas" view hidden from every other
-    //   admin, no matter how many madrasas they run.
-    // - *** CHANGED: only a madrasa's own ADMIN teacher can update its
-    //   settings (name/logo); ordinary teachers no longer can. Only the
-    //   super admin can update ANY madrasa's doc (used to flip the `active`
-    //   flag to deactivate/reactivate it).
     match /madrasas/{id} {
       allow get: if request.auth != null;
       allow list: if isSuperAdmin();
@@ -105,24 +80,6 @@ service cloud.firestore {
       allow delete: if false;
     }
 
-    // *** CHANGED (cross-tenant read fix): a TEACHER can now only read a
-    // student that belongs to their own madrasa (get or list) — this closes
-    // the gap where a logged-in teacher of one madrasa could query the
-    // students collection directly (bypassing the app's UI) and pull back
-    // every other madrasa's student roster (name/roll/class).
-    // An anonymous/STUDENT read (isTeacherAuth() == false) is left exactly
-    // as before: unrestricted by madrasaId. This is intentional — the
-    // class-then-name student login picker reads this collection BEFORE a
-    // session document exists (i.e. before the student's own madrasaId can
-    // be verified server-side), so it cannot be scoped without breaking
-    // that login flow. Closing that remaining half of the gap needs
-    // per-tenant custom auth claims, which requires the paid Blaze plan
-    // (already tracked as a deferred item) — this rule only tightens the
-    // teacher-side exposure, which was the larger risk (an authenticated
-    // teacher account, not just anonymous, being able to enumerate other
-    // madrasas' rosters).
-    // `create` (any teacher can ADD a student) and `update`/`delete`
-    // (admin-only) are unchanged.
     match /students/{studentId} {
       allow read: if request.auth != null &&
         (!isTeacherAuth() || resource.data.madrasaId == myMadrasaId());
@@ -131,13 +88,6 @@ service cloud.firestore {
       allow delete: if isStudentManager() && resource.data.madrasaId == myMadrasaId();
     }
 
-    // *** CHANGED: PIN ***
-    // - An admin can set / change / remove any PIN.
-    // - An ordinary teacher can only CREATE a PIN, and only for a student
-    //   that was just added with hasPinSet:true (the normal "add student"
-    //   flow). They can never change or remove an existing PIN, and never
-    //   give a PIN to an existing student who has none — which is what
-    //   still stops an ordinary teacher from taking over a student's login.
     match /student_pins/{studentId} {
       allow read: if false;
       allow create: if isTeacherAuth() &&
@@ -148,9 +98,6 @@ service cloud.firestore {
         get(/databases/$(database)/documents/students/$(studentId)).data.madrasaId == myMadrasaId();
     }
 
-    // *** CHANGED: reading is unchanged (any teacher of the madrasa); any
-    // teacher can add a contact record, but editing or deleting it is
-    // admin-only ***
     match /student_contacts/{studentId} {
       allow read: if isTeacherAuth() && resource.data.madrasaId == myMadrasaId();
       allow create: if isTeacherAuth() && request.resource.data.madrasaId == myMadrasaId();
@@ -191,11 +138,6 @@ service cloud.firestore {
       allow update, delete: if isTeacherAuth() && resource.data.madrasaId == myMadrasaId();
     }
 
-    // *** FIXED: মার্কশিট সংরক্ষণ ব্যর্থ (Missing or insufficient permissions) ***
-    // saveMarksheet() সেভ করার আগে ওই ডকুমেন্ট get() করে (আগে প্রকাশিত ছিল কি না
-    // দেখতে)। নতুন মার্কশিটের ডকুমেন্ট তখনো নেই, তাই resource null। আগের `allow read`
-    // সরাসরি resource.data পড়ত, ফলে null-এ ফেইল করত। attendance/fees_monthly-এর
-    // মতো এখানেও get আর list আলাদা করা হলো এবং get-এ `resource == null` যোগ হলো।
     match /results/{docId} {
       allow get: if request.auth != null && (
                       resource == null ||
@@ -213,12 +155,6 @@ service cloud.firestore {
       allow write: if isTeacherAuth() && request.resource.data.madrasaId == myMadrasaId();
     }
 
-    // *** FIXED: diary delete was broken ***
-    // Old rule used a single `allow write` guarded by request.resource.data,
-    // but request.resource is null on delete() calls, so every delete
-    // failed as permission-denied (same class of bug already fixed earlier
-    // for students/attendance/results). Split into create/update (uses
-    // request.resource.data) and a separate delete (uses resource.data).
     match /diary/{docId} {
       allow read: if (isTeacherAuth() && resource.data.madrasaId == myMadrasaId()) ||
                      (isStudentAuth() && resource.data.madrasaId == myMadrasaId() && resource.data.className == myClassName());
@@ -226,13 +162,16 @@ service cloud.firestore {
       allow delete: if isTeacherAuth() && resource.data.madrasaId == myMadrasaId();
     }
 
-    // ================= SUGGESTIONS (পরামর্শ বক্স) =================
-    // Private between the sender and the madrasa's ADMIN only:
-    //  - read: the admin teacher of the same madrasa, or the student who sent it.
-    //    Ordinary (non-admin) teachers can NOT read any suggestion.
-    //  - create: only a student, only for themself, only these fields (so a
-    //    student can't forge an admin "reply" on their own suggestion).
-    //  - update (admin reply) / delete: admin of the same madrasa only.
+    // ================= HOMEWORK (হোমওয়ার্ক) — নতুন =================
+    // /diary এর মতোই: মাদ্রাসার শিক্ষক নিজের মাদ্রাসার যেকোনো হোমওয়ার্ক
+    // পড়তে/দিতে/মুছতে পারবেন; শিক্ষার্থী শুধু নিজের শ্রেণির হোমওয়ার্ক পড়তে পারবে।
+    match /homework/{docId} {
+      allow read: if (isTeacherAuth() && resource.data.madrasaId == myMadrasaId()) ||
+                     (isStudentAuth() && resource.data.madrasaId == myMadrasaId() && resource.data.className == myClassName());
+      allow create, update: if isTeacherAuth() && request.resource.data.madrasaId == myMadrasaId();
+      allow delete: if isTeacherAuth() && resource.data.madrasaId == myMadrasaId();
+    }
+
     match /suggestions/{docId} {
       allow read: if (isRequesterAdmin() && resource.data.madrasaId == myMadrasaId()) ||
                      (isStudentAuth() && resource.data.studentId == mySessionStudentId());
