@@ -1,0 +1,32 @@
+আপনার firestore.rules ফাইলের service cloud.firestore { match /databases/{database}/documents { ... } }
+ব্লকের ভেতরে (অন্য match ব্লকগুলোর পাশে) এই অংশটা যোগ করুন:
+
+    match /usage_stats/{date} {
+
+      // শুধু isAdmin=true শিক্ষকরাই দেখতে পারবেন
+      allow read: if request.auth != null
+        && exists(/databases/$(database)/documents/teachers/$(request.auth.uid))
+        && get(/databases/$(database)/documents/teachers/$(request.auth.uid)).data.isAdmin == true;
+
+      // যেকোনো সাইন-ইন ব্যবহারকারী লিখতে পারবেন (ছাত্র/শিক্ষক উভয়ই read/write তৈরি করে),
+      // কিন্তু শুধু এই ৩টা নির্দিষ্ট সংখ্যার ফিল্ড ছাড়া আর কিছু লেখা যাবে না,
+      // এবং সংখ্যা কখনো আগের চেয়ে কমানো যাবে না (ভুল করে বা ইচ্ছাকৃতভাবে হিসাব মুছে ফেলা ঠেকাতে)
+      allow write: if request.auth != null
+        && date.matches('^[0-9]{4}-[0-9]{2}-[0-9]{2}$')
+        && request.resource.data.keys().hasOnly(['reads', 'writes', 'deletes', 'lastUpdated'])
+        && request.resource.data.reads is number && request.resource.data.reads >= 0
+        && request.resource.data.writes is number && request.resource.data.writes >= 0
+        && request.resource.data.deletes is number && request.resource.data.deletes >= 0
+        && (!('reads' in resource.data) || request.resource.data.reads >= resource.data.reads)
+        && (!('writes' in resource.data) || request.resource.data.writes >= resource.data.writes)
+        && (!('deletes' in resource.data) || request.resource.data.deletes >= resource.data.deletes);
+    }
+
+⚠️ গুরুত্বপূর্ণ: read rule-টা ধরে নিয়েছে আপনার admin flag "teachers" কালেকশনে,
+ডকুমেন্ট আইডি = uid, ফিল্ড নাম "isAdmin" (আপনার শিক্ষকগণ ব্যবস্থাপনায় যেভাবে আছে সেভাবে)।
+যদি এই collection/field নাম আলাদা হয়, তাহলে ওপরের rule-এ path/field নাম মিলিয়ে নিন।
+
+এই সংস্করণে যা নিশ্চিত করা হলো:
+- শুধু isAdmin=true থাকা শিক্ষকরাই সংখ্যা দেখতে পারবেন (আগের মতো সবাই না)
+- কেউ চাইলে এই collection-এ অপ্রাসঙ্গিক/ভুয়া ডেটা লিখতে পারবে না — শুধু reads/writes/deletes/lastUpdated
+- সংখ্যা কখনো পেছনের দিকে (কমে) যাবে না, ফলে কেউ ইচ্ছা করে হিসাব রিসেট/মুছে দিতে পারবে না
