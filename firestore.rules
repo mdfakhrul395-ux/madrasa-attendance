@@ -9,7 +9,8 @@ service cloud.firestore {
     }
 
     function isMadrasaActive(id) {
-      return !exists(/databases/$(database)/documents/madrasas/$(id)) ||
+      return id == null ||
+        !exists(/databases/$(database)/documents/madrasas/$(id)) ||
         get(/databases/$(database)/documents/madrasas/$(id)).data.get('active', true) != false;
     }
 
@@ -17,31 +18,45 @@ service cloud.firestore {
       return request.auth != null && request.auth.token.firebase.sign_in_provider == 'password' &&
         (!exists(/databases/$(database)/documents/teachers/$(request.auth.uid)) ||
           (get(/databases/$(database)/documents/teachers/$(request.auth.uid)).data.get('active', true) != false &&
-           isMadrasaActive(get(/databases/$(database)/documents/teachers/$(request.auth.uid)).data.madrasaId)));
+           isMadrasaActive(get(/databases/$(database)/documents/teachers/$(request.auth.uid)).data.get('madrasaId', null))));
     }
 
     function isStudentAuth() {
       return request.auth != null && request.auth.token.firebase.sign_in_provider == 'anonymous' &&
         (!exists(/databases/$(database)/documents/sessions/$(request.auth.uid)) ||
-          isMadrasaActive(get(/databases/$(database)/documents/sessions/$(request.auth.uid)).data.madrasaId));
+          isMadrasaActive(get(/databases/$(database)/documents/sessions/$(request.auth.uid)).data.get('madrasaId', null)));
     }
 
     function mySessionStudentId() {
-      return get(/databases/$(database)/documents/sessions/$(request.auth.uid)).data.studentId;
+      return exists(/databases/$(database)/documents/sessions/$(request.auth.uid))
+        ? get(/databases/$(database)/documents/sessions/$(request.auth.uid)).data.get('studentId', null)
+        : null;
     }
 
     function myClassName() {
-      return get(/databases/$(database)/documents/students/$(mySessionStudentId())).data.className;
+      return (mySessionStudentId() != null &&
+              exists(/databases/$(database)/documents/students/$(mySessionStudentId())))
+        ? get(/databases/$(database)/documents/students/$(mySessionStudentId())).data.get('className', null)
+        : null;
     }
 
+    // আগে: isTeacherAuth() true হলে শর্তহীনভাবে get(teachers/uid) চালাত — কিন্তু
+    // isTeacherAuth() নতুন/ডকুমেন্টহীন টিচারের জন্যও true হতে পারে (!exists(...) শাখা),
+    // ফলে সেই get() এরর থ্রো করত এবং পুরো কোয়েরিটাই permission-denied দেখাত।
+    // এখন exists() আলাদাভাবে চেক করা হচ্ছে, ডকুমেন্ট না থাকলে null রিটার্ন হবে, এরর থ্রো হবে না।
     function myMadrasaId() {
       return isTeacherAuth()
-        ? get(/databases/$(database)/documents/teachers/$(request.auth.uid)).data.madrasaId
-        : get(/databases/$(database)/documents/sessions/$(request.auth.uid)).data.madrasaId;
+        ? (exists(/databases/$(database)/documents/teachers/$(request.auth.uid))
+            ? get(/databases/$(database)/documents/teachers/$(request.auth.uid)).data.get('madrasaId', null)
+            : null)
+        : (exists(/databases/$(database)/documents/sessions/$(request.auth.uid))
+            ? get(/databases/$(database)/documents/sessions/$(request.auth.uid)).data.get('madrasaId', null)
+            : null);
     }
 
     function isRequesterAdmin() {
       return isTeacherAuth() &&
+        exists(/databases/$(database)/documents/teachers/$(request.auth.uid)) &&
         get(/databases/$(database)/documents/teachers/$(request.auth.uid)).data.get('isAdmin', false) == true;
     }
 
@@ -162,9 +177,7 @@ service cloud.firestore {
       allow delete: if isTeacherAuth() && resource.data.madrasaId == myMadrasaId();
     }
 
-    // ================= HOMEWORK (হোমওয়ার্ক) — নতুন =================
-    // /diary এর মতোই: মাদ্রাসার শিক্ষক নিজের মাদ্রাসার যেকোনো হোমওয়ার্ক
-    // পড়তে/দিতে/মুছতে পারবেন; শিক্ষার্থী শুধু নিজের শ্রেণির হোমওয়ার্ক পড়তে পারবে।
+    // ================= HOMEWORK (হোমওয়ার্ক) =================
     match /homework/{docId} {
       allow read: if (isTeacherAuth() && resource.data.madrasaId == myMadrasaId()) ||
                      (isStudentAuth() && resource.data.madrasaId == myMadrasaId() && resource.data.className == myClassName());
