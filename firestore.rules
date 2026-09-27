@@ -217,6 +217,25 @@ service cloud.firestore {
       allow delete: if isTeacherAuth() && resource.data.madrasaId == myMadrasaId();
     }
 
+    // ================= USAGE TRACKER (ব্যবহারের হিসাব) =================
+    // শুধু isAdmin=true থাকা শিক্ষক বা সুপার-অ্যাডমিন এই সংখ্যা দেখতে পারবেন।
+    // যেকোনো সাইন-ইন করা শিক্ষক/ছাত্র লিখতে পারবে (তারাই read/write তৈরি করে),
+    // কিন্তু শুধু নির্দিষ্ট সংখ্যার ফিল্ড ছাড়া আর কিছু লেখা যাবে না, আর সংখ্যা কখনো
+    // পেছনের দিকে (কমে) যাবে না।
+    match /usage_stats/{date} {
+      allow read: if isRequesterAdmin() || isSuperAdmin();
+
+      allow write: if request.auth != null &&
+        date.matches('^[0-9]{4}-[0-9]{2}-[0-9]{2}$') &&
+        request.resource.data.keys().hasOnly(['reads', 'writes', 'deletes', 'lastUpdated']) &&
+        request.resource.data.reads is number && request.resource.data.reads >= 0 &&
+        request.resource.data.writes is number && request.resource.data.writes >= 0 &&
+        request.resource.data.deletes is number && request.resource.data.deletes >= 0 &&
+        (!('reads' in resource.data) || request.resource.data.reads >= resource.data.reads) &&
+        (!('writes' in resource.data) || request.resource.data.writes >= resource.data.writes) &&
+        (!('deletes' in resource.data) || request.resource.data.deletes >= resource.data.deletes);
+    }
+
     match /_ping/{doc} {
       allow read: if true;
       allow write: if false;
