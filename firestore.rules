@@ -185,6 +185,14 @@ service cloud.firestore {
       allow delete: if isTeacherAuth() && resource.data.madrasaId == myMadrasaId();
     }
 
+    // ================= EXAM ROUTINES (পরীক্ষার রুটিন) =================
+    match /examRoutines/{docId} {
+      allow read: if (isTeacherAuth() && resource.data.madrasaId == myMadrasaId()) ||
+                     (isStudentAuth() && resource.data.madrasaId == myMadrasaId() && resource.data.className == myClassName());
+      allow create, update: if isTeacherAuth() && request.resource.data.madrasaId == myMadrasaId();
+      allow delete: if isTeacherAuth() && resource.data.madrasaId == myMadrasaId();
+    }
+
     match /suggestions/{docId} {
       allow read: if (isRequesterAdmin() && resource.data.madrasaId == myMadrasaId()) ||
                      (isStudentAuth() && resource.data.studentId == mySessionStudentId());
