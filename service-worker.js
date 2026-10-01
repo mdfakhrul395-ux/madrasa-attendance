@@ -1,4 +1,4 @@
-const CACHE_NAME = 'madrasa-attendance-v10';
+const CACHE_NAME = 'madrasa-attendance-v11';
 const ASSETS = [
   './index.html',
   './style.css',
@@ -6,6 +6,7 @@ const ASSETS = [
   './dashboard.js',
   './homework.js',
   './exam-routine.js',
+  './diary-ict.js',
   './firebase-config.js',
   './manifest.json',
   './icon-192.png',
