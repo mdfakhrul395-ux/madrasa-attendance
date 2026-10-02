@@ -40,10 +40,6 @@ service cloud.firestore {
         : null;
     }
 
-    // আগে: isTeacherAuth() true হলে শর্তহীনভাবে get(teachers/uid) চালাত — কিন্তু
-    // isTeacherAuth() নতুন/ডকুমেন্টহীন টিচারের জন্যও true হতে পারে (!exists(...) শাখা),
-    // ফলে সেই get() এরর থ্রো করত এবং পুরো কোয়েরিটাই permission-denied দেখাত।
-    // এখন exists() আলাদাভাবে চেক করা হচ্ছে, ডকুমেন্ট না থাকলে null রিটার্ন হবে, এরর থ্রো হবে না।
     function myMadrasaId() {
       return isTeacherAuth()
         ? (exists(/databases/$(database)/documents/teachers/$(request.auth.uid))
@@ -87,11 +83,18 @@ service cloud.firestore {
       allow delete: if false;
     }
 
+    // ================= MADRASAS + প্যাকেজ (plan, planExpiry, planUpdatedAt) =================
+    // প্যাকেজের ফিল্ডগুলো শুধু সুপার অ্যাডমিন লিখতে পারেন। মাদ্রাসার অ্যাডমিন নিজের মাদ্রাসার
+    // বাকি সব (নাম, লোগো, বন্ধের দিন ইত্যাদি) আগের মতোই বদলাতে পারেন, কিন্তু প্যাকেজের ফিল্ডে হাত দিতে পারেন না।
     match /madrasas/{id} {
       allow get: if request.auth != null;
       allow list: if isSuperAdmin();
-      allow create: if isTeacherAuth() && id == myMadrasaId();
-      allow update: if isSuperAdmin() || (isRequesterAdmin() && id == myMadrasaId());
+      allow create: if isSuperAdmin() ||
+        (isTeacherAuth() && id == myMadrasaId() &&
+         !request.resource.data.keys().hasAny(['plan', 'planExpiry', 'planUpdatedAt']));
+      allow update: if isSuperAdmin() ||
+        (isRequesterAdmin() && id == myMadrasaId() &&
+         !request.resource.data.diff(resource.data).affectedKeys().hasAny(['plan', 'planExpiry', 'planUpdatedAt']));
       allow delete: if false;
     }
 
@@ -226,10 +229,6 @@ service cloud.firestore {
     }
 
     // ================= USAGE TRACKER (ব্যবহারের হিসাব) =================
-    // শুধু isAdmin=true থাকা শিক্ষক বা সুপার-অ্যাডমিন এই সংখ্যা দেখতে পারবেন।
-    // যেকোনো সাইন-ইন করা শিক্ষক/ছাত্র লিখতে পারবে (তারাই read/write তৈরি করে),
-    // কিন্তু শুধু নির্দিষ্ট সংখ্যার ফিল্ড ছাড়া আর কিছু লেখা যাবে না, আর সংখ্যা কখনো
-    // পেছনের দিকে (কমে) যাবে না।
     match /usage_stats/{date} {
       allow read: if isRequesterAdmin() || isSuperAdmin();
 
