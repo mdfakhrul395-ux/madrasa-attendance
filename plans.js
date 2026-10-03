@@ -59,12 +59,12 @@
       docs.forEach(d => { cache[d.id] = d.data(); });
       if (snap.empty) { wrap.innerHTML = '<p class="muted">কোনো মাদ্রাসা পাওয়া যায়নি</p>'; return; }
 
-      let live = 0, expired = 0, none = 0, trial = 0;
+      let live = 0, expired = 0, none = 0, trial = 0, revenue = 0;
       docs.forEach(d => {
         const i = getPlanInfo(d.data());
-        if (!i.key) { if (d.data().trialEndsAt) trial++; else none++; } else if (i.expired) expired++; else live++;
+        if (!i.key) { if (d.data().trialEndsAt) trial++; else none++; } else if (i.expired) expired++; else { live++; const dm = d.data(); revenue += dm.planPrice != null ? Number(dm.planPrice) : i.plan.price; }
       });
-      const summary = `<p class="muted" style="margin-bottom:8px;">চালু প্যাকেজ: <b>${bn(live)}</b> &nbsp; ট্রায়াল: <b>${bn(trial)}</b> &nbsp; মেয়াদ শেষ: <b>${bn(expired)}</b> &nbsp; প্যাকেজ নেই: <b>${bn(none)}</b></p>`;
+      const summary = `<p class="muted" style="margin-bottom:8px;">চালু প্যাকেজ: <b>${bn(live)}</b> &nbsp; ট্রায়াল: <b>${bn(trial)}</b> &nbsp; মাসিক হিসাব: <b>৳ ${bn(Math.round(revenue).toLocaleString('en-US'))}</b> &nbsp; মেয়াদ শেষ: <b>${bn(expired)}</b> &nbsp; প্যাকেজ নেই: <b>${bn(none)}</b></p>`;
 
       wrap.innerHTML = summary + docs.map(d => {
         const m = d.data();
@@ -85,6 +85,11 @@
           const tl = Math.ceil((m.trialEndsAt - Date.now()) / 86400000);
           if (tl > 0) { cls = 'present'; txt = 'ট্রায়াল'; line = 'ফ্রি ট্রায়াল · আর ' + bn(tl) + ' দিন'; }
           else { cls = 'absent'; txt = 'ট্রায়াল শেষ'; line = 'ফ্রি ট্রায়াল শেষ হয়ে গেছে'; }
+        }
+        if (info.key) line += ' · ৳ ' + bn(Math.round(m.planPrice != null ? m.planPrice : info.plan.price).toLocaleString('en-US')) + '/মাস';
+        if (info.key && (m.studentLimit != null || m.teacherLimit != null)) {
+          line += ' · বিশেষ সীমা: শিক্ষার্থী ' + (m.studentLimit == null ? 'নিয়মমতো' : (m.studentLimit ? bn(m.studentLimit) : 'সীমাহীন'))
+            + ', শিক্ষক ' + (m.teacherLimit == null ? 'নিয়মমতো' : (m.teacherLimit ? bn(m.teacherLimit) : 'সীমাহীন'));
         }
         return `<div class="student-row" style="display:block;">
           <div style="display:flex;justify-content:space-between;align-items:center;">
@@ -136,6 +141,12 @@
           <button class="small secondary" onclick="planAdd(12)">+১ বছর</button>
         </div>
         <p class="muted" style="font-size:12px;">"+" বাটন তারিখের ঘরে থাকা ভবিষ্যৎ তারিখ থেকে, না থাকলে আজ থেকে গোনে।</p>
+        <label>এই মাদ্রাসার মাসিক টাকা (ফাঁকা = প্যাকেজের দাম)</label>
+        <input type="number" id="planPrice" min="0" value="${m.planPrice != null ? esc(m.planPrice) : ''}">
+        <label>শিক্ষার্থী সীমা (ফাঁকা = প্যাকেজের নিয়ম, ০ = সীমাহীন)</label>
+        <input type="number" id="planStuLim" min="0" value="${m.studentLimit != null ? esc(m.studentLimit) : ''}">
+        <label>শিক্ষক সীমা, অ্যাডমিনসহ (ফাঁকা = প্যাকেজের নিয়ম, ০ = সীমাহীন)</label>
+        <input type="number" id="planTchLim" min="0" value="${m.teacherLimit != null ? esc(m.teacherLimit) : ''}">
         <p id="planErr" class="muted" style="color:#dc2626;"></p>
         <button onclick="planSave('${jsq(id)}')">সংরক্ষণ করুন</button>
         <button class="secondary" onclick="planCloseEditor()" style="margin-top:8px;">বাতিল</button>
@@ -160,9 +171,17 @@
     const exp = $('planExp').value;
     if (sel && exp && !validDate(exp)) { if (err) err.textContent = 'তারিখ সঠিক নয়'; return; }
     const F = firebase.firestore.FieldValue;
+    const lim = elId => {
+      const v = $(elId).value.trim();
+      if (!sel || v === '') return F.delete();
+      const n = Number(v);
+      return (Number.isInteger(n) && n >= 0) ? n : NaN;
+    };
+    const sl = lim('planStuLim'), tl = lim('planTchLim'), pr = lim('planPrice');
+    if (Number.isNaN(sl) || Number.isNaN(tl) || Number.isNaN(pr)) { if (err) err.textContent = 'সীমা ও টাকা ০ বা তার বেশি পূর্ণ সংখ্যা হতে হবে'; return; }
     const patch = sel
-      ? { plan: sel, planExpiry: exp || F.delete(), planUpdatedAt: Date.now() }
-      : { plan: F.delete(), planExpiry: F.delete(), planUpdatedAt: Date.now() };
+      ? { plan: sel, planExpiry: exp || F.delete(), studentLimit: sl, teacherLimit: tl, planPrice: pr, planUpdatedAt: Date.now() }
+      : { plan: F.delete(), planExpiry: F.delete(), studentLimit: F.delete(), teacherLimit: F.delete(), planPrice: F.delete(), planUpdatedAt: Date.now() };
     db.collection('madrasas').doc(id).set(patch, { merge: true })
       .then(() => planCloseEditor())
       .catch(e => { if (err) err.textContent = 'সংরক্ষণ ব্যর্থ: ' + e.message; showDiagBanner('প্যাকেজ সংরক্ষণ ব্যর্থ: ' + e.message); });

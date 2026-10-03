@@ -35,7 +35,14 @@
   const planKey = () => planState().key;
   const allowed = f => { const k = planKey(); return !k || FEATURES[k].indexOf(f) > -1; };
   const minPlan = f => ORDER.find(k => FEATURES[k].indexOf(f) > -1) || 'premium';
-  const limitFor = kind => { const k = planKey(); return k ? PLANS[k][kind] : null; };
+  // সুপার অ্যাডমিন কোনো মাদ্রাসার জন্য আলাদা সীমা দিলে সেটাই চলে (০ = সীমাহীন), নইলে প্যাকেজের নিয়ম
+  const limitFor = kind => {
+    const k = planKey();
+    if (!k) return null;
+    const o = (appSettings || {})[kind === 'students' ? 'studentLimit' : 'teacherLimit'];
+    if (typeof o === 'number' && o >= 0) return o > 0 ? o : null;
+    return PLANS[k][kind];
+  };
   const tabOf = s => { const m = /(?:teacherTab|studentTab)\('([a-z_]+)'\)/.exec(s || ''); return m ? m[1] : null; };
   const contactHtml = () => SUPPORT_CONTACT ? '<p class="muted">যোগাযোগ: <b>' + esc(SUPPORT_CONTACT) + '</b></p>' : '';
 
@@ -201,8 +208,8 @@
           body = '<p><b>' + esc(st.trial ? 'ফ্রি ট্রায়াল (সব সুবিধা)' : p.label) + '</b>' + (st.trial ? ' · আর ' + bn(st.daysLeft) + ' দিন' + (st.expired ? ' (শেষ হয়ে গেছে)' : '') : info.expiry
             ? ' · মেয়াদ: ' + esc(fmtHolidayDate(info.expiry, false)) + (info.expired ? ' (শেষ হয়ে গেছে)' : ' (আর ' + bn(info.daysLeft) + ' দিন)')
             : '') + '</p>'
-            + '<p class="muted">শিক্ষার্থী: <b>' + bn(studentsCache.length) + '</b>' + (p.students ? ' / ' + bn(p.students) : ' (সীমাহীন)')
-            + ' &nbsp; শিক্ষক: ' + (p.teachers ? 'সর্বোচ্চ ' + bn(p.teachers) + ' জন (অ্যাডমিনসহ)' : 'সীমাহীন') + '</p>' + contactHtml();
+            + '<p class="muted">শিক্ষার্থী: <b>' + bn(studentsCache.length) + '</b>' + (limitFor('students') ? ' / ' + bn(limitFor('students')) : ' (সীমাহীন)')
+            + ' &nbsp; শিক্ষক: ' + (limitFor('teachers') ? 'সর্বোচ্চ ' + bn(limitFor('teachers')) + ' জন (অ্যাডমিনসহ)' : 'সীমাহীন') + '</p>' + contactHtml();
         }
         app.insertAdjacentHTML('afterbegin', '<div class="card" id="planInfoCard"><h2>আপনার প্যাকেজ</h2>' + body + '</div>');
       }

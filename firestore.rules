@@ -91,13 +91,13 @@ service cloud.firestore {
       allow list: if isSuperAdmin();
       allow create: if isSuperAdmin() ||
         (isTeacherAuth() && id == myMadrasaId() &&
-         !request.resource.data.keys().hasAny(['plan', 'planExpiry', 'planUpdatedAt']) &&
+         !request.resource.data.keys().hasAny(['plan', 'planExpiry', 'planUpdatedAt', 'studentLimit', 'teacherLimit', 'planPrice']) &&
          (!('trialEndsAt' in request.resource.data) ||
           (request.resource.data.trialEndsAt is number &&
            request.resource.data.trialEndsAt <= request.time.toMillis() + 2678400000)));
       allow update: if isSuperAdmin() ||
         (isRequesterAdmin() && id == myMadrasaId() &&
-         !request.resource.data.diff(resource.data).affectedKeys().hasAny(['plan', 'planExpiry', 'planUpdatedAt', 'trialEndsAt']));
+         !request.resource.data.diff(resource.data).affectedKeys().hasAny(['plan', 'planExpiry', 'planUpdatedAt', 'trialEndsAt', 'studentLimit', 'teacherLimit', 'planPrice']));
       allow delete: if false;
     }
 
