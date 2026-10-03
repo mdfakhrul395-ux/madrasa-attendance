@@ -11,7 +11,7 @@
     return;
   }
 
-  const SUPPORT_CONTACT = ''; // আপগ্রেডের জন্য আপনার নম্বর, যেমন '০১৭XXXXXXXX (হোয়াটসঅ্যাপ)'
+  const SUPPORT_CONTACT = '01319083897'; // আপগ্রেডের জন্য আপনার নম্বর, যেমন '০১৭XXXXXXXX (হোয়াটসঅ্যাপ)'
 
   const BASIC = ['home', 'students', 'attendance', 'report', 'leaves', 'timeleft', 'notices', 'diary', 'suggestions', 'teachers', 'settings', 'super_admin'];
   const STANDARD = BASIC.concat(['results', 'fees', 'homework', 'parentmsg']);
