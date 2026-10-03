@@ -20,7 +20,19 @@
   const NAMES = { students: 'শিক্ষার্থী', attendance: 'উপস্থিতি', report: 'রিপোর্ট', results: 'রেজাল্ট', leaves: 'ছুটি', timeleft: 'বের হওয়ার সময়', fees: 'বেতন', notices: 'নোটিশ', diary: 'ডায়েরী', suggestions: 'পরামর্শ', teachers: 'শিক্ষকগণ', settings: 'সেটিংস', homework: 'হোমওয়ার্ক', examroutine: 'পরীক্ষার রুটিন', parentmsg: 'অভিভাবককে বার্তা' };
 
   const bn = n => toBanglaNumeral(n);
-  const planKey = () => ((typeof isSuperAdminUser !== 'undefined' && isSuperAdminUser) ? null : getPlanInfo(appSettings || {}).key);
+  // ট্রায়াল চললে (প্যাকেজ বসানো না থাকলে) সব সুবিধা খোলা; প্যাকেজ বসালে প্যাকেজই প্রাধান্য পায়
+  const TRIAL_PLAN = 'premium';
+  function planState() {
+    if (typeof isSuperAdminUser !== 'undefined' && isSuperAdminUser) return { key: null, expired: false };
+    const m = appSettings || {}, info = getPlanInfo(m);
+    if (info.key) return { key: info.key, expired: info.expired, daysLeft: info.daysLeft, trial: false };
+    const te = Number(m.trialEndsAt) || 0;
+    if (te > 0) return { key: TRIAL_PLAN, expired: te <= Date.now(), daysLeft: Math.max(0, Math.ceil((te - Date.now()) / 86400000)), trial: true };
+    return { key: null, expired: false };
+  }
+  window.planState = planState;
+  window.PLAN_SUPPORT_CONTACT = SUPPORT_CONTACT;
+  const planKey = () => planState().key;
   const allowed = f => { const k = planKey(); return !k || FEATURES[k].indexOf(f) > -1; };
   const minPlan = f => ORDER.find(k => FEATURES[k].indexOf(f) > -1) || 'premium';
   const limitFor = kind => { const k = planKey(); return k ? PLANS[k][kind] : null; };
@@ -104,7 +116,7 @@
 
   // ---------- প্যাকেজ বদলালে (সেটিংস দেরিতে এলে বা সুপার অ্যাডমিন বদলালে) সাথে সাথে প্রয়োগ ----------
   let lastSig = null;
-  const sig = () => ((typeof isSuperAdminUser !== 'undefined' && isSuperAdminUser) ? 'S' : '') + (planKey() || 'none');
+  const sig = () => ((typeof isSuperAdminUser !== 'undefined' && isSuperAdminUser) ? 'S' : '') + (planKey() || 'none') + (planState().expired ? 'X' : '');
   function refreshGating() {
     const s = sig();
     if (s === lastSig) return;
@@ -182,11 +194,11 @@
       const r = prevSettings.apply(this, arguments);
       const app = document.getElementById('app');
       if (app && !document.getElementById('planInfoCard')) {
-        const k = planKey(), info = getPlanInfo(appSettings || {});
+        const k = planKey(), st = planState(), info = getPlanInfo(appSettings || {});
         let body = '<p class="muted">কোনো প্যাকেজ নির্ধারিত নেই, সব সুবিধা খোলা আছে।</p>';
         if (k) {
           const p = PLANS[k];
-          body = '<p><b>' + esc(p.label) + '</b>' + (info.expiry
+          body = '<p><b>' + esc(st.trial ? 'ফ্রি ট্রায়াল (সব সুবিধা)' : p.label) + '</b>' + (st.trial ? ' · আর ' + bn(st.daysLeft) + ' দিন' + (st.expired ? ' (শেষ হয়ে গেছে)' : '') : info.expiry
             ? ' · মেয়াদ: ' + esc(fmtHolidayDate(info.expiry, false)) + (info.expired ? ' (শেষ হয়ে গেছে)' : ' (আর ' + bn(info.daysLeft) + ' দিন)')
             : '') + '</p>'
             + '<p class="muted">শিক্ষার্থী: <b>' + bn(studentsCache.length) + '</b>' + (p.students ? ' / ' + bn(p.students) : ' (সীমাহীন)')

@@ -59,12 +59,12 @@
       docs.forEach(d => { cache[d.id] = d.data(); });
       if (snap.empty) { wrap.innerHTML = '<p class="muted">কোনো মাদ্রাসা পাওয়া যায়নি</p>'; return; }
 
-      let live = 0, expired = 0, none = 0;
+      let live = 0, expired = 0, none = 0, trial = 0;
       docs.forEach(d => {
         const i = getPlanInfo(d.data());
-        if (!i.key) none++; else if (i.expired) expired++; else live++;
+        if (!i.key) { if (d.data().trialEndsAt) trial++; else none++; } else if (i.expired) expired++; else live++;
       });
-      const summary = `<p class="muted" style="margin-bottom:8px;">চালু প্যাকেজ: <b>${bn(live)}</b> &nbsp; মেয়াদ শেষ: <b>${bn(expired)}</b> &nbsp; প্যাকেজ নেই: <b>${bn(none)}</b></p>`;
+      const summary = `<p class="muted" style="margin-bottom:8px;">চালু প্যাকেজ: <b>${bn(live)}</b> &nbsp; ট্রায়াল: <b>${bn(trial)}</b> &nbsp; মেয়াদ শেষ: <b>${bn(expired)}</b> &nbsp; প্যাকেজ নেই: <b>${bn(none)}</b></p>`;
 
       wrap.innerHTML = summary + docs.map(d => {
         const m = d.data();
@@ -80,6 +80,11 @@
           line = esc(info.plan.label) + ' · ' + (info.expiry
             ? 'মেয়াদ: ' + esc(fmtHolidayDate(info.expiry, false)) + (info.expired ? '' : ' (আর ' + bn(info.daysLeft) + ' দিন)')
             : 'মেয়াদ ঠিক করা নেই');
+        }
+        if (!info.key && m.trialEndsAt) {
+          const tl = Math.ceil((m.trialEndsAt - Date.now()) / 86400000);
+          if (tl > 0) { cls = 'present'; txt = 'ট্রায়াল'; line = 'ফ্রি ট্রায়াল · আর ' + bn(tl) + ' দিন'; }
+          else { cls = 'absent'; txt = 'ট্রায়াল শেষ'; line = 'ফ্রি ট্রায়াল শেষ হয়ে গেছে'; }
         }
         return `<div class="student-row" style="display:block;">
           <div style="display:flex;justify-content:space-between;align-items:center;">

@@ -83,7 +83,7 @@ service cloud.firestore {
       allow delete: if false;
     }
 
-    // ================= MADRASAS + প্যাকেজ (plan, planExpiry, planUpdatedAt) =================
+    // ================= MADRASAS + প্যাকেজ (plan, planExpiry, planUpdatedAt, trialEndsAt) =================
     // প্যাকেজের ফিল্ডগুলো শুধু সুপার অ্যাডমিন লিখতে পারেন। মাদ্রাসার অ্যাডমিন নিজের মাদ্রাসার
     // বাকি সব (নাম, লোগো, বন্ধের দিন ইত্যাদি) আগের মতোই বদলাতে পারেন, কিন্তু প্যাকেজের ফিল্ডে হাত দিতে পারেন না।
     match /madrasas/{id} {
@@ -91,10 +91,13 @@ service cloud.firestore {
       allow list: if isSuperAdmin();
       allow create: if isSuperAdmin() ||
         (isTeacherAuth() && id == myMadrasaId() &&
-         !request.resource.data.keys().hasAny(['plan', 'planExpiry', 'planUpdatedAt']));
+         !request.resource.data.keys().hasAny(['plan', 'planExpiry', 'planUpdatedAt']) &&
+         (!('trialEndsAt' in request.resource.data) ||
+          (request.resource.data.trialEndsAt is number &&
+           request.resource.data.trialEndsAt <= request.time.toMillis() + 2678400000)));
       allow update: if isSuperAdmin() ||
         (isRequesterAdmin() && id == myMadrasaId() &&
-         !request.resource.data.diff(resource.data).affectedKeys().hasAny(['plan', 'planExpiry', 'planUpdatedAt']));
+         !request.resource.data.diff(resource.data).affectedKeys().hasAny(['plan', 'planExpiry', 'planUpdatedAt', 'trialEndsAt']));
       allow delete: if false;
     }
 
