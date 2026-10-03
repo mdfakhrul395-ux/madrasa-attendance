@@ -47,24 +47,26 @@
   window.__plansAddMonths = addMonths;
 
   const cache = {};
+  const loginLinkFor = id => window.location.origin + window.location.pathname.replace(/index\.html$/, '') + '?m=' + encodeURIComponent(id);
 
   window.listenMadrasasList = function () {
     stopMadrasasListener();
-    madrasasUnsub = db.collection('madrasas').orderBy('createdAt', 'desc').onSnapshot(snap => {
+    madrasasUnsub = db.collection('madrasas').onSnapshot(snap => {
       const wrap = $('madrasasListWrap');
       if (!wrap) return;
+      const docs = snap.docs.slice().sort((a, b) => (b.data().createdAt || 0) - (a.data().createdAt || 0));
       Object.keys(cache).forEach(k => { delete cache[k]; });
-      snap.docs.forEach(d => { cache[d.id] = d.data(); });
+      docs.forEach(d => { cache[d.id] = d.data(); });
       if (snap.empty) { wrap.innerHTML = '<p class="muted">কোনো মাদ্রাসা পাওয়া যায়নি</p>'; return; }
 
       let live = 0, expired = 0, none = 0;
-      snap.docs.forEach(d => {
+      docs.forEach(d => {
         const i = getPlanInfo(d.data());
         if (!i.key) none++; else if (i.expired) expired++; else live++;
       });
       const summary = `<p class="muted" style="margin-bottom:8px;">চালু প্যাকেজ: <b>${bn(live)}</b> &nbsp; মেয়াদ শেষ: <b>${bn(expired)}</b> &nbsp; প্যাকেজ নেই: <b>${bn(none)}</b></p>`;
 
-      wrap.innerHTML = summary + snap.docs.map(d => {
+      wrap.innerHTML = summary + docs.map(d => {
         const m = d.data();
         const isActiveM = m.active !== false;
         const dateStr = m.createdAt ? new Date(m.createdAt).toLocaleDateString('bn-BD') : '-';
@@ -85,10 +87,13 @@
             <span class="badge ${isActiveM ? 'present' : 'absent'}">${isActiveM ? 'সক্রিয়' : 'নিষ্ক্রিয়'}</span>
           </div>
           <div class="muted" style="margin-top:2px;">নিবন্ধনের তারিখ: ${esc(dateStr)} &nbsp; আইডি: ${esc(d.id)}</div>
+          ${typeof tenantCopyLinkFor === 'function' ? `<input readonly value="${esc(loginLinkFor(d.id))}" style="margin-top:6px;font-size:12px;" onclick="this.select()">` : ''}
           <div style="margin-top:6px;">📦 <b>${line}</b> <span class="badge ${cls}">${txt}</span></div>
           <div style="margin-top:6px;">
             <button class="small secondary" onclick="planOpenEditor('${jsq(d.id)}')">📦 প্যাকেজ ঠিক করুন</button>
             <button class="small ${isActiveM ? 'danger' : ''}" onclick="toggleMadrasaActive('${jsq(d.id)}', ${isActiveM})">${isActiveM ? 'নিবন্ধন বাতিল করুন' : 'পুনরায় সক্রিয় করুন'}</button>
+            ${typeof tenantCopyLinkFor === 'function' ? `<button class="small secondary" onclick="tenantCopyLinkFor('${jsq(d.id)}')">লিংক কপি</button>
+            <button class="small secondary" onclick="tenantShareLinkFor('${jsq(d.id)}','${jsq(m.madrasaName || d.id)}')">হোয়াটসঅ্যাপে পাঠান</button>` : ''}
           </div>
         </div>`;
       }).join('');
