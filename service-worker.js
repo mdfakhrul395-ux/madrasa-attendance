@@ -1,4 +1,4 @@
-const CACHE_NAME = 'madrasa-attendance-v20';
+const CACHE_NAME = 'madrasa-attendance-v21';
 const ASSETS = [
   './index.html',
   './style.css',
