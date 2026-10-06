@@ -58,14 +58,17 @@ nav.tabs .tabs-primary .tab-btn.active .tab-icon[data-svg]{color:#fff}
 nav.tabs .tabs-primary .tab-btn .tab-lbl{margin-top:0}
 nav.tabs .tabs-primary .tab-btn .nbadge{position:absolute;top:-3px;right:3px;background:#dc2626;color:#fff;border-radius:10px;font-size:10px;min-width:16px;height:16px;line-height:16px;text-align:center;padding:0 3px;border:2px solid #fff;box-sizing:content-box}
 
+/* মেনু খোলা থাকলে ভাসমান বাটন (রিপোর্ট) মেনুর পেছনে চলে যায়, কোনো টাইল ঢাকে না */
+nav.tabs.more-open{z-index:2147483000}
+
 /* ---- "আরও" মেনু শিট ---- */
-.more-sheet{border-radius:22px 22px 0 0;padding:8px 12px 80px;box-shadow:0 -8px 24px rgba(15,23,42,.14);max-height:72vh;overflow-y:auto;-webkit-overflow-scrolling:touch}
+.more-sheet{border-radius:22px 22px 0 0;padding:8px 12px 16px;box-shadow:0 -8px 24px rgba(15,23,42,.14);max-height:calc(100vh - 150px);overflow-y:auto;-webkit-overflow-scrolling:touch}
 .more-sheet:before{content:"";display:block;width:36px;height:4px;border-radius:2px;background:#cbd5e1;margin:0 auto 10px}
 .more-sheet .more-title{font-size:13px;margin:0 2px 2px}
-.more-sheet .more-gh{display:flex;align-items:center;gap:8px;font-size:13.5px;font-weight:700;color:#1e293b;margin:14px 2px 8px}
+.more-sheet .more-gh{display:flex;align-items:center;gap:8px;font-size:13.5px;font-weight:700;color:#1e293b;margin:12px 2px 6px}
 .more-sheet .more-gh:before{content:"";width:4px;height:14px;border-radius:2px;background:var(--c,#0f766e)}
 .more-sheet .more-grid{gap:8px}
-.more-sheet .more-grid .more-item{position:relative;overflow:hidden;flex-direction:column;align-items:flex-start;justify-content:space-between;gap:10px;min-height:92px;padding:10px;border-radius:16px;font-size:12.5px;font-weight:700;text-align:left;line-height:1.35;color:#1e293b;-webkit-tap-highlight-color:transparent;transition:transform .12s ease}
+.more-sheet .more-grid .more-item{position:relative;overflow:hidden;flex-direction:column;align-items:flex-start;justify-content:space-between;gap:8px;min-height:84px;padding:10px;border-radius:16px;font-size:12.5px;font-weight:700;text-align:left;line-height:1.35;color:#1e293b;-webkit-tap-highlight-color:transparent;transition:transform .12s ease}
 .more-sheet .more-grid .more-item:active{transform:scale(.95)}
 .more-sheet .more-grid .more-item.active{font-weight:700;color:#1e293b;box-shadow:0 0 0 2px var(--c,#0f766e)}
 .more-sheet .more-grid .more-item .more-lbl{position:relative;overflow-wrap:anywhere}
@@ -92,7 +95,7 @@ nav.tabs .tabs-primary .tab-btn .nbadge{position:absolute;top:-3px;right:3px;bac
 .dash .dash-actions .dash-act .dash-act-ic[data-svg] svg{width:30px;height:30px}
 
 @media (max-width:340px){
-  .more-sheet .more-grid .more-item{min-height:84px;font-size:12px;padding:9px}
+  .more-sheet .more-grid .more-item{min-height:78px;font-size:12px;padding:9px}
   .dash .dash-actions .dash-act .dash-act-ic,.dash .dash-actions .dash-act.main .dash-act-ic{width:56px;height:56px;border-radius:19px}
 }
 `;
@@ -154,6 +157,21 @@ nav.tabs .tabs-primary .tab-btn .nbadge{position:absolute;top:-3px;right:3px;bac
         + groupsHtml
         + '</div>';
     };
+    // মেনু খুললে/বন্ধ করলে নেভের ওপর more-open ক্লাস বসানো/সরানো
+    const syncOpen = function () {
+      const nav = document.getElementById('bottomNav');
+      const sheet = document.getElementById('moreSheet');
+      if (nav) nav.classList.toggle('more-open', !!(sheet && sheet.style.display === 'block'));
+    };
+    ['toggleMoreMenu', 'closeMoreMenu'].forEach(function (name) {
+      const orig = window[name];
+      if (typeof orig !== 'function') return;
+      window[name] = function () {
+        const r = orig.apply(this, arguments);
+        syncOpen();
+        return r;
+      };
+    });
   } catch (e) {
     console.error('[ui-polish] নতুন ডিজাইন চালু হয়নি, আগের ডিজাইনই থাকবে:', e);
   }
