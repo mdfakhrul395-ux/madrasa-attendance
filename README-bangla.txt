@@ -1,17 +1,22 @@
-ডায়েরিতে আইসিটি যোগ করার নিয়ম
-================================
+নোটিশ "মুছুন" বাটন ফিক্স
+==========================
 
-১) diary-ict.js ফাইলটি GitHub রিপোজিটরির মূল ফোল্ডারে আপলোড করুন
-   (app.js, dashboard.js যেখানে আছে ঠিক সেখানে)।
+কারণ: firestore.rules-এ notices-এর "allow write" ডিলিটের সময় request.resource ব্যবহার করত,
+যা ডিলিটে থাকে না — তাই ডিলিট ব্লক হতো। এখন create/update ও delete আলাদা করা হয়েছে।
 
-২) index.html খুলে dashboard.js এর লাইনের নিচে (বা homework.js/tenant-link.js থাকলে সবার নিচে) এই লাইন যোগ করুন:
+ধাপ ১ (জরুরি): নিয়ম পাবলিশ
+  1. Firebase Console -> Firestore Database -> Rules
+  2. এই zip-এর firestore.rules ফাইলের পুরো লেখা কপি করে আগের লেখার জায়গায় বসান
+  3. "Publish" চাপুন
+  4. অ্যাপ রিফ্রেশ করে নোটিশ মুছে দেখুন
 
-   <script src="diary-ict.js"></script>
+ধাপ ২ (ঐচ্ছিক): app.js-এ এরর দেখানো
+  app.js-এ deleteNotice ফাংশনটি খুঁজে এভাবে বদলান:
 
-৩) service-worker.js এ যদি ফাইলের তালিকা (ASSETS / urlsToCache) থাকে, সেখানে 'diary-ict.js' যোগ করুন
-   এবং CACHE_NAME এর সংখ্যা একটি বাড়িয়ে দিন, যাতে ফোনে পুরোনো সংস্করণ না দেখায়।
+  function deleteNotice(id) {
+    if (!confirm('এই নোটিশ মুছতে চান?')) return;
+    db.collection('notices').doc(id).delete()
+      .catch(e => { alert('মুছতে ব্যর্থ: ' + e.message); showDiagBanner('নোটিশ মুছতে ব্যর্থ: ' + e.message); });
+  }
 
-৪) Commit করার পর অ্যাপ নতুন করে খুলুন। ডায়েরির নতুন এন্ট্রি ফর্মের সবার শেষে "আইসিটি" ঘর দেখা যাবে।
-
-* আগের কোনো ডায়েরি এন্ট্রি নষ্ট হবে না। Firestore rules বদলাতে হবে না।
-* শিক্ষার্থীর ডায়েরি পাতা ও হোম ড্যাশবোর্ডেও আইসিটি নিজে থেকে দেখাবে।
+  (এটা করলে service-worker.js-এর CACHE_NAME-এর ভার্সন বাড়াতে ভুলবেন না।)

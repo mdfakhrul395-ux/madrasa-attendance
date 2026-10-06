@@ -171,9 +171,11 @@ service cloud.firestore {
       allow delete: if isTeacherAuth() && resource.data.madrasaId == myMadrasaId();
     }
 
+    // ===== নোটিশ: create/update ও delete আলাদা (delete-এ request.resource থাকে না, তাই আগে মোছা ব্লক হতো) =====
     match /notices/{docId} {
       allow read: if request.auth != null && resource.data.madrasaId == myMadrasaId();
-      allow write: if isTeacherAuth() && request.resource.data.madrasaId == myMadrasaId();
+      allow create, update: if isTeacherAuth() && request.resource.data.madrasaId == myMadrasaId();
+      allow delete: if isTeacherAuth() && resource.data.madrasaId == myMadrasaId();
     }
 
     match /diary/{docId} {
