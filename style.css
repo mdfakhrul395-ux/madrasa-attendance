@@ -1,9 +1,27 @@
+/* ================= বাংলা ফন্ট (অ্যাপের ভেতরেই রাখা, সব ফোনে একই দেখানোর জন্য) ================= */
+@font-face {
+  font-family: 'Noto Sans Bengali';
+  font-style: normal;
+  font-weight: 400;
+  font-display: swap;
+  src: url('NotoSansBengali-Regular.woff') format('woff');
+}
+@font-face {
+  font-family: 'Noto Sans Bengali';
+  font-style: normal;
+  font-weight: 700;
+  font-display: swap;
+  src: url('NotoSansBengali-Bold.woff') format('woff');
+}
+
 * { box-sizing: border-box; margin: 0; padding: 0; }
 body {
   font-family: 'Noto Sans Bengali', 'Segoe UI', sans-serif;
   background: #f2f5f7;
   color: #1e293b;
   padding-bottom: 84px;
+  -webkit-text-size-adjust: 100%;
+  text-size-adjust: 100%;
 }
 header {
   background: #0f766e;
