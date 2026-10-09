@@ -1,4 +1,4 @@
-/* ShikkhaOS — payments.js (পেমেন্ট সিস্টেম, ধাপ ১)
+/* ShikkhaOS — payments.js (পেমেন্ট সিস্টেম, ধাপ ১ + ২)
  *
  * index.html-এ plans-expiry.js এর নিচে লোড হবে। app.js / dashboard.js বদলাতে হয় না।
  *
@@ -9,7 +9,8 @@
  *      Nagad নম্বরে টাকা পাঠিয়ে প্ল্যান, মাস, পরিমাণ, প্রেরকের নম্বর ও TrxID জমা দেওয়া।
  *  একই TrxID একই মাদ্রাসা দ্বিতীয়বার জমা দিতে পারে না (ডকুমেন্ট আইডি = মাদ্রাসা আইডি + TrxID)।
  *  রিড কম রাখতে সবকিছু একবার get() দিয়ে লোড হয় (লাইভ listener নেই)।
- *  অনুমোদন ও প্ল্যান/মেয়াদ নিজে থেকে বদলানো আসবে ধাপ ২-এ।
+ *  ধাপ ২: সুপার অ্যাডমিন আবেদনে "অনুমোদন" চাপলে plans.js এর নিয়মে (madrasas/{id}-এ plan, planExpiry, planUpdatedAt)
+ *  মাদ্রাসার প্ল্যান ও মেয়াদ নিজে থেকে বদলে যায়, অথবা "প্রত্যাখ্যান" করে কারণ জানানো যায়।
  */
 (function () {
   'use strict';
@@ -38,7 +39,10 @@
   const fmtDate = ms => ms ? new Date(ms).toLocaleDateString('bn-BD') : '';
   const normPhone = s => toEnglishDigits(s).replace(/[^0-9]/g, '');
   const validPhone = p => /^01[3-9][0-9]{8}$/.test(p);
-  const priceOf = (c, key) => Number(c && c.prices && c.prices[key]) || 0;
+  // সুপার অ্যাডমিন দাম বসালে সেটি, নইলে plans.js এর নিজস্ব দাম
+  const defaultPrice = key => (window.PLANS && window.PLANS[key] && Number(window.PLANS[key].price)) || 0;
+  const customPrice = (c, key) => Number(c && c.prices && c.prices[key]) || 0;
+  const priceOf = (c, key) => customPrice(c, key) || defaultPrice(key);
   const hr = '<hr style="border:none;border-top:1px solid #eee;margin:14px 0;">';
 
   // ---------- পেমেন্ট সেটিংস (payment_settings/main), ৫ মিনিট ক্যাশ ----------
@@ -52,17 +56,30 @@
     });
   }
 
-  function requestRow(r, forAdmin) {
+  function requestRow(r, forAdmin, id) {
     const st = STATUS[r.status] || STATUS.pending;
     const top = forAdmin
       ? esc(r.madrasaName || r.madrasaId || '-') + ' <span class="muted">— ' + esc(planLabel(r.plan)) + ', ' + esc(bn(r.months)) + ' মাস</span>'
       : esc(planLabel(r.plan)) + ' <span class="muted">— ' + esc(bn(r.months)) + ' মাস</span>';
     const more = forAdmin ? ' | প্রেরক: ' + esc(r.senderNumber || '-') : '';
+    let note = '';
+    if (r.status === 'approved' && r.approvedExpiry) {
+      note = '<div class="muted" style="margin-top:2px;">✅ প্ল্যান চালু হয়েছে, মেয়াদ: ' + esc(fmtHolidayDate(r.approvedExpiry, false)) + '</div>';
+    } else if (r.status === 'rejected' && r.rejectReason) {
+      note = '<div style="margin-top:2px;color:#b91c1c;font-size:13px;">কারণ: ' + esc(r.rejectReason) + '</div>';
+    }
+    const btns = (forAdmin && id && (r.status || 'pending') === 'pending')
+      ? `<div style="margin-top:6px;">
+          <button class="small" onclick="payApprove('${jsq(id)}')">✅ অনুমোদন</button>
+          <button class="small danger" onclick="payReject('${jsq(id)}')">প্রত্যাখ্যান</button>
+        </div>`
+      : '';
     return `<div class="student-row" style="display:block;">
       <div style="display:flex;justify-content:space-between;align-items:center;gap:8px;">
         <b>${top}</b><span class="badge ${st[1]}">${st[0]}</span>
       </div>
       <div class="muted" style="margin-top:2px;">${esc(money(r.amount))} | TrxID: ${esc(r.trxId || '-')}${more} | ${esc(fmtDate(r.createdAt))}</div>
+      ${note}${btns}
     </div>`;
   }
 
@@ -211,8 +228,8 @@
   // =====================================================================
   function adminCardHtml() {
     const priceInputs = PLANS.map(p => `
-      <label style="font-size:12px;">${esc(p.label)} — মাসিক দাম (টাকা)</label>
-      <input id="pcP_${p.key}" type="number" inputmode="numeric" placeholder="যেমন: 300">`).join('');
+      <label style="font-size:12px;">${esc(p.label)} — মাসিক দাম (ফাঁকা থাকলে ${esc(bn(defaultPrice(p.key)))} টাকা)</label>
+      <input id="pcP_${p.key}" type="number" inputmode="numeric" placeholder="${esc(defaultPrice(p.key))}">`).join('');
     return `<div class="card" id="payAdminCard">
       <h2>💳 পেমেন্ট সেটিংস</h2>
       <p class="muted">মাদ্রাসারা এই নম্বরে টাকা পাঠাবে। এখানে বদলালে সবার কাছে সাথে সাথে নতুন নম্বর দেখাবে।</p>
@@ -235,7 +252,7 @@
     if (!el('pcNumber')) return;
     el('pcNumber').value = (c && c.nagadNumber) || '';
     el('pcType').value = (c && c.accountType === 'merchant') ? 'merchant' : 'personal';
-    PLANS.forEach(p => { const e = el('pcP_' + p.key); if (e) e.value = priceOf(c, p.key) || ''; });
+    PLANS.forEach(p => { const e = el('pcP_' + p.key); if (e) e.value = customPrice(c, p.key) || ''; });
   }
 
   window.paySaveCfg = function () {
@@ -263,13 +280,80 @@
       const live = el('payAdminList');
       if (!live) return;
       if (snap.empty) { live.innerHTML = '<p class="muted">এখনো কোনো পেমেন্টের আবেদন আসেনি</p>'; return; }
-      const docs = snap.docs.map(d => d.data());
+      const docs = snap.docs.map(d => Object.assign({ _id: d.id }, d.data()));
       const pend = docs.filter(r => (r.status || 'pending') === 'pending').length;
       live.innerHTML = (pend ? `<p style="color:#b45309;font-weight:bold;margin:0 0 6px;">অপেক্ষমাণ আবেদন: ${esc(bn(pend))}টি</p>` : '')
-        + docs.map(r => requestRow(r, true)).join('');
+        + docs.map(r => requestRow(r, true, r._id)).join('');
     }).catch(e => {
       const live = el('payAdminList');
       if (live) live.innerHTML = '<p class="muted">লোড করতে সমস্যা হয়েছে: ' + esc(e.message) + '</p>';
+    });
+  };
+
+  // ---------- ধাপ ২: অনুমোদন / প্রত্যাখ্যান (শুধু সুপার অ্যাডমিন) ----------
+  window.payApprove = function (id) {
+    if (!isSuperAdminUser) return;
+    if (typeof window.__plansAddMonths !== 'function' || typeof getPlanInfo !== 'function') {
+      alert('plans.js লোড হয়নি, তাই অনুমোদন করা যাচ্ছে না। অ্যাপ রিফ্রেশ করে আবার চেষ্টা করুন।');
+      return;
+    }
+    const reqRef = db.collection('payment_requests').doc(id);
+    reqRef.get().then(reqDoc => {
+      if (!reqDoc.exists) { alert('আবেদনটি পাওয়া যায়নি'); return; }
+      const r = reqDoc.data();
+      if ((r.status || 'pending') !== 'pending') { alert('এই আবেদন আগেই নিষ্পত্তি হয়ে গেছে'); window.payAdminLoad(); return; }
+      return Promise.all([
+        db.collection('madrasas').doc(r.madrasaId).get(),
+        db.collection('payment_requests').where('trxId', '==', r.trxId).where('status', '==', 'approved').get(),
+        loadCfg().catch(() => cfg || {})
+      ]).then(res => {
+        const mDoc = res[0], dup = res[1], c = res[2] || {};
+        if (!mDoc.exists) { alert('এই মাদ্রাসা পাওয়া যায়নি'); return; }
+        const cur = getPlanInfo(mDoc.data());
+        const today = todayLocal();
+        const base = (cur.expiry && cur.expiry >= today) ? cur.expiry : today;
+        const newExpiry = window.__plansAddMonths(base, Number(r.months));
+        const expected = priceOf(c, r.plan) * Number(r.months);
+
+        let msg = 'মাদ্রাসা: ' + (r.madrasaName || r.madrasaId) + '\nপ্ল্যান: ' + planLabel(r.plan) + ' (' + bn(r.months) + ' মাস)\nটাকা: ' + money(r.amount)
+          + '\nপ্রেরকের নম্বর: ' + r.senderNumber + '\nTrxID: ' + r.trxId
+          + '\n\nনতুন মেয়াদ: ' + fmtHolidayDate(newExpiry, false);
+        if (cur.key && cur.key !== r.plan) msg += '\nপ্ল্যান বদলাবে: ' + planLabel(cur.key) + ' থেকে ' + planLabel(r.plan);
+        if (expected > 0 && expected !== Number(r.amount)) msg += '\n\n⚠️ টাকা নির্ধারিত দামের (' + money(expected) + ') সাথে মেলে না';
+        if (dup.docs.some(d => d.id !== id)) msg += '\n\n⚠️ এই TrxID আরেকটি আবেদনে আগেই অনুমোদন হয়েছে!';
+        msg += '\n\nNagad-এ TrxID আর টাকা মিলিয়ে দেখেছেন? অনুমোদন করবেন?';
+        if (!confirm(msg)) return;
+
+        const F = firebase.firestore.FieldValue;
+        const patch = { plan: r.plan, planExpiry: newExpiry, planUpdatedAt: Date.now() };
+        // অন্য প্ল্যানে গেলে আগের প্ল্যানের বিশেষ সীমা/দাম মুছে যায় (প্যাকেজ ঠিক করুন থেকে আবার দেওয়া যাবে)
+        if (cur.key !== r.plan) { patch.studentLimit = F.delete(); patch.teacherLimit = F.delete(); patch.planPrice = F.delete(); }
+        const batch = db.batch();
+        batch.set(db.collection('madrasas').doc(r.madrasaId), patch, { merge: true });
+        batch.update(reqRef, { status: 'approved', approvedAt: Date.now(), approvedExpiry: newExpiry });
+        return batch.commit().then(() => {
+          alert('অনুমোদন হয়েছে। নতুন মেয়াদ: ' + fmtHolidayDate(newExpiry, false));
+          window.payAdminLoad();
+        });
+      });
+    }).catch(e => {
+      alert('অনুমোদন ব্যর্থ: ' + (e && e.message));
+      if (typeof showDiagBanner === 'function') showDiagBanner('পেমেন্ট অনুমোদন ব্যর্থ: ' + (e && e.code) + ' ' + (e && e.message));
+    });
+  };
+
+  window.payReject = function (id) {
+    if (!isSuperAdminUser) return;
+    const why = prompt('প্রত্যাখ্যানের কারণ লিখুন (মাদ্রাসা দেখতে পাবে):', 'TrxID বা টাকা মেলেনি');
+    if (why === null) return;
+    const reqRef = db.collection('payment_requests').doc(id);
+    reqRef.get().then(doc => {
+      if (!doc.exists || (doc.data().status || 'pending') !== 'pending') { alert('এই আবেদন আগেই নিষ্পত্তি হয়ে গেছে'); window.payAdminLoad(); return; }
+      return reqRef.update({ status: 'rejected', rejectedAt: Date.now(), rejectReason: String(why).trim().slice(0, 120) })
+        .then(() => window.payAdminLoad());
+    }).catch(e => {
+      alert('প্রত্যাখ্যান ব্যর্থ: ' + (e && e.message));
+      if (typeof showDiagBanner === 'function') showDiagBanner('পেমেন্ট প্রত্যাখ্যান ব্যর্থ: ' + (e && e.message));
     });
   };
 
