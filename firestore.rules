@@ -233,6 +233,36 @@ service cloud.firestore {
       allow delete: if isTeacherAuth() && resource.data.madrasaId == myMadrasaId();
     }
 
+    // ================= PAYMENTS (পেমেন্ট) =================
+    // Nagad নম্বর ও দাম: শুধু সুপার অ্যাডমিন লিখতে পারেন; মাদ্রাসার অ্যাডমিনরা পড়তে পারেন।
+    match /payment_settings/{id} {
+      allow read: if isRequesterAdmin() || isSuperAdmin();
+      allow write: if isSuperAdmin();
+    }
+
+    // পেমেন্টের আবেদন: মাদ্রাসার অ্যাডমিন শুধু নিজের মাদ্রাসার জন্য, শুধু "pending" অবস্থায় তৈরি করতে পারেন।
+    // ডকুমেন্ট আইডি = মাদ্রাসা আইডি + "_" + TrxID, তাই একই TrxID দ্বিতীয়বার জমা দেওয়া যায় না
+    // (আগের ডকুমেন্ট থাকলে সেটি update হিসেবে ধরা হয়, যা শুধু সুপার অ্যাডমিন পারেন)।
+    // অনুমোদন/প্রত্যাখ্যান (update) শুধু সুপার অ্যাডমিন।
+    match /payment_requests/{reqId} {
+      allow read: if isSuperAdmin() ||
+                     (isRequesterAdmin() && resource.data.madrasaId == myMadrasaId());
+      allow create: if isRequesterAdmin() &&
+        request.resource.data.keys().hasOnly(['madrasaId', 'madrasaName', 'plan', 'months', 'amount', 'senderNumber', 'trxId', 'status', 'createdAt']) &&
+        request.resource.data.madrasaId == myMadrasaId() &&
+        reqId == request.resource.data.madrasaId + '_' + request.resource.data.trxId &&
+        request.resource.data.status == 'pending' &&
+        request.resource.data.plan is string && request.resource.data.plan.size() <= 20 &&
+        request.resource.data.months is number && request.resource.data.months >= 1 && request.resource.data.months <= 24 &&
+        request.resource.data.amount is number && request.resource.data.amount > 0 && request.resource.data.amount <= 1000000 &&
+        request.resource.data.senderNumber is string && request.resource.data.senderNumber.size() >= 11 && request.resource.data.senderNumber.size() <= 14 &&
+        request.resource.data.trxId is string && request.resource.data.trxId.size() >= 6 && request.resource.data.trxId.size() <= 20 &&
+        request.resource.data.madrasaName is string && request.resource.data.madrasaName.size() <= 80 &&
+        request.resource.data.createdAt is number;
+      allow update: if isSuperAdmin();
+      allow delete: if false;
+    }
+
     // ================= USAGE TRACKER (ব্যবহারের হিসাব) =================
     match /usage_stats/{date} {
       allow read: if isRequesterAdmin() || isSuperAdmin();
