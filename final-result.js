@@ -6,7 +6,8 @@
  * app.js, dashboard.js বা অন্য কোনো ফাইল বদলাতে হয় না। এই ফাইল নিজেই:
  *   - ৩য় সেমিস্টারের মার্কশিট খুললে তার নিচে "পরীক্ষার চূড়ান্ত ফলাফল" অংশ যোগ করে
  *     (শিক্ষক ও শিক্ষার্থী দুইপাশেই; শিক্ষার্থী শুধু প্রকাশিত মার্কশিটের হিসাব দেখে)
- *   - সেমিস্টার চেনে পরীক্ষার নাম থেকে (যেমন "১ম সেমিস্টার ২০২৬", "৩য় সেমিস্টার পরীক্ষা")
+ *   - সেমিস্টার চেনে পরীক্ষার নাম থেকে ("১ম সেমিস্টার", "২য় পরীক্ষা", "প্রথম" ইত্যাদি, "সেমিস্টার" লেখা না থাকলেও চলে);
+ *     নাম থেকে না মিললে ওই শিক্ষাবর্ষে ঠিক ৩টি পরীক্ষা থাকলে তারিখের ক্রমে ১ম/২য়/৩য় ধরে
  *   - সুপার অ্যাডমিন প্যানেলে প্রতিটি মাদ্রাসার পাশে "চূড়ান্ত ফলাফল চালু/বন্ধ" সুইচ বসায়
  *     (madrasas/{id}.finalResultEnabled; ফিল্ড না থাকলে চালু ধরা হয়)
  *
@@ -33,20 +34,39 @@
   const normYear = s => String(s == null ? '' : s).replace(/[০-৯]/g, d => DIGITS.indexOf(d)).trim();
 
   // ---------- সেমিস্টার চেনা ----------
+  // "১ম সেমিস্টার", "২য় সেমিস্টার পরীক্ষা ২০২৬", "পরীক্ষা: ৩য় সেমিস্টার", "প্রথম সেমিস্টার", "সেমিস্টার ৩",
+  // "1st Semester" ইত্যাদি সবই চেনে। সংখ্যা/শব্দ "সেমিস্টার" শব্দের ঠিক পাশেরটি ধরা হয়,
+  // তাই বছর (২০২৬), শ্রেণি (১ম শ্রেণি) বা "পরীক্ষা" শব্দ থাকলেও গোলমাল হয় না।
+  const KW = '(?:সেমিস্টার|সেমিষ্টার|সেমেস্টার|সেমেষ্টার|semester|সেমি|সেমে)';
+  const ORD = '(প্রথম|দ্বিতীয়|তৃতীয়|first|second|third|[123](?![0-9]))';
+  const SFX = '(?:ম|\u09AF\u09BC|st|nd|rd)?';
+  const RE_BEFORE = new RegExp('(?:^|[^0-9])' + ORD + '\\s*' + SFX + '\\s*[-–:]?\\s*' + KW);
+  const RE_AFTER = new RegExp(KW + '\\s*[-–:]?\\s*' + ORD);
+  const ordNum = w => /প্রথম|first/.test(w) ? 1 : /দ্বিতীয়|second/.test(w) ? 2 : /তৃতীয়|third/.test(w) ? 3 : Number(w);
+
+  // "সেমিস্টার" শব্দ না থাকলেও চলে: "১ম পরীক্ষা", "২য়", "প্রথম", "3rd" ইত্যাদিও চেনা যায়।
+  const RE_ORD_WORD = /প্রথম|দ্বিতীয়|তৃতীয়|first|second|third/;
+  const RE_ORD_NUM = /(^|[^0-9])([123])\s*(?:ম|\u09AF\u09BC|st|nd|rd)(?![\u0980-\u09FFa-z])/;
+
   function semesterOf(name) {
     const t = String(name || '')
       .replace(/\u09DF/g, '\u09AF\u09BC')
       .replace(/[০-৯]/g, d => DIGITS.indexOf(d))
       .toLowerCase();
-    if (!/সেমি|সেমে|semester/.test(t)) return 0;
-    if (/প্রথম|first/.test(t)) return 1;
-    if (/দ্বিতীয়|second/.test(t)) return 2;
-    if (/তৃতীয়|third/.test(t)) return 3;
-    const m = t.match(/(^|[^0-9])([123])(?![0-9])/);
-    return m ? Number(m[2]) : 0;
+    const hasKw = new RegExp(KW).test(t);
+    let m;
+    if (hasKw && (m = RE_BEFORE.exec(t) || RE_AFTER.exec(t))) return ordNum(m[1]);
+    const w = t.match(RE_ORD_WORD);
+    if (w) return ordNum(w[0]);
+    m = RE_ORD_NUM.exec(t);
+    if (m) return Number(m[2]);
+    if (hasKw) { m = t.match(/(^|[^0-9])([123])(?![0-9])/); if (m) return Number(m[2]); }
+    return 0;
   }
 
-  // একই শিক্ষাবর্ষে একই সেমিস্টারের একাধিক থাকলে সর্বশেষটি
+  // একই শিক্ষাবর্ষে একই সেমিস্টারের একাধিক থাকলে সর্বশেষটি।
+  // নাম থেকে তিনটি সেমিস্টার না মিললে, শিক্ষার্থীর ওই শিক্ষাবর্ষে ঠিক ৩টি পরীক্ষা থাকলে
+  // সেগুলো তারিখের ক্রমে ১ম, ২য়, ৩য় ধরা হয় (তারিখ মিললে নামের ক্রমে)।
   function pick(list) {
     const by = {};
     list.forEach(r => {
@@ -54,6 +74,12 @@
       if (!k) return;
       if (!by[k] || String(r.date || '') > String(by[k].date || '')) by[k] = r;
     });
+    if (by[1] && by[2] && by[3]) return by;
+    if (list.length === 3) {
+      const sorted = list.slice().sort((x, y) =>
+        String(x.date || '').localeCompare(String(y.date || '')) || String(x.examName || '').localeCompare(String(y.examName || ''), 'bn'));
+      return { 1: sorted[0], 2: sorted[1], 3: sorted[2] };
+    }
     return by;
   }
 
@@ -63,7 +89,7 @@
       if (!r) return { k, w, has: false };
       const t = computeMarksheetTotals(r.subjects);
       const pct = t.totalFull > 0 ? t.totalObtained / t.totalFull * 100 : 0;
-      return { k, w, has: true, marks: pct * w / 100, gpa: Number(t.gpa), failed: t.hasFailedSubject };
+      return { k, w, has: true, marks: pct * w / 100, gpa: Number(t.gpa), failed: t.hasFailedSubject, exam: r.examName || '' };
     });
     if (rows.some(x => !x.has)) return { rows, complete: false };
     const marks = rows.reduce((s, x) => s + x.marks, 0);
@@ -82,7 +108,7 @@
     const th = 'padding:8px 10px;border:1px solid #e5e7eb;';
     const rows = f.rows.map((x, i) => `
       <tr style="background:${i % 2 === 0 ? '#fff' : '#fafafa'};">
-        <td style="${th}">${esc(banglaOrdinal(x.k))} সেমিস্টার <span class="muted">(${bn(x.w)}%)</span></td>
+        <td style="${th}">${esc(banglaOrdinal(x.k))} সেমিস্টার <span class="muted">(${bn(x.w)}%)</span>${x.has && x.exam ? `<div class="muted" style="font-size:11px;">${esc(x.exam)}</div>` : ''}</td>
         <td style="${th}text-align:center;">${x.has ? num(x.marks) + ' / ' + bn(x.w) : '—'}</td>
         <td style="${th}text-align:center;">${x.has ? num(x.gpa) : '—'}</td>
       </tr>`).join('');
@@ -118,7 +144,7 @@
         </div>` : ''}`;
     } else {
       const missing = f.rows.filter(x => !x.has).map(x => banglaOrdinal(x.k) + ' সেমিস্টার').join(', ');
-      tail = `<p class="muted" style="margin-top:10px;font-size:13px;">চূড়ান্ত ফলাফলের জন্য ${esc(missing)}-এর ${isTeacher ? 'মার্কশিট (একই শিক্ষাবর্ষে, পরীক্ষার নামে সেমিস্টার লেখা)' : 'প্রকাশিত মার্কশিট'} দরকার।</p>`;
+      tail = `<p class="muted" style="margin-top:10px;font-size:13px;">চূড়ান্ত ফলাফলের জন্য ${esc(missing)}-এর ${isTeacher ? 'মার্কশিট (একই শিক্ষাবর্ষে)' : 'প্রকাশিত মার্কশিট'} দরকার।</p>`;
     }
 
     return `
@@ -154,7 +180,6 @@
     return db.collection('results').doc(docId).get().then(doc => {
       if (!doc.exists) return null;
       const r = doc.data();
-      if (semesterOf(r.examName) !== 3) return null;
       const year = normYear(r.academicYear);
       let q = db.collection('results');
       q = role === 'teacher'
@@ -164,6 +189,9 @@
         const list = snap.docs.map(d => Object.assign({ _id: d.id }, d.data()))
           .filter(x => normYear(x.academicYear) === year && Array.isArray(x.subjects) && x.subjects.length);
         const by = pick(list);
+        // শুধু ৩য় সেমিস্টারের মার্কশিটের নিচে দেখানো হবে
+        const isThird = semesterOf(r.examName) === 3 || (by[3] && by[3]._id === docId);
+        if (!isThird) return null;
         return { studentId, docId, year, by, f: calcFinal(by) };
       });
     });
