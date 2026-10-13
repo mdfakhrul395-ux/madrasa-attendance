@@ -78,7 +78,8 @@ service cloud.firestore {
         (request.auth.uid == uid &&
          request.resource.data.madrasaId == resource.data.madrasaId &&
          request.resource.data.get('isAdmin', false) == resource.data.get('isAdmin', false) &&
-         request.resource.data.get('active', true) == resource.data.get('active', true))
+         request.resource.data.get('active', true) == resource.data.get('active', true) &&
+         request.resource.data.get('classTeacherOf', '') == resource.data.get('classTeacherOf', ''))
       );
       allow delete: if false;
     }
