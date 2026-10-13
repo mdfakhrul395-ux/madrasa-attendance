@@ -1,355 +1,334 @@
-/* ShikkhaOS — "পরীক্ষার চূড়ান্ত ফলাফল" (১ম সেমিস্টার ২৫% + ২য় সেমিস্টার ২৫% + ৩য় সেমিস্টার ৫০%)
+/* ShikkhaOS — পরীক্ষার চূড়ান্ত ফলাফল (১ম সেমিস্টার ২৫% + ২য় সেমিস্টার ২৫% + ৩য় সেমিস্টার ৫০%)
  *
- * index.html এ এই ফাইলটি সবার শেষে (ui-polish.js এর পরে) লোড হবে:
- *   <script defer src="final-result.js"></script>
+ * index.html এ সবার শেষে (ui-polish.js এর পরে) লোড হবে:
+ *   <script src="final-result.js"></script>
+ * app.js / dashboard.js বদলাতে হয় না।
  *
- * app.js, dashboard.js বা অন্য কোনো ফাইল বদলাতে হয় না। এই ফাইল নিজেই:
- *   - ৩য় সেমিস্টারের মার্কশিট খুললে তার নিচে "পরীক্ষার চূড়ান্ত ফলাফল" অংশ যোগ করে
- *     (শিক্ষক ও শিক্ষার্থী দুইপাশেই; শিক্ষার্থী শুধু প্রকাশিত মার্কশিটের হিসাব দেখে)
- *   - সেমিস্টার চেনে পরীক্ষার নাম থেকে ("১ম সেমিস্টার", "২য় পরীক্ষা", "প্রথম" ইত্যাদি, "সেমিস্টার" লেখা না থাকলেও চলে);
- *     নাম থেকে না মিললে ওই শিক্ষাবর্ষে ঠিক ৩টি পরীক্ষা থাকলে তারিখের ক্রমে ১ম/২য়/৩য় ধরে
- *   - সুপার অ্যাডমিন প্যানেলে প্রতিটি মাদ্রাসার পাশে "চূড়ান্ত ফলাফল চালু/বন্ধ" সুইচ বসায়
- *     (madrasas/{id}.finalResultEnabled; ফিল্ড না থাকলে চালু ধরা হয়)
- *
- * হিসাব:
- *   প্রতি সেমিস্টারের নম্বর = সেমিস্টারের শতাংশ × ওজন (২৫/২৫/৫০), সর্বমোট = তিনটির যোগফল (১০০-এর মধ্যে)
- *   সর্বমোট জিপিএ = ১ম জিপিএ × ২৫% + ২য় জিপিএ × ২৫% + ৩য় জিপিএ × ৫০%
- *   গ্রেড = সর্বমোট জিপিএ থেকে (শুধু ৩য় সেমিস্টারে ফেল বিষয় থাকলে F; ১ম/২য়তে ফেল থাকলেও F হয় না)
- *   অবস্থান = শ্রেণির মধ্যে: জিপিএ, তারপর সর্বমোট নম্বর, তারপর রোল (ফেল করলে অবস্থান নেই)
- *   অবস্থান ৩য় সেমিস্টারের ডকুমেন্টে finalMeritRank/finalMeritTotal নামে জমা থাকে,
- *   শিক্ষক "অবস্থান হালনাগাদ করুন" বাটন চাপলে পুরো শ্রেণির জন্য হিসাব হয়ে জমা হয়।
+ * হিসাবের নিয়ম:
+ *  - সেমিস্টারের নম্বর = প্রাপ্ত নম্বর × ওয়েটেজ (যেমন ৭৫০ × ২৫% = ১৮৭.৫)
+ *  - সর্বমোট নম্বর = তিন সেমিস্টারের ওয়েটেড নম্বরের যোগফল (শুধু সংখ্যাটি দেখায়, "/পূর্ণমান" নয়)
+ *  - সেমিস্টারের জিপিএ × ওয়েটেজ, তিনটির যোগফল = সর্বমোট জিপিএ
+ *  - গ্রেড: জিপিএ থেকে; F হয় শুধু ৩য় সেমিস্টারে কোনো বিষয়ে ফেল করলে
+ *  - অবস্থান: চূড়ান্ত জিপিএ → সর্বমোট নম্বর → রোল (শ্রেণি অনুযায়ী), "চূড়ান্ত মেধাক্রম হালনাগাদ" বাটনে হিসাব হয়
+ *  - সেমিস্টার চেনা পরীক্ষার নামের লেখার ওপর নির্ভর করে না: অ্যাডমিন শিক্ষাবর্ষ অনুযায়ী
+ *    কোন পরীক্ষা ১ম/২য়/৩য় তা "সেমিস্টার নির্ধারণ" থেকে ঠিক করেন (না করলে ওই শিক্ষাবর্ষের
+ *    প্রথম তিনটি পরীক্ষা তারিখ অনুযায়ী ধরা হয়)
+ *  - সুপার অ্যাডমিন সুপার অ্যাডমিন ট্যাবে প্রতিটি মাদ্রাসার জন্য এই অংশ চালু/বন্ধ করেন
+ *    (madrasas/{id}.finalResultEnabled; ফাঁকা থাকলে চালু)
  */
 (function () {
   'use strict';
 
   if (typeof viewMarksheet !== 'function' || typeof computeMarksheetTotals !== 'function' || typeof db === 'undefined') {
-    console.error('[final-result] app.js এর পরে এই ফাইলটি লোড করুন (index.html এ সবার শেষে)।');
+    console.error('[final-result] app.js এর পরে এই ফাইল লোড করুন।');
     return;
   }
 
-  const WEIGHTS = { 1: 25, 2: 25, 3: 50 };
-  const DIGITS = '০১২৩৪৫৬৭৮৯';
-  const bn = n => toBanglaNumeral(n);
-  const num = n => bn((Math.round(n * 100) / 100).toFixed(2));
-  const normYear = s => String(s == null ? '' : s).replace(/[০-৯]/g, d => DIGITS.indexOf(d)).trim();
+  const WEIGHTS = [0.25, 0.25, 0.5];
+  const WLABEL = ['২৫%', '২৫%', '৫০%'];
+  const SEMS = ['১ম সেমিস্টার', '২য় সেমিস্টার', '৩য় সেমিস্টার'];
+  const bn = toBanglaNumeral;
+  const r2 = v => Math.round((Number(v) + 1e-9) * 100) / 100;
+  const num = v => bn(String(r2(v)));
+  const gpaTxt = v => bn(r2(v).toFixed(2));
+  const yk = y => y || '_';
+  const enabled = () => !(appSettings && appSettings.finalResultEnabled === false);
+  const isAdmin = () => !!(myTeacherIsAdmin || isSuperAdminUser);
+  const el = id => document.getElementById(id);
 
-  // ---------- সেমিস্টার চেনা ----------
-  // "১ম সেমিস্টার", "২য় সেমিস্টার পরীক্ষা ২০২৬", "পরীক্ষা: ৩য় সেমিস্টার", "প্রথম সেমিস্টার", "সেমিস্টার ৩",
-  // "1st Semester" ইত্যাদি সবই চেনে। সংখ্যা/শব্দ "সেমিস্টার" শব্দের ঠিক পাশেরটি ধরা হয়,
-  // তাই বছর (২০২৬), শ্রেণি (১ম শ্রেণি) বা "পরীক্ষা" শব্দ থাকলেও গোলমাল হয় না।
-  const KW = '(?:সেমিস্টার|সেমিষ্টার|সেমেস্টার|সেমেষ্টার|semester|সেমি|সেমে)';
-  const ORD = '(প্রথম|দ্বিতীয়|তৃতীয়|first|second|third|[123](?![0-9]))';
-  const SFX = '(?:ম|\u09AF\u09BC|st|nd|rd)?';
-  const RE_BEFORE = new RegExp('(?:^|[^0-9])' + ORD + '\\s*' + SFX + '\\s*[-–:]?\\s*' + KW);
-  const RE_AFTER = new RegExp(KW + '\\s*[-–:]?\\s*' + ORD);
-  const ordNum = w => /প্রথম|first/.test(w) ? 1 : /দ্বিতীয়|second/.test(w) ? 2 : /তৃতীয়|third/.test(w) ? 3 : Number(w);
+  let current = null; // { studentId, docId, year, names, configured, count }
 
-  // "সেমিস্টার" শব্দ না থাকলেও চলে: "১ম পরীক্ষা", "২য়", "প্রথম", "3rd" ইত্যাদিও চেনা যায়।
-  const RE_ORD_WORD = /প্রথম|দ্বিতীয়|তৃতীয়|first|second|third/;
-  const RE_ORD_NUM = /(^|[^0-9])([123])\s*(?:ম|\u09AF\u09BC|st|nd|rd)(?![\u0980-\u09FFa-z])/;
-
-  function semesterOf(name) {
-    const t = String(name || '')
-      .replace(/\u09DF/g, '\u09AF\u09BC')
-      .replace(/[০-৯]/g, d => DIGITS.indexOf(d))
-      .toLowerCase();
-    const hasKw = new RegExp(KW).test(t);
-    let m;
-    if (hasKw && (m = RE_BEFORE.exec(t) || RE_AFTER.exec(t))) return ordNum(m[1]);
-    const w = t.match(RE_ORD_WORD);
-    if (w) return ordNum(w[0]);
-    m = RE_ORD_NUM.exec(t);
-    if (m) return Number(m[2]);
-    if (hasKw) { m = t.match(/(^|[^0-9])([123])(?![0-9])/); if (m) return Number(m[2]); }
-    return 0;
-  }
-
-  // একই শিক্ষাবর্ষে একই সেমিস্টারের একাধিক থাকলে সর্বশেষটি।
-  // নাম থেকে তিনটি সেমিস্টার না মিললে, শিক্ষার্থীর ওই শিক্ষাবর্ষে ঠিক ৩টি পরীক্ষা থাকলে
-  // সেগুলো তারিখের ক্রমে ১ম, ২য়, ৩য় ধরা হয় (তারিখ মিললে নামের ক্রমে)।
-  function pick(list) {
-    const by = {};
+  // ---------- সেমিস্টার নির্ধারণ ----------
+  function pickExams(list, year) {
+    const cfgAll = appSettings && appSettings.finalResultExams;
+    const cfg = cfgAll && cfgAll[yk(year)];
+    if (Array.isArray(cfg) && cfg.length === 3) return { names: cfg.slice(), configured: true, count: 3 };
+    const first = {};
     list.forEach(r => {
-      const k = semesterOf(r.examName);
-      if (!k) return;
-      if (!by[k] || String(r.date || '') > String(by[k].date || '')) by[k] = r;
+      const d = r.date || '';
+      if (!(r.examName in first) || d < first[r.examName]) first[r.examName] = d;
     });
-    if (by[1] && by[2] && by[3]) return by;
-    if (list.length === 3) {
-      const sorted = list.slice().sort((x, y) =>
-        String(x.date || '').localeCompare(String(y.date || '')) || String(x.examName || '').localeCompare(String(y.examName || ''), 'bn'));
-      return { 1: sorted[0], 2: sorted[1], 3: sorted[2] };
+    const all = Object.keys(first).sort((a, b) => first[a].localeCompare(first[b]) || a.localeCompare(b, 'bn'));
+    return { names: all.slice(0, 3), configured: false, count: all.length };
+  }
+
+  // ---------- হিসাব ----------
+  function model(rs) {
+    const sems = rs.map(r => r ? { r, t: computeMarksheetTotals(r.subjects) } : null);
+    const m = { sems, complete: sems.every(Boolean) };
+    m.rows = sems.map((s, i) => s ? { marks: s.t.totalObtained * WEIGHTS[i], gpa: Number(s.t.gpa) * WEIGHTS[i] } : null);
+    if (m.complete) {
+      m.marks = m.rows.reduce((a, x) => a + x.marks, 0);
+      m.gpa = r2(m.rows.reduce((a, x) => a + x.gpa, 0));
+      m.full = sems.reduce((a, s, i) => a + s.t.totalFull * WEIGHTS[i], 0);
+      m.percent = m.full > 0 ? (m.marks / m.full) * 100 : 0;
+      m.failed = sems[2].t.hasFailedSubject; // শুধু ৩য় সেমিস্টারের ফেল ধরা হয়
+      const g = gradeFromAvgGpa(m.gpa);
+      m.grade = m.failed ? 'F' : (g === 'F' ? 'D' : g);
     }
-    return by;
+    return m;
   }
 
-  function calcFinal(by) {
-    const rows = [1, 2, 3].map(k => {
-      const r = by[k], w = WEIGHTS[k];
-      if (!r) return { k, w, has: false };
-      const t = computeMarksheetTotals(r.subjects);
-      const pct = t.totalFull > 0 ? t.totalObtained / t.totalFull * 100 : 0;
-      return { k, w, has: true, marks: pct * w / 100, gpa: Number(t.gpa), failed: t.hasFailedSubject, exam: r.examName || '' };
-    });
-    if (rows.some(x => !x.has)) return { rows, complete: false };
-    const marks = rows.reduce((s, x) => s + x.marks, 0);
-    const gpa = rows.reduce((s, x) => s + x.gpa * x.w / 100, 0);
-    const failed = rows[2].failed; // শুধু ৩য় সেমিস্টারে ফেল থাকলে F
-    return { rows, complete: true, marks, gpa, failed, grade: failed ? 'F' : gradeFromAvgGpa(Math.round(gpa * 100) / 100) };
-  }
+  // ---------- HTML ----------
+  function boxHtml(m, ctx) {
+    const td = 'padding:8px 10px;border:1px solid #e5e7eb;';
+    const names = ctx.names;
+    const rows = [0, 1, 2].map(i => {
+      const s = m.sems[i], row = m.rows[i];
+      const label = esc(SEMS[i]) + ' (' + WLABEL[i] + ')';
+      if (!s) {
+        return `<tr>
+          <td style="${td}">${label}<div class="muted" style="font-size:11px;">${names[i] ? esc(names[i]) + ': ' : ''}ফলাফল পাওয়া যায়নি</div></td>
+          <td style="${td}text-align:center;">–</td><td style="${td}text-align:center;">–</td></tr>`;
+      }
+      return `<tr>
+        <td style="${td}">${label}<div class="muted" style="font-size:11px;">${esc(names[i])}: প্রাপ্ত ${esc(bn(s.t.totalObtained))}/${esc(bn(s.t.totalFull))}, জিপিএ ${esc(bn(s.t.gpa))}</div></td>
+        <td style="${td}text-align:center;"><b>${esc(num(row.marks))}</b></td>
+        <td style="${td}text-align:center;">${esc(gpaTxt(row.gpa))}</td></tr>`;
+    }).join('');
 
-  // ---------- মার্কশিটের নিচে অংশটি বসানো ----------
-  let tok = 0;
-  let cur = null;
+    const totalRow = `<tr style="background:#f3f4f6;">
+      <td style="${td}"><b>সর্বমোট (১০০%)</b></td>
+      <td style="${td}text-align:center;"><b>${m.complete ? esc(num(m.marks)) : '–'}</b></td>
+      <td style="${td}text-align:center;"><b>${m.complete ? esc(gpaTxt(m.gpa)) : '–'}</b></td></tr>`;
 
-  function cardHtml(c) {
-    const f = c.f;
-    const isTeacher = role === 'teacher';
-    const th = 'padding:8px 10px;border:1px solid #e5e7eb;';
-    const rows = f.rows.map((x, i) => `
-      <tr style="background:${i % 2 === 0 ? '#fff' : '#fafafa'};">
-        <td style="${th}">${esc(banglaOrdinal(x.k))} সেমিস্টার <span class="muted">(${bn(x.w)}%)</span>${x.has && x.exam ? `<div class="muted" style="font-size:11px;">${esc(x.exam)}</div>` : ''}</td>
-        <td style="${th}text-align:center;">${x.has ? num(x.marks) + ' / ' + bn(x.w) : '—'}</td>
-        <td style="${th}text-align:center;">${x.has ? num(x.gpa) : '—'}</td>
-      </tr>`).join('');
-    const totalRow = f.complete ? `
-      <tr style="background:#f3f4f6;">
-        <td style="${th}"><b>সর্বমোট (১০০%)</b></td>
-        <td style="${th}text-align:center;"><b>${num(f.marks)} / ${bn(100)}</b></td>
-        <td style="${th}text-align:center;"><b>${num(f.gpa)}</b></td>
-      </tr>` : '';
-
-    let tail;
-    if (f.complete) {
-      const gc = gradeColor(f.grade);
-      const r3 = c.by[3] || {};
-      const rank = (!f.failed && r3.finalMeritRank)
-        ? esc(banglaOrdinal(r3.finalMeritRank)) + (r3.finalMeritTotal ? ' / ' + esc(bn(r3.finalMeritTotal)) : '')
-        : '—';
-      tail = `
-        <div style="display:flex;gap:10px;margin-top:12px;flex-wrap:wrap;">
-          <div style="flex:1;min-width:90px;background:${gc.bg};border-radius:10px;padding:10px;text-align:center;">
-            <div class="muted" style="font-size:11px;">গ্রেড</div>
-            <div style="font-size:18px;font-weight:bold;color:${gc.fg};">${esc(f.grade)}</div>
-            ${f.failed ? '<div style="font-size:10px;color:#991b1b;font-weight:bold;margin-top:2px;">(অকৃতকার্য)</div>' : ''}
-          </div>
-          <div style="flex:1;min-width:90px;background:#fce7f3;border-radius:10px;padding:10px;text-align:center;">
-            <div class="muted" style="font-size:11px;">অবস্থান</div>
-            <div style="font-size:18px;font-weight:bold;color:#9d174d;">${rank}</div>
-          </div>
+    let stats = '';
+    if (m.complete) {
+      const gc = gradeColor(m.grade);
+      const r3 = m.sems[2].r;
+      const rankTxt = (!m.failed && r3.finalRank)
+        ? esc(banglaOrdinal(r3.finalRank)) + (r3.finalRankTotal ? ' / ' + esc(bn(r3.finalRankTotal)) : '')
+        : '–';
+      stats = `<div style="display:flex;gap:10px;margin-top:12px;flex-wrap:wrap;">
+        <div style="flex:1;min-width:90px;background:#eef2ff;border-radius:10px;padding:10px;text-align:center;">
+          <div class="muted" style="font-size:11px;">শতাংশ</div>
+          <div style="font-size:18px;font-weight:bold;color:#3730a3;">${esc(num(m.percent))}%</div>
         </div>
-        ${isTeacher ? `<div class="no-print" style="margin-top:10px;">
-          <button class="small secondary" onclick="frUpdateRanks()">অবস্থান হালনাগাদ করুন</button>
-          <p class="muted" style="font-size:12px;margin:6px 0 0;">এই শ্রেণির সবার চূড়ান্ত অবস্থান হিসাব করে জমা হবে, তখন শিক্ষার্থীরাও দেখতে পাবে। মার্কশিট বদলালে আবার চাপুন।</p>
-        </div>` : ''}`;
+        <div style="flex:1;min-width:90px;background:${gc.bg};border-radius:10px;padding:10px;text-align:center;">
+          <div class="muted" style="font-size:11px;">গ্রেড</div>
+          <div style="font-size:18px;font-weight:bold;color:${gc.fg};">${esc(m.grade)}</div>
+          ${m.failed ? '<div style="font-size:10px;color:#991b1b;font-weight:bold;margin-top:2px;">(অকৃতকার্য)</div>' : ''}
+        </div>
+        <div style="flex:1;min-width:90px;background:#fce7f3;border-radius:10px;padding:10px;text-align:center;">
+          <div class="muted" style="font-size:11px;">অবস্থান</div>
+          <div style="font-size:18px;font-weight:bold;color:#9d174d;">${rankTxt}</div>
+        </div>
+      </div>`;
     } else {
-      const missing = f.rows.filter(x => !x.has).map(x => banglaOrdinal(x.k) + ' সেমিস্টার').join(', ');
-      tail = `<p class="muted" style="margin-top:10px;font-size:13px;">চূড়ান্ত ফলাফলের জন্য ${esc(missing)}-এর ${isTeacher ? 'মার্কশিট (একই শিক্ষাবর্ষে)' : 'প্রকাশিত মার্কশিট'} দরকার।</p>`;
+      stats = '<p class="muted" style="margin-top:10px;font-size:12px;text-align:center;">তিনটি সেমিস্টারের ফলাফল যুক্ত হলে সর্বমোট, গ্রেড ও অবস্থান দেখাবে।</p>';
     }
 
-    return `
-      <hr style="border:none;border-top:1px solid #eee;margin:0 0 12px;">
-      <div style="font-weight:bold;font-size:16px;text-align:center;margin-bottom:8px;">পরীক্ষার চূড়ান্ত ফলাফল</div>
+    const isT = (typeof role !== 'undefined' && role === 'teacher');
+    const hint = (isT && isAdmin() && !ctx.configured && ctx.count > 3)
+      ? '<p class="muted no-print" style="font-size:12px;color:#b45309;">এই শিক্ষাবর্ষে তিনটির বেশি পরীক্ষা আছে। কোনটি ১ম/২য়/৩য় সেমিস্টার তা "সেমিস্টার নির্ধারণ" থেকে ঠিক করে দিন।</p>' : '';
+    const ctrl = isT ? `<div class="no-print" style="margin-top:10px;display:flex;gap:8px;flex-wrap:wrap;">
+        <button class="small secondary" onclick="frRecomputeRanks()">চূড়ান্ত মেধাক্রম হালনাগাদ</button>
+        ${isAdmin() ? '<button class="small secondary" onclick="frOpenConfig()">সেমিস্টার নির্ধারণ</button>' : ''}
+      </div><div id="frPanel" class="no-print"></div>` : '';
+
+    return `<div id="finalResultBox" style="margin-top:18px;padding-top:14px;border-top:2px solid #e5e7eb;">
+      <h3 style="text-align:center;margin:0 0 8px;font-size:16px;">পরীক্ষার চূড়ান্ত ফলাফল</h3>
       <table style="width:100%;border-collapse:collapse;">
-        <thead>
-          <tr style="background:#eef2ff;">
-            <th style="${th}text-align:left;">পরীক্ষা</th>
-            <th style="${th}">নম্বর</th>
-            <th style="${th}">জিপিএ</th>
-          </tr>
-        </thead>
+        <thead><tr style="background:#eef2ff;">
+          <th style="${td}text-align:left;">পরীক্ষা</th><th style="${td}">নম্বর</th><th style="${td}">জিপিএ</th>
+        </tr></thead>
         <tbody>${rows}${totalRow}</tbody>
       </table>
-      ${tail}
-      <p class="muted" style="font-size:11.5px;margin-top:8px;">নম্বর = সেমিস্টারের শতাংশ × ওজন। জিপিএ = তিন সেমিস্টারের জিপিএ ২৫%, ২৫% ও ৫০% ওজনে গড়।</p>`;
+      ${stats}${hint}${ctrl}
+    </div>`;
   }
 
-  function mount(area, c) {
-    cur = c;
-    let box = area.querySelector('#frBox');
-    if (!box) {
-      const anchor = area.querySelector('.no-print');
-      const h = '<div id="frBox" style="margin-top:18px;"></div>';
-      if (anchor) anchor.insertAdjacentHTML('beforebegin', h); else area.insertAdjacentHTML('beforeend', h);
-      box = area.querySelector('#frBox');
-    }
-    if (box) box.innerHTML = cardHtml(c);
+  // ---------- মার্কশিটে বসানো ----------
+  function loadCtx(studentId, year) {
+    let q = db.collection('results').where('studentId', '==', studentId);
+    if (typeof role !== 'undefined' && role === 'teacher') q = q.where('madrasaId', '==', madrasaId);
+    else q = q.where('published', '==', true);
+    return q.get().then(snap => {
+      const list = snap.docs.map(d => Object.assign({ id: d.id }, d.data()))
+        .filter(r => (r.academicYear || '') === year && Array.isArray(r.subjects) && r.subjects.length);
+      const pick = pickExams(list, year);
+      const byName = {};
+      list.forEach(r => { byName[r.examName] = r; });
+      return { list, names: pick.names, configured: pick.configured, count: pick.count, byName };
+    });
   }
 
-  function loadCard(studentId, docId) {
-    return db.collection('results').doc(docId).get().then(doc => {
-      if (!doc.exists) return null;
-      const r = doc.data();
-      const year = normYear(r.academicYear);
-      let q = db.collection('results');
-      q = role === 'teacher'
-        ? q.where('madrasaId', '==', madrasaId).where('studentId', '==', studentId)
-        : q.where('studentId', '==', studentId).where('published', '==', true);
-      return q.get().then(snap => {
-        const list = snap.docs.map(d => Object.assign({ _id: d.id }, d.data()))
-          .filter(x => normYear(x.academicYear) === year && Array.isArray(x.subjects) && x.subjects.length);
-        const by = pick(list);
-        // শুধু ৩য় সেমিস্টারের মার্কশিটের নিচে দেখানো হবে
-        const isThird = semesterOf(r.examName) === 3 || (by[3] && by[3]._id === docId);
-        if (!isThird) return null;
-        return { studentId, docId, year, by, f: calcFinal(by) };
+  function inject(p) {
+    if (!enabled()) return;
+    db.collection('results').doc(p.docId).get().then(doc => {
+      if (!doc.exists) return;
+      const cur = doc.data();
+      if (!Array.isArray(cur.subjects) || !cur.subjects.length) return;
+      const year = cur.academicYear || '';
+      return loadCtx(p.studentId, year).then(ctx => {
+        if (ctx.names.indexOf(cur.examName) === -1) return; // এই পরীক্ষা তিন সেমিস্টারের মধ্যে নয়
+        const area = el('marksheetPrintArea');
+        if (!area || el('finalResultBox')) return;
+        const m = model([0, 1, 2].map(i => ctx.byName[ctx.names[i]] || null));
+        current = { studentId: p.studentId, docId: p.docId, year, names: ctx.names, configured: ctx.configured, count: ctx.count };
+        const anchor = area.querySelector('.no-print');
+        const html = boxHtml(m, ctx);
+        if (anchor) anchor.insertAdjacentHTML('beforebegin', html);
+        else area.insertAdjacentHTML('beforeend', html);
       });
-    });
+    }).catch(e => { if (typeof showDiagBanner === 'function') showDiagBanner('চূড়ান্ত ফলাফল লোড ব্যর্থ: ' + e.message); });
   }
 
-  function attach(studentId, docId) {
-    const my = ++tok;
-    if (typeof appSettings !== 'undefined' && appSettings && appSettings.finalResultEnabled === false) return;
-    loadCard(studentId, docId).then(c => {
-      if (!c || my !== tok) return;
-      let n = 0;
-      const iv = setInterval(() => {
-        if (my !== tok) { clearInterval(iv); return; }
-        const area = document.getElementById('marksheetPrintArea');
-        if (area) { clearInterval(iv); mount(area, c); }
-        else if (++n > 80) clearInterval(iv);
-      }, 100);
-    }).catch(e => {
-      console.error('[final-result]', e);
-      if (typeof showDiagBanner === 'function') showDiagBanner('চূড়ান্ত ফলাফল লোড এরর: ' + (e && e.code ? e.code + ' ' : '') + (e && e.message));
-    });
-  }
-
+  let pending = null;
   const origView = window.viewMarksheet;
   window.viewMarksheet = function (studentId, docId) {
-    const ret = origView.apply(this, arguments);
-    try { attach(studentId, docId); } catch (e) { console.error('[final-result]', e); }
-    return ret;
+    pending = { studentId, docId };
+    return origView.apply(this, arguments);
   };
 
-  // ---------- শ্রেণির সবার অবস্থান হিসাব ও জমা (শুধু শিক্ষক) ----------
-  window.frUpdateRanks = function () {
-    const c = cur;
-    if (!c || role !== 'teacher') return;
-    const me = studentsCache.find(s => s.id === c.studentId);
-    if (!me || !me.className) return alert('শিক্ষার্থীর শ্রেণি পাওয়া যায়নি');
-    if (!confirm(me.className + ' শ্রেণির সবার চূড়ান্ত অবস্থান হিসাব করে জমা করা হবে। এগিয়ে যাবেন?')) return;
-
-    db.collection('results').where('madrasaId', '==', madrasaId).get().then(snap => {
-      const byStu = {};
-      snap.docs.forEach(d => {
-        const r = Object.assign({ _id: d.id }, d.data());
-        if (normYear(r.academicYear) !== c.year) return;
-        if (!Array.isArray(r.subjects) || !r.subjects.length) return;
-        (byStu[r.studentId] = byStu[r.studentId] || []).push(r);
-      });
-      const list = studentsCache.filter(s => s.className === me.className).map(s => {
-        const by = pick(byStu[s.id] || []);
-        return { s, by, f: calcFinal(by) };
-      });
-      const pass = list.filter(x => x.f.complete && !x.f.failed).sort((a, b) => {
-        const ga = Math.round(a.f.gpa * 100), gb = Math.round(b.f.gpa * 100);
-        if (gb !== ga) return gb - ga;
-        const ma = Math.round(a.f.marks * 100), mb = Math.round(b.f.marks * 100);
-        if (mb !== ma) return mb - ma;
-        return meritRollCompare(a.s.roll, b.s.roll);
-      });
-      const FV = firebase.firestore.FieldValue;
-      const ops = [];
-      list.forEach(x => {
-        if (!x.by[3]) return;
-        const ref = db.collection('results').doc(x.by[3]._id);
-        const idx = pass.indexOf(x);
-        ops.push(idx > -1
-          ? [ref, { finalMeritRank: idx + 1, finalMeritTotal: pass.length }]
-          : [ref, { finalMeritRank: FV.delete(), finalMeritTotal: FV.delete() }]);
-      });
-      const commits = [];
-      for (let i = 0; i < ops.length; i += 400) {
-        const batch = db.batch();
-        ops.slice(i, i + 400).forEach(o => batch.update(o[0], o[1]));
-        commits.push(batch.commit());
+  (function watch() {
+    const app = el('app');
+    if (!app) { setTimeout(watch, 200); return; }
+    new MutationObserver(() => {
+      if (pending && el('marksheetPrintArea') && !el('finalResultBox')) {
+        const p = pending; pending = null;
+        inject(p);
       }
-      return Promise.all(commits).then(() => pass.length);
-    }).then(n => {
-      alert('চূড়ান্ত অবস্থান হালনাগাদ হয়েছে (উত্তীর্ণ ' + bn(n) + ' জন)');
-      return loadCard(c.studentId, c.docId).then(nc => {
-        const area = document.getElementById('marksheetPrintArea');
-        if (nc && area) mount(area, nc);
+    }).observe(app, { childList: true });
+  })();
+
+  // ---------- সেমিস্টার নির্ধারণ (অ্যাডমিন) ----------
+  window.frOpenConfig = function () {
+    if (!current || !isAdmin()) return;
+    const panel = el('frPanel');
+    if (!panel) return;
+    panel.innerHTML = '<p class="muted">পরীক্ষার তালিকা লোড হচ্ছে...</p>';
+    db.collection('results').where('madrasaId', '==', madrasaId).get().then(snap => {
+      const first = {};
+      snap.docs.forEach(d => {
+        const r = d.data();
+        if ((r.academicYear || '') !== current.year || !r.examName) return;
+        const dt = r.date || '';
+        if (!(r.examName in first) || dt < first[r.examName]) first[r.examName] = dt;
       });
-    }).catch(e => {
-      alert('হালনাগাদ ব্যর্থ: ' + e.message);
-      if (typeof showDiagBanner === 'function') showDiagBanner('চূড়ান্ত অবস্থান হালনাগাদ ব্যর্থ: ' + e.message);
-    });
+      const list = Object.keys(first).sort((a, b) => first[a].localeCompare(first[b]) || a.localeCompare(b, 'bn'));
+      if (list.length < 3) { panel.innerHTML = '<p class="muted">এই শিক্ষাবর্ষে অন্তত তিনটি পরীক্ষার মার্কশিট থাকলে নির্ধারণ করা যাবে।</p>'; return; }
+      const sel = i => {
+        const chosen = current.names[i] || list[i];
+        return `<label style="font-size:12px;">${esc(SEMS[i])} (${WLABEL[i]})</label>
+          <select id="frSel${i}">${list.map(n => `<option value="${esc(n)}"${n === chosen ? ' selected' : ''}>${esc(n)}</option>`).join('')}</select>`;
+      };
+      panel.innerHTML = `<div style="margin-top:10px;padding:10px;border:1px solid #e5e7eb;border-radius:10px;">
+        <p class="muted" style="margin:0 0 6px;font-size:12px;">শিক্ষাবর্ষ ${esc(current.year || '-')} এর জন্য:</p>
+        ${sel(0)}${sel(1)}${sel(2)}
+        <p id="frCfgErr" class="muted" style="color:#dc2626;"></p>
+        <button class="small" onclick="frSaveConfig()">সংরক্ষণ করুন</button>
+      </div>`;
+    }).catch(e => { panel.innerHTML = '<p class="muted">লোড ব্যর্থ: ' + esc(e.message) + '</p>'; });
   };
 
-  // ---------- সুপার অ্যাডমিন: প্রতিটি মাদ্রাসার পাশে চালু/বন্ধ সুইচ ----------
-  let frUnsub = null;
-  const frState = {}; // মাদ্রাসার id -> চালু আছে কিনা
+  window.frSaveConfig = function () {
+    if (!current || !isAdmin()) return;
+    const names = [0, 1, 2].map(i => { const s = el('frSel' + i); return s ? s.value : ''; });
+    const err = el('frCfgErr');
+    if (names.some(n => !n) || new Set(names).size !== 3) { if (err) err.textContent = 'তিনটি সেমিস্টারে তিনটি আলাদা পরীক্ষা বাছুন'; return; }
+    const patch = { finalResultExams: {} };
+    patch.finalResultExams[yk(current.year)] = names;
+    db.collection('madrasas').doc(madrasaId).set(patch, { merge: true }).then(() => {
+      appSettings.finalResultExams = Object.assign({}, appSettings.finalResultExams || {}, patch.finalResultExams);
+      window.viewMarksheet(current.studentId, current.docId);
+    }).catch(e => { if (err) err.textContent = 'সংরক্ষণ ব্যর্থ: ' + e.message; });
+  };
 
-  function frToggle(id) {
-    const on = frState[id] !== false;
-    if (!confirm(on
-      ? 'এই মাদ্রাসার মার্কশিটে "চূড়ান্ত ফলাফল" অংশ বন্ধ করতে চান?'
-      : 'এই মাদ্রাসার মার্কশিটে "চূড়ান্ত ফলাফল" অংশ চালু করতে চান?')) return;
-    db.collection('madrasas').doc(id).set({ finalResultEnabled: !on }, { merge: true })
-      .catch(e => { alert('আপডেট ব্যর্থ: ' + e.message); if (typeof showDiagBanner === 'function') showDiagBanner('চূড়ান্ত ফলাফল সুইচ ব্যর্থ: ' + e.message); });
-  }
+  // ---------- চূড়ান্ত মেধাক্রম (অবস্থান) ----------
+  window.frRecomputeRanks = function () {
+    if (!current || typeof role === 'undefined' || role !== 'teacher') return;
+    if (current.names.length < 3) { alert('আগে তিনটি সেমিস্টার নির্ধারণ করুন'); return; }
+    if (!confirm('এই শিক্ষাবর্ষের সব শ্রেণির চূড়ান্ত অবস্থান নতুন করে হিসাব হবে। এগিয়ে যাবেন?')) return;
+    const names = current.names, year = current.year;
+    Promise.all(names.map(n => db.collection('results').where('madrasaId', '==', madrasaId).where('examName', '==', n).get()))
+      .then(snaps => {
+        const per = {};
+        snaps.forEach((snap, i) => snap.docs.forEach(d => {
+          const r = d.data();
+          if ((r.academicYear || '') !== year || !Array.isArray(r.subjects) || !r.subjects.length) return;
+          (per[r.studentId] = per[r.studentId] || [null, null, null])[i] = Object.assign({ id: d.id }, r);
+        }));
+        const groups = {}, ops = [];
+        const del = firebase.firestore.FieldValue.delete();
+        Object.keys(per).forEach(sid => {
+          const rs = per[sid], st = studentsCache.find(s => s.id === sid), m = model(rs);
+          if (m.complete && !m.failed && st && st.className) {
+            (groups[st.className] = groups[st.className] || []).push({ m, roll: st.roll, id3: rs[2].id });
+          } else if (rs[2]) {
+            ops.push({ id: rs[2].id, data: { finalRank: del, finalRankTotal: del } });
+          }
+        });
+        Object.keys(groups).forEach(c => {
+          const list = groups[c].sort((a, b) => (b.m.gpa - a.m.gpa) || (b.m.marks - a.m.marks) || meritRollCompare(a.roll, b.roll));
+          list.forEach((x, idx) => ops.push({ id: x.id3, data: { finalRank: idx + 1, finalRankTotal: list.length } }));
+        });
+        const commits = [];
+        for (let i = 0; i < ops.length; i += 400) {
+          const batch = db.batch();
+          ops.slice(i, i + 400).forEach(o => batch.update(db.collection('results').doc(o.id), o.data));
+          commits.push(batch.commit());
+        }
+        return Promise.all(commits);
+      })
+      .then(() => { alert('চূড়ান্ত মেধাক্রম হালনাগাদ হয়েছে'); window.viewMarksheet(current.studentId, current.docId); })
+      .catch(e => { alert('হালনাগাদ ব্যর্থ: ' + e.message); if (typeof showDiagBanner === 'function') showDiagBanner('চূড়ান্ত মেধাক্রম ব্যর্থ: ' + e.message); });
+  };
 
-  function frPaint() {
-    const wrap = document.getElementById('madrasasListWrap');
+  // ---------- সুপার অ্যাডমিন: মাদ্রাসাভিত্তিক চালু/বন্ধ ----------
+  let flags = {}, flagUnsub = null, listObs = null;
+
+  function paintToggles() {
+    const wrap = el('madrasasListWrap');
     if (!wrap) return;
     wrap.querySelectorAll('.student-row').forEach(row => {
+      if (row.querySelector('.frToggle')) return;
       const b = row.querySelector('button[onclick*="toggleMadrasaActive"]');
-      if (!b) return;
-      const m = /toggleMadrasaActive\('((?:[^'\\]|\\.)*)'/.exec(b.getAttribute('onclick') || '');
+      const m = b && (b.getAttribute('onclick') || '').match(/toggleMadrasaActive\('([^']*)'/);
       if (!m) return;
-      const id = m[1].replace(/\\(.)/g, '$1');
-      const known = Object.prototype.hasOwnProperty.call(frState, id);
-      const on = frState[id] !== false;
-      const sig = id + '|' + known + '|' + on;
-      let box = row.querySelector('.fr-sw');
-      if (!box) {
-        box = document.createElement('div');
-        box.className = 'fr-sw';
-        box.style.cssText = 'margin-top:8px;display:flex;align-items:center;gap:8px;flex-wrap:wrap;';
-        row.appendChild(box);
-      }
-      if (box.dataset.sig === sig) return;
-      box.dataset.sig = sig;
-      box.innerHTML = '';
-      const label = document.createElement('span');
-      label.className = 'muted';
-      label.style.fontSize = '13px';
-      label.textContent = 'মার্কশিটে চূড়ান্ত ফলাফল:';
-      const badge = document.createElement('span');
-      badge.className = 'badge ' + (on ? 'present' : 'absent');
-      badge.textContent = on ? 'চালু' : 'বন্ধ';
-      const btn = document.createElement('button');
-      btn.className = 'small secondary';
-      btn.textContent = on ? 'বন্ধ করুন' : 'চালু করুন';
-      btn.onclick = () => frToggle(id);
-      box.appendChild(label); box.appendChild(badge); box.appendChild(btn);
+      const on = flags[m[1]] !== false;
+      const box = document.createElement('div');
+      box.className = 'frToggle';
+      box.style.marginTop = '6px';
+      box.innerHTML = `<button class="small ${on ? '' : 'secondary'}" onclick="frToggleMadrasa('${jsq(m[1])}', ${on})">চূড়ান্ত ফলাফল: ${on ? 'চালু' : 'বন্ধ'}</button>`;
+      row.appendChild(box);
     });
   }
 
-  function frSync() {
-    const wrap = document.getElementById('madrasasListWrap');
-    if (!wrap || typeof isSuperAdminUser === 'undefined' || !isSuperAdminUser) {
-      if (frUnsub) { frUnsub(); frUnsub = null; }
-      return;
-    }
-    if (!frUnsub) {
-      frUnsub = db.collection('madrasas').onSnapshot(snap => {
-        snap.docs.forEach(d => { frState[d.id] = d.data().finalResultEnabled !== false; });
-        frPaint();
-      }, err => console.error('[final-result] madrasas', err));
-    }
-    frPaint();
+  function stopFlags() {
+    if (flagUnsub) { flagUnsub(); flagUnsub = null; }
+    if (listObs) { listObs.disconnect(); listObs = null; }
   }
 
-  const appEl = document.getElementById('app');
-  if (appEl && window.MutationObserver) {
-    let queued = false;
-    new MutationObserver(() => {
-      if (queued) return;
-      queued = true;
-      requestAnimationFrame(() => { queued = false; frSync(); });
-    }).observe(appEl, { childList: true, subtree: true });
+  const origListen = window.listenMadrasasList;
+  if (typeof origListen === 'function') {
+    window.listenMadrasasList = function () {
+      const r = origListen.apply(this, arguments);
+      stopFlags();
+      flagUnsub = db.collection('madrasas').onSnapshot(snap => {
+        flags = {};
+        snap.docs.forEach(d => { flags[d.id] = d.data().finalResultEnabled; });
+        const wrap = el('madrasasListWrap');
+        if (wrap) wrap.querySelectorAll('.frToggle').forEach(x => x.remove());
+        paintToggles();
+      }, () => { /* ignore */ });
+      const wrap = el('madrasasListWrap');
+      if (wrap) { listObs = new MutationObserver(paintToggles); listObs.observe(wrap, { childList: true }); }
+      return r;
+    };
   }
+  const origStop = window.stopMadrasasListener;
+  if (typeof origStop === 'function') {
+    window.stopMadrasasListener = function () { stopFlags(); return origStop.apply(this, arguments); };
+  }
+
+  window.frToggleMadrasa = function (id, currentlyOn) {
+    if (!isSuperAdminUser) { alert('এটি শুধু সুপার অ্যাডমিন পরিবর্তন করতে পারেন'); return; }
+    const msg = currentlyOn
+      ? 'এই মাদ্রাসার মার্কশিট থেকে "চূড়ান্ত ফলাফল" অংশটি বন্ধ করবেন?'
+      : 'এই মাদ্রাসার জন্য "চূড়ান্ত ফলাফল" অংশটি চালু করবেন?';
+    if (!confirm(msg)) return;
+    db.collection('madrasas').doc(id).set({ finalResultEnabled: !currentlyOn }, { merge: true })
+      .catch(e => { alert('আপডেট ব্যর্থ: ' + e.message); if (typeof showDiagBanner === 'function') showDiagBanner('চূড়ান্ত ফলাফল সুইচ ব্যর্থ: ' + e.message); });
+  };
 })();
