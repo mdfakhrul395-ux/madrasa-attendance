@@ -27,7 +27,7 @@
   const WEIGHTS = [0.25, 0.25, 0.5];
   const WLABEL = ['২৫%', '২৫%', '৫০%'];
   const SEMS = ['১ম সেমিস্টার', '২য় সেমিস্টার', '৩য় সেমিস্টার'];
-  const bn = toBanglaNumeral;
+  const bn = v => String(v); // নম্বর/জিপিএ মার্কশিটের মতো ইংরেজি সংখ্যায়
   const r2 = v => Math.round((Number(v) + 1e-9) * 100) / 100;
   const num = v => bn(String(r2(v)));
   const gpaTxt = v => bn(r2(v).toFixed(2));
@@ -97,7 +97,7 @@
       const gc = gradeColor(m.grade);
       const r3 = m.sems[2].r;
       const rankTxt = (!m.failed && r3.finalRank)
-        ? esc(banglaOrdinal(r3.finalRank)) + (r3.finalRankTotal ? ' / ' + esc(bn(r3.finalRankTotal)) : '')
+        ? esc(banglaOrdinal(r3.finalRank)) + (r3.finalRankTotal ? ' / ' + esc(toBanglaNumeral(r3.finalRankTotal)) : '')
         : '–';
       stats = `<div style="display:flex;gap:10px;margin-top:12px;flex-wrap:wrap;">
         <div style="flex:1;min-width:90px;background:#eef2ff;border-radius:10px;padding:10px;text-align:center;">
