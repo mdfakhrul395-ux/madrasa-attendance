@@ -1,4 +1,4 @@
-/* ShikkhaOS — শ্রেণি শিক্ষক নির্ধারণ (ধাপ ১)
+/* ShikkhaOS — শ্রেণি শিক্ষক নির্ধারণ (ধাপ ১) + রেজাল্ট সম্পাদনার সীমা (ধাপ ২)
  *
  * শিক্ষকগণ ট্যাবের নিচে "শ্রেণি শিক্ষক নির্ধারণ" নামে একটি কার্ড যোগ করে।
  * অ্যাডমিন সেখানে প্রতিটি শিক্ষকের পাশে তাঁর শ্রেণি বেছে দেন।
@@ -84,7 +84,7 @@
         app.insertAdjacentHTML('beforeend', `
           <div class="card">
             <h2>শ্রেণি শিক্ষক নির্ধারণ</h2>
-            <p class="muted">যে শিক্ষক যে শ্রেণির শ্রেণি শিক্ষক, তাঁর পাশে সেই শ্রেণি বেছে দিন। (পরের ধাপে শুধু শ্রেণি শিক্ষক ও অ্যাডমিন রেজাল্ট সম্পাদনা করতে পারবেন।)</p>
+            <p class="muted">যে শিক্ষক যে শ্রেণির শ্রেণি শিক্ষক, তাঁর পাশে সেই শ্রেণি বেছে দিন। (রেজাল্ট সম্পাদনা করতে পারবেন শুধু ওই শ্রেণির শ্রেণি শিক্ষক ও অ্যাডমিন; বাকিরা শুধু দেখতে পারবেন।)</p>
             <div id="classTeacherWrap">লোড হচ্ছে...</div>
           </div>`);
         load();
@@ -92,4 +92,225 @@
     }
     return r;
   };
+
+  // =====================================================================
+  //   ধাপ ২: রেজাল্ট সম্পাদনা শুধু ওই শ্রেণির শ্রেণি শিক্ষক ও অ্যাডমিনের
+  // সার্ভারে firestore.rules একই নিয়ম জোর করে; এখানে অ্যাপের ভেতরের ব্যবস্থা
+  // (বাটন লুকানো, ফর্মে শুধু নিজের শ্রেণির শিক্ষার্থী, মেধাক্রম শুধু নিজের শ্রেণির)।
+  // =====================================================================
+  const isAdminNow = () => !!((typeof myTeacherIsAdmin !== 'undefined' && myTeacherIsAdmin) ||
+                              (typeof isSuperAdminUser !== 'undefined' && isSuperAdminUser));
+  let myClass = '';          // এই শিক্ষকের শ্রেণি ('' মানে কোনো শ্রেণির শ্রেণি শিক্ষক নন)
+  let classLoaded = false;
+  let listenerUid = null;
+  let unsubMine = null;
+  let defaultFilterApplied = false;
+  let obs = null;
+
+  function stopMine() {
+    if (unsubMine) { try { unsubMine(); } catch (e) { /* ignore */ } unsubMine = null; }
+    listenerUid = null;
+  }
+
+  // নিজের teachers/{uid} ডকুমেন্ট শোনা, যাতে অ্যাডমিন শ্রেণি বদলালে অ্যাপ বন্ধ না করেই কাজ করে
+  function startMine() {
+    const u = auth.currentUser;
+    if (!u || !u.providerData || !u.providerData.length) return;
+    if (listenerUid === u.uid) return;
+    stopMine();
+    listenerUid = u.uid;
+    unsubMine = db.collection('teachers').doc(u.uid).onSnapshot(snap => {
+      const d = snap.exists ? snap.data() : {};
+      const c = typeof d.classTeacherOf === 'string' ? d.classTeacherOf : '';
+      const changed = !classLoaded || c !== myClass;
+      myClass = c;
+      classLoaded = true;
+      if (changed) onClassChanged();
+    }, err => console.error('[class-teacher] নিজের তথ্য লোড এরর', err));
+  }
+
+  function onClassChanged() {
+    if (isAdminNow()) return;
+    if (document.getElementById('resultsWrap') && typeof lastResultsIsTeacher !== 'undefined' && lastResultsIsTeacher) {
+      window.renderResultsScreen(true);
+    }
+  }
+
+  function canEditStudent(sid) {
+    if (isAdminNow()) return true;
+    if (!myClass) return false;
+    const s = studentsCache.find(x => x.id === sid);
+    return !!s && s.className === myClass;
+  }
+
+  // রেজাল্টের docId = শিক্ষার্থীর id + '_' + পরীক্ষার নাম ..., তাই শুরু দেখেই শিক্ষার্থী চেনা যায়
+  function canEditDocId(docId) {
+    if (isAdminNow()) return true;
+    const id = String(docId || '');
+    return studentsCache.some(s => canEditStudent(s.id) && id.indexOf(s.id + '_') === 0);
+  }
+
+  const DENY_MSG = 'এই শ্রেণির রেজাল্ট শুধু ওই শ্রেণির শ্রেণি শিক্ষক বা অ্যাডমিন সম্পাদনা করতে পারেন।';
+
+  function wrapGuard(name, check) {
+    const orig = window[name];
+    if (typeof orig !== 'function') return;
+    window[name] = function () {
+      if (!check.apply(null, arguments)) { alert(DENY_MSG); return; }
+      return orig.apply(this, arguments);
+    };
+  }
+  wrapGuard('editMarksheet', sid => canEditStudent(sid));
+  wrapGuard('togglePublish', docId => canEditDocId(docId));
+  wrapGuard('deleteMarksheet', docId => canEditDocId(docId));
+  wrapGuard('saveMarksheet', () => {
+    const sel = document.getElementById('resStudent');
+    return sel && sel.value ? canEditStudent(sel.value) : true;
+  });
+
+  // তালিকার প্রতিটি সারিতে যে শিক্ষার্থীর রেজাল্ট সম্পাদনা করা যাবে না, তার বাটন সরিয়ে ফেলা
+  function stripButtons() {
+    const wrap = document.getElementById('resultsWrap');
+    if (!wrap || isAdminNow()) return;
+    wrap.querySelectorAll('button[onclick]').forEach(b => {
+      const m = /^(editMarksheet|togglePublish|deleteMarksheet)\('((?:[^'\\]|\\.)*)'/.exec(b.getAttribute('onclick') || '');
+      if (!m) return;
+      const arg = m[2].replace(/\\(.)/g, '$1');
+      const ok = m[1] === 'editMarksheet' ? canEditStudent(arg) : canEditDocId(arg);
+      if (!ok) b.remove();
+    });
+  }
+
+  function watchResultsList() {
+    if (obs) { obs.disconnect(); obs = null; }
+    const wrap = document.getElementById('resultsWrap');
+    if (!wrap) return;
+    obs = new MutationObserver(stripButtons);
+    obs.observe(wrap, { childList: true, subtree: true });
+    stripButtons();
+  }
+
+  function restrictResultsUi() {
+    if (isAdminNow()) return;
+    const sel = document.getElementById('resStudent');
+    const formCard = sel ? sel.closest('.card') : null;
+    if (formCard) {
+      const mine = studentsCache.filter(s => canEditStudent(s.id) && (resultsClassFilter === 'all' || s.className === resultsClassFilter));
+      if (!mine.length) {
+        // শ্রেণি বাছাইয়ের ঘরটি (resultsFilterWrap) রেখে বাকি ফর্ম লুকানো, যাতে অন্য শ্রেণির রেজাল্ট দেখার ব্যবস্থা আটকে না যায়
+        Array.from(formCard.children).forEach(ch => {
+          if (ch.tagName !== 'H2' && ch.id !== 'resultsFilterWrap') ch.style.display = 'none';
+        });
+        const note = !classLoaded ? 'লোড হচ্ছে...'
+          : !myClass ? 'আপনাকে কোনো শ্রেণির শ্রেণি শিক্ষক করা হয়নি, তাই রেজাল্ট শুধু দেখতে পারবেন।'
+          : 'এই শ্রেণির রেজাল্ট আপনি শুধু দেখতে পারবেন। সম্পাদনা করতে পারবেন শুধু নিজের শ্রেণির (' + myClass + ')।';
+        const fw = document.getElementById('resultsFilterWrap');
+        const html = '<p class="muted" style="margin:8px 0 0;">' + esc(note) + '</p>';
+        if (fw) fw.insertAdjacentHTML('afterend', html); else formCard.insertAdjacentHTML('beforeend', html);
+      } else {
+        sel.innerHTML = mine.map(s => `<option value="${esc(s.id)}">${esc(s.name)} (${esc(s.roll || '')})</option>`).join('');
+      }
+    }
+    watchResultsList();
+  }
+
+  if (typeof renderResultsScreen === 'function') {
+    const origResults = window.renderResultsScreen;
+    window.renderResultsScreen = function (isTeacher) {
+      if (isTeacher && !isAdminNow()) {
+        startMine();
+        // শ্রেণি শিক্ষক প্রথমবার রেজাল্ট ট্যাবে এলে নিজের শ্রেণিই আগে দেখান
+        if (classLoaded && myClass && !defaultFilterApplied && resultsClassFilter === 'all') {
+          resultsClassFilter = myClass;
+          defaultFilterApplied = true;
+        }
+      }
+      const r = origResults.apply(this, arguments);
+      if (isTeacher) restrictResultsUi();
+      return r;
+    };
+  }
+
+  // ---- মেধাক্রম: অ্যাডমিন সব শ্রেণির, শ্রেণি শিক্ষক শুধু নিজের শ্রেণির ----
+  // (নইলে অন্য শ্রেণির রেজাল্টে লিখতে গিয়ে পুরো ব্যাচটাই সার্ভার ফিরিয়ে দিত)
+  function recomputeOwn(examName, academicYear) {
+    if (!examName || !myClass) return Promise.resolve();
+    return db.collection('results')
+      .where('madrasaId', '==', madrasaId)
+      .where('examName', '==', examName)
+      .get()
+      .then(snap => {
+        const list = [];
+        snap.docs.forEach(d => {
+          const r = d.data();
+          if ((r.academicYear || '') !== (academicYear || '')) return;
+          if (!Array.isArray(r.subjects) || r.subjects.length === 0) return;
+          const st = studentsCache.find(s => s.id === r.studentId);
+          if (!st || st.className !== myClass) return;
+          const t = computeMarksheetTotals(r.subjects);
+          list.push({ id: d.id, gpa: Number(t.gpa), total: t.totalObtained, roll: st.roll, failed: t.grade === 'F' });
+        });
+        const pass = list.filter(x => !x.failed).sort((a, b) =>
+          (b.gpa - a.gpa) || (b.total - a.total) || meritRollCompare(a.roll, b.roll));
+        const batch = db.batch();
+        let any = false;
+        pass.forEach((x, i) => {
+          batch.update(db.collection('results').doc(x.id), { meritRank: i + 1, meritTotal: pass.length });
+          any = true;
+        });
+        list.filter(x => x.failed).forEach(x => {
+          batch.update(db.collection('results').doc(x.id), {
+            meritRank: firebase.firestore.FieldValue.delete(),
+            meritTotal: firebase.firestore.FieldValue.delete()
+          });
+          any = true;
+        });
+        return any ? batch.commit() : undefined;
+      })
+      .catch(e => showDiagBanner('মেধাক্রম হিসাব ব্যর্থ: ' + e.message));
+  }
+
+  const origRecompute = window.recomputeMeritRanks;
+  if (typeof origRecompute === 'function') {
+    window.recomputeMeritRanks = function (examName, academicYear) {
+      return isAdminNow() ? origRecompute.apply(this, arguments) : recomputeOwn(examName, academicYear);
+    };
+  }
+
+  const origRecomputeAll = window.recomputeAllMeritRanks;
+  if (typeof origRecomputeAll === 'function') {
+    window.recomputeAllMeritRanks = function () {
+      if (isAdminNow()) return origRecomputeAll.apply(this, arguments);
+      if (!myClass) { alert('আপনি কোনো শ্রেণির শ্রেণি শিক্ষক নন।'); return; }
+      db.collection('results').where('madrasaId', '==', madrasaId).get().then(snap => {
+        const combos = {};
+        snap.docs.forEach(d => {
+          const r = d.data();
+          if (!r.examName) return;
+          combos[r.examName + '||' + (r.academicYear || '')] = { examName: r.examName, academicYear: r.academicYear || '' };
+        });
+        let chain = Promise.resolve();
+        Object.keys(combos).forEach(k => { chain = chain.then(() => recomputeOwn(combos[k].examName, combos[k].academicYear)); });
+        return chain;
+      }).then(() => alert('আপনার শ্রেণির মেধাক্রম হালনাগাদ করা হয়েছে'))
+        .catch(e => showDiagBanner('মেধাক্রম হালনাগাদ ব্যর্থ: ' + e.message));
+    };
+  }
+
+  // লগইনের পর নিজের শ্রেণি শোনা শুরু; লগআউটে বন্ধ
+  const origEnsure = window.ensureTeacherDoc;
+  if (typeof origEnsure === 'function') {
+    window.ensureTeacherDoc = function () {
+      return Promise.resolve(origEnsure.apply(this, arguments)).then(r => { startMine(); return r; });
+    };
+  }
+  const origLogout = window.logout;
+  if (typeof origLogout === 'function') {
+    window.logout = function () {
+      stopMine();
+      myClass = ''; classLoaded = false; defaultFilterApplied = false;
+      if (obs) { obs.disconnect(); obs = null; }
+      return origLogout.apply(this, arguments);
+    };
+  }
 })();

@@ -60,6 +60,22 @@ service cloud.firestore {
       return isTeacherAuth() && (isRequesterAdmin() || isSuperAdmin());
     }
 
+    // ================= শ্রেণি শিক্ষক (রেজাল্ট সম্পাদনা) =================
+    // রেজাল্ট সম্পাদনা করতে পারবেন: অ্যাডমিন/সুপার অ্যাডমিন, অথবা সংশ্লিষ্ট শিক্ষার্থীর শ্রেণির শ্রেণি শিক্ষক
+    // (teachers/{uid}.classTeacherOf == শিক্ষার্থীর className, এবং শিক্ষার্থী একই মাদ্রাসার)।
+    function myClassTeacherOf() {
+      return get(/databases/$(database)/documents/teachers/$(request.auth.uid)).data.get('classTeacherOf', '');
+    }
+
+    function canEditResultOf(studentId) {
+      return isStudentManager() ||
+        (isTeacherAuth() &&
+         myClassTeacherOf() != '' &&
+         exists(/databases/$(database)/documents/students/$(studentId)) &&
+         get(/databases/$(database)/documents/students/$(studentId)).data.madrasaId == myMadrasaId() &&
+         get(/databases/$(database)/documents/students/$(studentId)).data.get('className', null) == myClassTeacherOf());
+    }
+
     match /teachers/{uid} {
       allow read: if request.auth != null && (
         request.auth.uid == uid ||
@@ -79,7 +95,8 @@ service cloud.firestore {
          request.resource.data.madrasaId == resource.data.madrasaId &&
          request.resource.data.get('isAdmin', false) == resource.data.get('isAdmin', false) &&
          request.resource.data.get('active', true) == resource.data.get('active', true) &&
-         request.resource.data.get('classTeacherOf', '') == resource.data.get('classTeacherOf', ''))
+         request.resource.data.get('classTeacherOf', '') == resource.data.get('classTeacherOf', '') &&
+         request.resource.data.get('pending', false) == resource.data.get('pending', false))
       );
       allow delete: if false;
     }
@@ -168,8 +185,13 @@ service cloud.firestore {
                     );
       allow list: if (isTeacherAuth() && resource.data.madrasaId == myMadrasaId()) ||
                      (isStudentAuth() && resource.data.studentId == mySessionStudentId());
-      allow create, update: if isTeacherAuth() && request.resource.data.madrasaId == myMadrasaId();
-      allow delete: if isTeacherAuth() && resource.data.madrasaId == myMadrasaId();
+      allow create: if isTeacherAuth() && request.resource.data.madrasaId == myMadrasaId() &&
+        canEditResultOf(request.resource.data.studentId);
+      allow update: if isTeacherAuth() && request.resource.data.madrasaId == myMadrasaId() &&
+        request.resource.data.studentId == resource.data.studentId &&
+        canEditResultOf(resource.data.studentId);
+      allow delete: if isTeacherAuth() && resource.data.madrasaId == myMadrasaId() &&
+        canEditResultOf(resource.data.studentId);
     }
 
     // ===== নোটিশ: create/update ও delete আলাদা (delete-এ request.resource থাকে না, তাই আগে মোছা ব্লক হতো) =====
