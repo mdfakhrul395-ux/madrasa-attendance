@@ -1,4 +1,4 @@
-/* ShikkhaOS — শ্রেণি শিক্ষক নির্ধারণ (ধাপ ১) + রেজাল্ট সম্পাদনার সীমা (ধাপ ২)
+/* ShikkhaOS — শ্রেণি শিক্ষক নির্ধারণ (ধাপ ১) + রেজাল্ট সম্পাদনার সীমা (ধাপ ২) + শ্রেণি শিক্ষকের শিক্ষার্থী-তথ্য সম্পাদনা (ধাপ ৩)
  *
  * শিক্ষকগণ ট্যাবের নিচে "শ্রেণি শিক্ষক নির্ধারণ" নামে একটি কার্ড যোগ করে।
  * অ্যাডমিন সেখানে প্রতিটি শিক্ষকের পাশে তাঁর শ্রেণি বেছে দেন।
@@ -133,6 +133,9 @@
     if (isAdminNow()) return;
     if (document.getElementById('resultsWrap') && typeof lastResultsIsTeacher !== 'undefined' && lastResultsIsTeacher) {
       window.renderResultsScreen(true);
+    }
+    if (document.getElementById('studentsScreen') && typeof window.renderStudentsList === 'function') {
+      window.renderStudentsList();
     }
   }
 
@@ -294,6 +297,73 @@
         return chain;
       }).then(() => alert('আপনার শ্রেণির মেধাক্রম হালনাগাদ করা হয়েছে'))
         .catch(e => showDiagBanner('মেধাক্রম হালনাগাদ ব্যর্থ: ' + e.message));
+    };
+  }
+
+  // =====================================================================
+  //   ধাপ ৩: শ্রেণি শিক্ষক নিজের শ্রেণির শিক্ষার্থীর তথ্য সম্পাদনা করতে পারবেন
+  // (✏️ সম্পাদনা, PIN সেট/পরিবর্তন, নম্বর সম্পাদনা)। মুছতে পারবেন শুধু অ্যাডমিন।
+  // dashboard.js ও student-edit.js এ "শুধু অ্যাডমিন" পরীক্ষা আছে; সেগুলো না বদলে
+  // শ্রেণি শিক্ষকের নিজের শ্রেণির ক্ষেত্রে ওই কয়েকটি ফাংশন চলার মুহূর্তটুকুতে
+  // (একই সেকেন্ডে, সিঙ্ক্রোনাসভাবে) অ্যাডমিন-পতাকা চালু করা হয়, তারপরই ফিরিয়ে দেওয়া হয়।
+  // সার্ভারে firestore.rules আলাদাভাবে একই নিয়ম জোর করে।
+  // =====================================================================
+  function asAdmin(fn) {
+    const prev = myTeacherIsAdmin;
+    myTeacherIsAdmin = true;
+    try { return fn(); } finally { myTeacherIsAdmin = prev; }
+  }
+
+  const STU_DENY = 'আপনি শুধু নিজের শ্রেণির শিক্ষার্থীর তথ্য সম্পাদনা করতে পারবেন।';
+
+  function lockClassField() {
+    const c = document.getElementById('seClass');
+    if (!c) return;
+    c.readOnly = true;
+    c.removeAttribute('list');
+    c.style.background = '#f1f5f9';
+    const note = document.querySelector('#stuEditModal p.muted:not(#seError)');
+    if (note) note.textContent = 'শ্রেণি বদলাতে অ্যাডমিনের সাহায্য নিন।';
+  }
+
+  ['setStudentPin', 'setStudentPhone', 'editStudentInfo'].forEach(name => {
+    const orig = window[name];
+    if (typeof orig !== 'function') return;
+    window[name] = function (id) {
+      if (isAdminNow()) return orig.apply(this, arguments);
+      if (!canEditStudent(id)) { alert(STU_DENY); return; }
+      const r = asAdmin(() => orig.apply(this, arguments));
+      if (name === 'editStudentInfo') lockClassField();
+      return r;
+    };
+  });
+
+  // তালিকায় বাটন: নিজের শ্রেণির সারিতে তিনটি বাটন, "মুছুন" কোথাও নয়, অন্য শ্রেণির সারিতে কিছুই নয়
+  function restrictStudentsList() {
+    const wrap = document.getElementById('studentsListWrap');
+    if (!wrap) return;
+    wrap.querySelectorAll('button[onclick]').forEach(b => {
+      const m = /^(setStudentPin|setStudentPhone|deleteStudent|editStudentInfo)\('((?:[^'\\]|\\.)*)'/.exec(b.getAttribute('onclick') || '');
+      if (!m) return;
+      const id = m[2].replace(/\\(.)/g, '$1');
+      if (m[1] === 'deleteStudent' || !canEditStudent(id)) b.remove();
+    });
+    if (wrap.children.length) {
+      const note = !classLoaded ? 'লোড হচ্ছে...'
+        : myClass ? 'শুধু আপনার শ্রেণির (' + myClass + ') শিক্ষার্থীর তথ্য সম্পাদনা করতে পারবেন। মোছা শুধু অ্যাডমিন করতে পারেন।'
+        : 'তথ্য সংশোধন ও মোছা শুধু অ্যাডমিন শিক্ষক করতে পারেন। আপনি নতুন শিক্ষার্থী যোগ করতে পারবেন।';
+      wrap.insertAdjacentHTML('afterbegin', '<p class="muted" style="margin-bottom:6px;">' + esc(note) + '</p>');
+    }
+  }
+
+  const origStudentsList = window.renderStudentsList;
+  if (typeof origStudentsList === 'function') {
+    window.renderStudentsList = function () {
+      if (isAdminNow()) return origStudentsList.apply(this, arguments);
+      startMine();
+      const r = asAdmin(() => origStudentsList.apply(this, arguments)); // বাটনসহ আঁকা
+      restrictStudentsList();
+      return r;
     };
   }
 

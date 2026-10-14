@@ -67,13 +67,17 @@ service cloud.firestore {
       return get(/databases/$(database)/documents/teachers/$(request.auth.uid)).data.get('classTeacherOf', '');
     }
 
+    // শিক্ষার্থী যদি একই মাদ্রাসার হয় এবং তার শ্রেণি == এই শিক্ষকের classTeacherOf
+    function isMyClassStudent(studentId) {
+      return isTeacherAuth() &&
+        myClassTeacherOf() != '' &&
+        exists(/databases/$(database)/documents/students/$(studentId)) &&
+        get(/databases/$(database)/documents/students/$(studentId)).data.madrasaId == myMadrasaId() &&
+        get(/databases/$(database)/documents/students/$(studentId)).data.get('className', null) == myClassTeacherOf();
+    }
+
     function canEditResultOf(studentId) {
-      return isStudentManager() ||
-        (isTeacherAuth() &&
-         myClassTeacherOf() != '' &&
-         exists(/databases/$(database)/documents/students/$(studentId)) &&
-         get(/databases/$(database)/documents/students/$(studentId)).data.madrasaId == myMadrasaId() &&
-         get(/databases/$(database)/documents/students/$(studentId)).data.get('className', null) == myClassTeacherOf());
+      return isStudentManager() || isMyClassStudent(studentId);
     }
 
     match /teachers/{uid} {
@@ -123,7 +127,14 @@ service cloud.firestore {
       allow read: if request.auth != null &&
         (!isTeacherAuth() || resource.data.madrasaId == myMadrasaId());
       allow create: if isTeacherAuth() && request.resource.data.madrasaId == myMadrasaId();
-      allow update: if isStudentManager() && request.resource.data.madrasaId == myMadrasaId();
+      // অ্যাডমিন সব সম্পাদনা করতে পারেন; শ্রেণি শিক্ষক শুধু নিজের শ্রেণির শিক্ষার্থীর তথ্য, এবং শ্রেণি বদলাতে পারেন না
+      allow update: if request.resource.data.madrasaId == myMadrasaId() &&
+        (isStudentManager() ||
+         (isTeacherAuth() &&
+          resource.data.madrasaId == myMadrasaId() &&
+          myClassTeacherOf() != '' &&
+          resource.data.get('className', null) == myClassTeacherOf() &&
+          request.resource.data.get('className', null) == resource.data.get('className', null)));
       allow delete: if isStudentManager() && resource.data.madrasaId == myMadrasaId();
     }
 
@@ -131,16 +142,19 @@ service cloud.firestore {
       allow read: if false;
       allow create: if isTeacherAuth() &&
         get(/databases/$(database)/documents/students/$(studentId)).data.madrasaId == myMadrasaId() &&
-        (isStudentManager() ||
+        (isStudentManager() || isMyClassStudent(studentId) ||
          get(/databases/$(database)/documents/students/$(studentId)).data.get('hasPinSet', false) == true);
-      allow update, delete: if isStudentManager() &&
+      allow update: if (isStudentManager() || isMyClassStudent(studentId)) &&
+        get(/databases/$(database)/documents/students/$(studentId)).data.madrasaId == myMadrasaId();
+      allow delete: if isStudentManager() &&
         get(/databases/$(database)/documents/students/$(studentId)).data.madrasaId == myMadrasaId();
     }
 
     match /student_contacts/{studentId} {
       allow read: if isTeacherAuth() && resource.data.madrasaId == myMadrasaId();
       allow create: if isTeacherAuth() && request.resource.data.madrasaId == myMadrasaId();
-      allow update: if isStudentManager() && request.resource.data.madrasaId == myMadrasaId();
+      allow update: if (isStudentManager() || isMyClassStudent(studentId)) &&
+        request.resource.data.madrasaId == myMadrasaId();
       allow delete: if isStudentManager() && resource.data.madrasaId == myMadrasaId();
     }
 
