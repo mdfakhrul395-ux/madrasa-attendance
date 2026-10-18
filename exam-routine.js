@@ -45,17 +45,19 @@
       .er-class{font-size:13px;opacity:.85;margin-bottom:2px;}
       .er-title{font-size:18px;font-weight:700;line-height:1.35;}
       .er-posted{font-size:12px;opacity:.85;white-space:nowrap;padding-top:2px;}
-      .er-body{padding:14px 14px 16px;}
+      .er-body{padding:12px 8px 14px;}
       .er-scroll{overflow-x:auto;border:1px solid var(--er-line);border-radius:12px;}
       .er-table{width:100%;border-collapse:collapse;font-size:15px;color:var(--er-ink);}
-      .er-table th{background:var(--er-tint);color:var(--er-teal-dark);text-align:left;font-weight:700;padding:10px 12px;border-bottom:2px solid var(--er-teal);}
-      .er-table td{padding:12px;border-bottom:1px solid var(--er-line);vertical-align:middle;}
+      .er-table th{background:var(--er-tint);color:var(--er-teal-dark);text-align:left;font-weight:700;padding:10px 8px;border-bottom:2px solid var(--er-teal);}
+      .er-table td{padding:10px 8px;border-bottom:1px solid var(--er-line);vertical-align:middle;}
       .er-table tr:last-child td{border-bottom:none;}
       .er-table tbody tr:nth-child(even) td{background:#f8fbfa;}
-      .er-date{font-weight:700;font-size:15px;line-height:1.35;}
+      .er-date{font-weight:700;font-size:14px;line-height:1.35;}
       .er-day{display:inline-block;margin-top:4px;padding:2px 10px;border-radius:999px;background:var(--er-tint);color:var(--er-teal-dark);font-size:13px;font-weight:600;}
       .er-sub{font-weight:600;line-height:1.5;}
-      .er-time{display:inline-block;white-space:nowrap;padding:4px 10px;border-radius:8px;background:#fff7e6;color:#8a5a00;border:1px solid #f3dcaa;font-weight:600;font-size:14px;}
+      .er-subitem{margin:2px 0;}
+      .er-subitem + .er-subitem{padding-top:4px;border-top:1px dashed var(--er-line);}
+      .er-time{display:inline-block;white-space:nowrap;padding:3px 8px;border-radius:8px;background:#fff7e6;color:#8a5a00;border:1px solid #f3dcaa;font-weight:600;font-size:14px;}
       .er-note{margin-top:14px;padding:12px 14px;background:#f4faf8;border-left:4px solid var(--er-teal);border-radius:8px;color:var(--er-ink);line-height:1.7;font-size:14.5px;}
       .er-note b{color:var(--er-teal-dark);}
       .er-img{margin-top:14px;}
@@ -133,6 +135,24 @@
     const row = btn && btn.closest ? btn.closest('.erRow') : null;
     if (row && row.parentNode) row.parentNode.removeChild(row);
   };
+
+  // বিষয়: কমা দিয়ে আলাদা লাইনে; "বাংলা ১ম" ভাঙবে না
+  function fmtSubject(text) {
+    const parts = String(text == null ? '' : text).split(/\s*[,،]\s*/).filter(Boolean);
+    if (!parts.length) return '';
+    return parts.map(p => {
+      const words = p.trim().split(/\s+/);
+      let out;
+      if (words.length >= 2 && /^[০-৯0-9]/.test(words[words.length - 1])) {
+        const last = words.pop();
+        const prev = words.pop();
+        out = esc(words.concat([prev + '\u00A0' + last]).join(' '));
+      } else {
+        out = esc(p.trim());
+      }
+      return '<div class="er-subitem">' + out + '</div>';
+    }).join('');
+  }
 
   // তারিখ উপরে, তার নিচে বার
   function fmtDate(iso) {
@@ -221,7 +241,7 @@
               </tr></thead>
               <tbody>${rows.map(x => `<tr>
                 <td>${fmtDate(x.date)}</td>
-                <td class="er-sub">${esc(x.subject)}</td>
+                <td class="er-sub">${fmtSubject(x.subject)}</td>
                 <td>${x.time ? `<span class="er-time">${esc(x.time)}</span>` : ''}</td>
               </tr>`).join('')}</tbody>
             </table>
