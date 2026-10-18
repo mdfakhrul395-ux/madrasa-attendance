@@ -11,6 +11,8 @@
  *   { madrasaId, className, examName, rows:[{date,subject,time}], note,
  *     imageDataUrl, imageType, createdAt }
  * কোয়েরিতে orderBy নেই (সাজানো হয় ব্রাউজারে), তাই নতুন Firestore index লাগবে না।
+ *
+ * এই সংস্করণে: তারিখ উপরে, বার নিচে + আকর্ষণীয় নতুন ডিজাইন (স্টাইল নিজে থেকেই যুক্ত হয়)।
  */
 (function () {
   'use strict';
@@ -29,6 +31,40 @@
 
   let examClassFilter = 'all';
   let examUnsub = null;
+
+  // ================= ডিজাইন (একবারই যুক্ত হয়) =================
+  (function injectStyle() {
+    if (document.getElementById('erStyle')) return;
+    const st = document.createElement('style');
+    st.id = 'erStyle';
+    st.textContent = `
+      .er-card{--er-teal:#0f766e;--er-teal-dark:#0b5e57;--er-tint:#e8f4f1;--er-line:#dbe7e4;--er-ink:#16302c;
+        background:#fff;border:1px solid var(--er-line);border-radius:16px;overflow:hidden;margin-bottom:16px;
+        box-shadow:0 2px 10px rgba(15,118,110,.08);}
+      .er-head{background:var(--er-teal);color:#fff;padding:14px 16px;display:flex;justify-content:space-between;align-items:flex-start;gap:10px;}
+      .er-class{font-size:13px;opacity:.85;margin-bottom:2px;}
+      .er-title{font-size:18px;font-weight:700;line-height:1.35;}
+      .er-posted{font-size:12px;opacity:.85;white-space:nowrap;padding-top:2px;}
+      .er-body{padding:14px 14px 16px;}
+      .er-scroll{overflow-x:auto;border:1px solid var(--er-line);border-radius:12px;}
+      .er-table{width:100%;border-collapse:collapse;font-size:15px;color:var(--er-ink);}
+      .er-table th{background:var(--er-tint);color:var(--er-teal-dark);text-align:left;font-weight:700;padding:10px 12px;border-bottom:2px solid var(--er-teal);}
+      .er-table td{padding:12px;border-bottom:1px solid var(--er-line);vertical-align:middle;}
+      .er-table tr:last-child td{border-bottom:none;}
+      .er-table tbody tr:nth-child(even) td{background:#f8fbfa;}
+      .er-date{font-weight:700;font-size:15px;line-height:1.35;}
+      .er-day{display:inline-block;margin-top:4px;padding:2px 10px;border-radius:999px;background:var(--er-tint);color:var(--er-teal-dark);font-size:13px;font-weight:600;}
+      .er-sub{font-weight:600;line-height:1.5;}
+      .er-time{display:inline-block;white-space:nowrap;padding:4px 10px;border-radius:8px;background:#fff7e6;color:#8a5a00;border:1px solid #f3dcaa;font-weight:600;font-size:14px;}
+      .er-note{margin-top:14px;padding:12px 14px;background:#f4faf8;border-left:4px solid var(--er-teal);border-radius:8px;color:var(--er-ink);line-height:1.7;font-size:14.5px;}
+      .er-note b{color:var(--er-teal-dark);}
+      .er-img{margin-top:14px;}
+      .er-img img{max-width:100%;border-radius:12px;border:1px solid var(--er-line);display:block;}
+      .er-del{margin-top:14px;}
+      .erRow{background:#f8fbfa;border:1px solid #dbe7e4 !important;border-radius:12px !important;padding:10px !important;}
+    `;
+    document.head.appendChild(st);
+  })();
 
   // ================= ন্যাভ: "পরীক্ষার রুটিন" ট্যাব =================
   if (typeof teacherMoreTabs !== 'undefined' && !teacherMoreTabs.some(t => t.key === 'examroutine')) {
@@ -76,7 +112,7 @@
 
   // ================= টেবিলের সারি (শিক্ষকের ফর্ম) =================
   function rowHtml() {
-    return `<div class="erRow" style="border:1px solid #e5e7eb;border-radius:8px;padding:8px;margin-bottom:8px;">
+    return `<div class="erRow" style="margin-bottom:8px;">
       <label>তারিখ</label>
       <input type="date" class="erDate">
       <label>বিষয়</label>
@@ -98,10 +134,14 @@
     if (row && row.parentNode) row.parentNode.removeChild(row);
   };
 
+  // তারিখ উপরে, তার নিচে বার
   function fmtDate(iso) {
     if (!/^\d{4}-\d{2}-\d{2}$/.test(String(iso || ''))) return esc(iso || '');
     try {
-      return esc(new Date(iso + 'T00:00:00').toLocaleDateString('bn-BD', { weekday: 'long', day: 'numeric', month: 'long', year: 'numeric' }));
+      const d = new Date(iso + 'T00:00:00');
+      const tarikh = d.toLocaleDateString('bn-BD', { day: 'numeric', month: 'long', year: 'numeric' });
+      const bar = d.toLocaleDateString('bn-BD', { weekday: 'long' });
+      return '<div class="er-date">' + esc(tarikh) + '</div><span class="er-day">' + esc(bar) + '</span>';
     } catch (e) { return esc(iso); }
   }
 
@@ -172,29 +212,34 @@
         const rows = Array.isArray(r.rows) ? r.rows : [];
         const imgUrl = safeDataUrl(r.imageDataUrl);
         const table = rows.length ? `
-          <div style="overflow-x:auto;margin-top:8px;">
-            <table style="width:100%;border-collapse:collapse;font-size:14px;">
-              <thead><tr style="background:#f3f4f6;">
-                <th style="border:1px solid #e5e7eb;padding:6px;text-align:left;">তারিখ ও বার</th>
-                <th style="border:1px solid #e5e7eb;padding:6px;text-align:left;">বিষয়</th>
-                <th style="border:1px solid #e5e7eb;padding:6px;text-align:left;">সময়</th>
+          <div class="er-scroll">
+            <table class="er-table">
+              <thead><tr>
+                <th>তারিখ ও বার</th>
+                <th>বিষয়</th>
+                <th>সময়</th>
               </tr></thead>
               <tbody>${rows.map(x => `<tr>
-                <td style="border:1px solid #e5e7eb;padding:6px;">${fmtDate(x.date)}</td>
-                <td style="border:1px solid #e5e7eb;padding:6px;">${esc(x.subject)}</td>
-                <td style="border:1px solid #e5e7eb;padding:6px;">${esc(x.time)}</td>
+                <td>${fmtDate(x.date)}</td>
+                <td class="er-sub">${esc(x.subject)}</td>
+                <td>${x.time ? `<span class="er-time">${esc(x.time)}</span>` : ''}</td>
               </tr>`).join('')}</tbody>
             </table>
           </div>` : '';
-        return `<div class="student-row" style="display:block;">
-          <div style="display:flex;justify-content:space-between;gap:8px;">
-            <b>${esc(r.className || '-')}${r.examName ? ' - ' + esc(r.examName) : ''}</b>
-            <span class="muted">${r.createdAt ? esc(new Date(r.createdAt).toLocaleDateString('bn-BD')) : ''}</span>
+        return `<div class="er-card">
+          <div class="er-head">
+            <div>
+              <div class="er-class">${esc(r.className || '-')}</div>
+              <div class="er-title">${esc(r.examName || 'পরীক্ষার রুটিন')}</div>
+            </div>
+            <span class="er-posted">${r.createdAt ? esc(new Date(r.createdAt).toLocaleDateString('bn-BD')) : ''}</span>
           </div>
-          ${table}
-          ${r.note ? `<div style="margin-top:6px;"><b>নির্দেশনা:</b> ${esc(r.note).replace(/\n/g, '<br>')}</div>` : ''}
-          ${imgUrl ? `<div style="margin-top:6px;"><img src="${esc(imgUrl)}" style="max-width:100%;border-radius:8px;" alt="পরীক্ষার রুটিনের ছবি"></div>` : ''}
-          ${isTeacher ? `<button class="small danger" onclick="deleteExamRoutine('${jsq(d.id)}')" style="margin-top:6px;">মুছুন</button>` : ''}
+          <div class="er-body">
+            ${table}
+            ${r.note ? `<div class="er-note"><b>নির্দেশনা:</b> ${esc(r.note).replace(/\n/g, '<br>')}</div>` : ''}
+            ${imgUrl ? `<div class="er-img"><img src="${esc(imgUrl)}" alt="পরীক্ষার রুটিনের ছবি"></div>` : ''}
+            ${isTeacher ? `<button class="small danger er-del" onclick="deleteExamRoutine('${jsq(d.id)}')">মুছুন</button>` : ''}
+          </div>
         </div>`;
       }).join('');
     }, err => {
