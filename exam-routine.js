@@ -48,8 +48,8 @@
       .er-body{padding:12px 8px 14px;}
       .er-scroll{overflow-x:auto;border:1px solid var(--er-line);border-radius:12px;}
       .er-table{width:100%;table-layout:fixed;border-collapse:collapse;font-size:15px;color:var(--er-ink);}
-      .er-table th:nth-child(1),.er-table td:nth-child(1){width:31%;}
-      .er-table th:nth-child(2),.er-table td:nth-child(2){width:37%;}
+      .er-table th:nth-child(1),.er-table td:nth-child(1){width:32%;}
+      .er-table th:nth-child(2),.er-table td:nth-child(2){width:36%;text-align:center;}
       .er-table th:nth-child(3),.er-table td:nth-child(3){width:32%;text-align:center;}
       .er-table th{background:var(--er-tint);color:var(--er-teal-dark);text-align:left;font-weight:700;padding:10px 8px;border-bottom:2px solid var(--er-teal);}
       .er-table td{padding:10px 8px;border-bottom:1px solid var(--er-line);vertical-align:middle;}
