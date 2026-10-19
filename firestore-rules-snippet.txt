@@ -1,0 +1,5 @@
+    match /fee_defaults/{id} {
+      allow read: if isTeacherAuth() && id == myMadrasaId();
+      allow create, update: if isTeacherAuth() && id == myMadrasaId()
+        && request.resource.data.madrasaId == myMadrasaId();
+    }
