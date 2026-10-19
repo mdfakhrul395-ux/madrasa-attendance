@@ -1,4 +1,4 @@
-// ================= fees-quick.js (v3) — মাসিক বেতন + ভর্তি/পরীক্ষা ফি: সুন্দর ও দ্রুত এন্ট্রি =================
+// ================= fees-quick.js (v4) — মাসিক বেতন + ভর্তি/পরীক্ষা ফি: সুন্দর ও দ্রুত এন্ট্রি =================
 // index.html-এ সবার শেষে (class-teacher.js-এর পরে) লোড হবে। app.js ছুঁতে হয় না।
 // বন্ধ করতে: index.html থেকে এই ফাইলের লাইনটি মুছে দিন।
 //  • ওপরে সারাংশ + আদায়ের প্রগ্রেস বার
@@ -42,8 +42,15 @@
 .fq-search{width:100%;box-sizing:border-box;padding:11px 14px;border:1px solid #cbd5e1;border-radius:14px;font-size:15px;margin:0 0 8px;font-family:inherit}
 .fq-chip{display:inline-block;width:auto;margin:0 6px 10px 0;border:0;border-radius:20px;padding:7px 14px;font-size:13px;font-weight:700;background:#e2e8f0;color:#475569;font-family:inherit;cursor:pointer}
 .fq-chip.on{background:#0F7B6C;color:#fff}
-.fq-row{display:flex;align-items:center;gap:10px;padding:10px 12px;background:#fff;border-radius:14px;margin:0 0 8px;border-left:5px solid #cbd5e1;box-shadow:0 1px 3px rgba(15,23,42,.07);cursor:pointer;-webkit-tap-highlight-color:transparent}
-.fq-row:active{background:#f8fafc}
+.fq-row{display:block;padding:10px 12px 12px;background:#fff;border-radius:14px;margin:0 0 8px;border-left:5px solid #cbd5e1;box-shadow:0 1px 3px rgba(15,23,42,.07)}
+.fq-top{display:flex;align-items:center;gap:10px;cursor:pointer;-webkit-tap-highlight-color:transparent}
+.fq-top:active{opacity:.7}
+.fq-chev{color:#94a3b8;font-size:22px;line-height:1;flex:none}
+.fq-acts{display:grid;grid-template-columns:1fr 1fr;gap:8px;margin-top:9px}
+.fq-a{width:100%;margin:0;border:0;border-radius:12px;padding:10px 6px;font-size:15px;font-weight:700;font-family:inherit;cursor:pointer;-webkit-tap-highlight-color:transparent}
+.fq-a:active{opacity:.8}
+.fq-a.pay{background:#dcfce7;color:#166534}.fq-a.pay.on{background:#16a34a;color:#fff}
+.fq-a.due{background:#fee2e2;color:#991b1b}.fq-a.due.on{background:#dc2626;color:#fff}
 .fq-row.st-paid{border-left-color:#16a34a}.fq-row.st-part{border-left-color:#f59e0b}.fq-row.st-due{border-left-color:#dc2626}
 .fq-av{width:38px;height:38px;border-radius:50%;background:#eef2ff;color:#3730a3;font-weight:700;display:flex;align-items:center;justify-content:center;flex:none;font-size:14px}
 .fq-mid{flex:1;min-width:0}
@@ -201,15 +208,17 @@
     const i = info(s), idq = jsq(s.id);
     const av = s.roll ? esc(bn(String(s.roll))) : esc(String(s.name || '?').charAt(0));
     const amtHtml = i.amt > 0 ? money(i.amt) : '<span style="color:#b45309;font-size:12px;">পরিমাণ দিন</span>';
-    const btn = i.kind === 'paid'
-      ? '<button class="fq-go edit" onclick="event.stopPropagation();fqOpen(\'' + idq + '\')">✎</button>'
-      : '<button class="fq-go" onclick="event.stopPropagation();fqOpen(\'' + idq + '\')">✓</button>';
-    return '<div class="fq-row ' + i.cls + '" id="fee_' + esc(s.id) + '" onclick="fqOpen(\'' + idq + '\')">' +
+    return '<div class="fq-row ' + i.cls + '" id="fee_' + esc(s.id) + '">' +
+      '<div class="fq-top" onclick="fqOpen(\'' + idq + '\')">' +
       '<div class="fq-av">' + av + '</div>' +
       '<div class="fq-mid"><div class="fq-nm">' + esc(s.name) + '</div>' +
       '<div class="fq-st" style="color:' + i.color + ';">' + esc(i.text) +
       (feesClassFilter === 'all' && s.className ? ' <span class="muted">· ' + esc(s.className) + '</span>' : '') + '</div></div>' +
-      '<div class="fq-amt">' + amtHtml + '</div>' + btn + '</div>';
+      '<div class="fq-amt">' + amtHtml + '</div><span class="fq-chev">›</span></div>' +
+      '<div class="fq-acts">' +
+      '<button class="fq-a pay' + (i.kind === 'paid' ? ' on' : '') + '" onclick="fqQuick(\'' + idq + '\',\'paid\')">✓ পরিশোধিত</button>' +
+      '<button class="fq-a due' + (i.kind === 'due' || i.kind === 'part' ? ' on' : '') + '" onclick="fqQuick(\'' + idq + '\',\'due\')">বকেয়া</button>' +
+      '</div></div>';
   }
 
   function renderList() {
@@ -263,6 +272,7 @@
           <button class="fq-btn ok" style="font-size:14px;padding:11px 6px;" onclick="fqBulk()">✅ সবাইকে পরিশোধিত</button>
           <button class="fq-btn ghost" style="font-size:14px;padding:11px 6px;" onclick="fqClassDefault()">⚙ সবার বেতন সেট</button>
         </div>
+        <label class="fq-chkl" style="margin:10px 0 0;font-size:12.5px;"><input type="checkbox" onchange="fqSetConfirm(this.checked)" ${S.confirm ? 'checked' : ''}><span>"পরিশোধিত" চাপলে আগে নিশ্চিত করতে চাই (না টিক দিলে সাথে সাথে সেভ হয়, ভুল হলে "ফিরিয়ে নিন" চাপা যাবে)</span></label>
       </div>`;
   }
 
@@ -310,6 +320,33 @@
         '</p><button class="fq-btn ghost" onclick="loadMonthlyFeesTeacher()">আবার চেষ্টা করুন</button></div>';
       if (e.code !== 'permission-denied') showDiagBanner('বেতন লোড এরর: ' + e.message);
     });
+  };
+
+  // ---------- সারির ভেতরেই পরিশোধিত / বকেয়া বাটন ----------
+  try { S.confirm = localStorage.getItem('fqConfirm') === '1'; } catch (e) { S.confirm = false; }
+  window.fqSetConfirm = function (on) {
+    S.confirm = !!on;
+    try { localStorage.setItem('fqConfirm', on ? '1' : '0'); } catch (e) { /* ignore */ }
+  };
+
+  window.fqQuick = function (id, which) {
+    const s = stu(id), d = S.docs[id] || {}, i = info(s);
+    if (which === 'paid') {
+      if (i.kind === 'paid') return;
+      const amt = curAmount(id);
+      if (!(amt > 0)) { fqOpen(id); return sheetErr('আগে পরিমাণ লিখুন'); }
+      if (S.confirm) return fqOpen(id);
+      return act(id, payPatch(d, amt), { a: 'paid', v: amt }, '✓ ' + s.name + ' — ' + money(amt) + ' পরিশোধিত');
+    }
+    if (i.kind === 'due' || i.kind === 'part') return;
+    if (i.kind === 'paid') {
+      const cur = num(d.amount);
+      return act(id, { status: 'due', amount: d.totalAmount ? num(d.totalAmount) : cur, paidAmount: 0, paidDate: '' },
+        { a: 'unpaid', old: cur }, s.name + ' — পরিশোধ বাতিল, বকেয়া');
+    }
+    const amt = curAmount(id);
+    if (!(amt > 0)) { fqOpen(id); return sheetErr('আগে পরিমাণ লিখুন'); }
+    act(id, { status: 'due', amount: amt }, { a: 'due', v: amt }, s.name + ' — বকেয়া চিহ্নিত');
   };
 
   // ---------- শিক্ষার্থীর শিট ----------
@@ -559,16 +596,34 @@
   function otRow(i) {
     const s = stu(i.studentId), inf = otInfo(i), idq = jsq(i.id);
     const av = s.roll ? esc(bn(String(s.roll))) : esc(String(s.name || '?').charAt(0));
-    const btn = inf.kind === 'paid'
-      ? '<button class="fq-go edit" onclick="event.stopPropagation();otOpen(\'' + idq + '\')">✎</button>'
-      : '<button class="fq-go" onclick="event.stopPropagation();otOpen(\'' + idq + '\')">✓</button>';
-    return '<div class="fq-row ' + inf.cls + '" onclick="otOpen(\'' + idq + '\')">' +
+    return '<div class="fq-row ' + inf.cls + '">' +
+      '<div class="fq-top" onclick="otOpen(\'' + idq + '\')">' +
       '<div class="fq-av">' + av + '</div>' +
       '<div class="fq-mid"><div class="fq-nm">' + esc(s.name) + '</div>' +
       '<div class="fq-st" style="color:' + inf.color + ';">' + (O.type ? '' : esc(i.feeType || 'ফি') + ' · ') + esc(inf.text) +
       (feesClassFilter === 'all' && s.className ? ' <span class="muted">· ' + esc(s.className) + '</span>' : '') + '</div></div>' +
-      '<div class="fq-amt">' + money(i.status === 'paid' ? i.amount : i.amount) + '</div>' + btn + '</div>';
+      '<div class="fq-amt">' + money(i.amount) + '</div><span class="fq-chev">›</span></div>' +
+      '<div class="fq-acts">' +
+      '<button class="fq-a pay' + (inf.kind === 'paid' ? ' on' : '') + '" onclick="otQuick(\'' + idq + '\',\'paid\')">✓ পরিশোধিত</button>' +
+      '<button class="fq-a due' + (inf.kind !== 'paid' ? ' on' : '') + '" onclick="otQuick(\'' + idq + '\',\'due\')">বকেয়া</button>' +
+      '</div></div>';
   }
+
+  window.otQuick = function (id, which) {
+    const i = otItem(id);
+    if (!i) return;
+    const kind = otInfo(i).kind;
+    if (which === 'paid') {
+      if (kind === 'paid') return;
+      const amt = num(i.amount);
+      if (!(amt > 0) || S.confirm) { otOpen(id); return !(amt > 0) ? sheetErr('আগে পরিমাণ লিখুন') : undefined; }
+      return otAct(id, payPatch(i, amt), { a: 'paid', v: amt }, '✓ ' + otName(id) + ' — ' + money(amt) + ' পরিশোধিত');
+    }
+    if (kind !== 'paid') return;
+    const cur = num(i.amount);
+    otAct(id, { status: 'due', amount: i.totalAmount ? num(i.totalAmount) : cur, paidAmount: 0, paidDate: '' },
+      { a: 'unpaid', old: cur }, otName(id) + ' — পরিশোধ বাতিল, বকেয়া');
+  };
 
   function renderOt() {
     if (feesMode !== 'onetime' || !currentFeesIsTeacher || !$('feesResultWrap')) { otStop(); return; }
