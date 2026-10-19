@@ -162,7 +162,9 @@
     if (!/^\d{4}-\d{2}-\d{2}$/.test(String(iso || ''))) return esc(iso || '');
     try {
       const d = new Date(iso + 'T00:00:00');
-      const tarikh = d.toLocaleDateString('bn-BD', { day: 'numeric', month: 'long', year: 'numeric' });
+      const bn = n => String(n).replace(/\d/g, c => '০১২৩৪৫৬৭৮৯'[c]);
+      const p = iso.split('-');
+      const tarikh = bn(p[2]) + '/' + bn(p[1]) + '/' + bn(p[0].slice(2));   // ০৩/১১/২৬
       const bar = d.toLocaleDateString('bn-BD', { weekday: 'long' });
       return '<div class="er-date">' + esc(tarikh) + '</div><span class="er-day">' + esc(bar) + '</span>';
     } catch (e) { return esc(iso); }
