@@ -1,4 +1,4 @@
-// ================= fees-quick.js (v4) — মাসিক বেতন + ভর্তি/পরীক্ষা ফি: সুন্দর ও দ্রুত এন্ট্রি =================
+// ================= fees-quick.js (v5) — মাসিক বেতন + ভর্তি/পরীক্ষা ফি: সুন্দর ও দ্রুত এন্ট্রি =================
 // index.html-এ সবার শেষে (class-teacher.js-এর পরে) লোড হবে। app.js ছুঁতে হয় না।
 // বন্ধ করতে: index.html থেকে এই ফাইলের লাইনটি মুছে দিন।
 //  • ওপরে সারাংশ + আদায়ের প্রগ্রেস বার
@@ -9,7 +9,7 @@
 (function () {
   'use strict';
 
-  const S = { mid: null, month: '', docs: {}, defaults: {}, defaultsOk: false, defaultsWarned: false,
+  const S = { mid: null, month: '', docs: {}, defaults: {}, classFees: {}, defaultsOk: false, defaultsWarned: false,
     token: 0, filter: 'all', q: '', toastT: null };
   const $ = id => document.getElementById(id);
   const money = n => (typeof feeMoney === 'function') ? feeMoney(n) : (n + ' টাকা');
@@ -90,32 +90,53 @@
 
   // ---------- ডিফল্ট বেতন (fee_defaults/{madrasaId}.amounts) ----------
   function loadDefaults() {
-    if (S.mid !== madrasaId) { S.mid = madrasaId; S.defaults = {}; S.defaultsOk = false; }
+    if (S.mid !== madrasaId) { S.mid = madrasaId; S.defaults = {}; S.classFees = {}; S.defaultsOk = false; }
     if (S.defaultsOk) return Promise.resolve();
     return db.collection('fee_defaults').doc(madrasaId).get().then(doc => {
       S.defaults = (doc.exists && doc.data().amounts) || {};
+      S.classFees = (doc.exists && doc.data().classes) || {};
       S.defaultsOk = true;
     }).catch(e => {
       showDiagBanner('fee_defaults লোড ব্যর্থ (firestore.rules-এ fee_defaults যোগ করা হয়েছে?): ' + e.message);
     });
   }
 
-  function setDefaults(map) {
-    return db.collection('fee_defaults').doc(madrasaId)
-      .set({ madrasaId, amounts: map }, { merge: true })
-      .then(() => { Object.assign(S.defaults, map); S.defaultsOk = true; })
-      .catch(e => {
-        if (!S.defaultsWarned) {
-          S.defaultsWarned = true;
-          alert('নির্ধারিত বেতন জমা হয়নি। firestore.rules-এ fee_defaults ব্লকটি যোগ করে Publish করা হয়েছে কি?');
-        }
-        showDiagBanner('fee_defaults সংরক্ষণ ব্যর্থ: ' + e.message);
+  // শ্রেণিভিত্তিক বেতন: classes[শ্রেণি] = টাকা | ব্যক্তিগত ব্যতিক্রম: amounts[studentId] = টাকা (null = মুছুন)
+  function saveCfg(classesPatch, amountsPatch) {
+    const body = { madrasaId };
+    if (classesPatch && Object.keys(classesPatch).length) body.classes = classesPatch;
+    if (amountsPatch && Object.keys(amountsPatch).length) {
+      body.amounts = {};
+      Object.keys(amountsPatch).forEach(k => { body.amounts[k] = amountsPatch[k] === null ? FV().delete() : amountsPatch[k]; });
+    }
+    return db.collection('fee_defaults').doc(madrasaId).set(body, { merge: true }).then(() => {
+      if (classesPatch) Object.assign(S.classFees, classesPatch);
+      if (amountsPatch) Object.keys(amountsPatch).forEach(k => {
+        if (amountsPatch[k] === null) delete S.defaults[k]; else S.defaults[k] = amountsPatch[k];
       });
+      S.defaultsOk = true;
+      return true;
+    }).catch(e => {
+      if (!S.defaultsWarned) {
+        S.defaultsWarned = true;
+        alert('নির্ধারিত বেতন জমা হয়নি। firestore.rules-এ fee_defaults ব্লকটি যোগ করে Publish করা হয়েছে কি?');
+      }
+      showDiagBanner('fee_defaults সংরক্ষণ ব্যর্থ: ' + e.message);
+      return false;
+    });
+  }
+
+  const classFeeOf = id => num(S.classFees[stu(id).className]);
+  const effDefault = id => num(S.defaults[id]) || classFeeOf(id);
+
+  // একজনের স্থায়ী বেতন: শ্রেণির বেতনের সমান হলে আলাদা করে রাখার দরকার নেই
+  function setStudentFee(id, v) {
+    return saveCfg(null, { [id]: v === classFeeOf(id) ? null : v });
   }
 
   function curAmount(id) {
     const d = S.docs[id] || {};
-    return num(d.amount) > 0 ? num(d.amount) : num(S.defaults[id]);
+    return num(d.amount) > 0 ? num(d.amount) : effDefault(id);
   }
 
   function shortDate(ds) {
@@ -213,7 +234,8 @@
       '<div class="fq-av">' + av + '</div>' +
       '<div class="fq-mid"><div class="fq-nm">' + esc(s.name) + '</div>' +
       '<div class="fq-st" style="color:' + i.color + ';">' + esc(i.text) +
-      (feesClassFilter === 'all' && s.className ? ' <span class="muted">· ' + esc(s.className) + '</span>' : '') + '</div></div>' +
+      (feesClassFilter === 'all' && s.className ? ' <span class="muted">· ' + esc(s.className) + '</span>' : '') +
+      (num(S.defaults[s.id]) > 0 && classFeeOf(s.id) > 0 && num(S.defaults[s.id]) !== classFeeOf(s.id) ? ' <span style="color:#7C4DCC;">· আলাদা বেতন</span>' : '') + '</div></div>' +
       '<div class="fq-amt">' + amtHtml + '</div><span class="fq-chev">›</span></div>' +
       '<div class="fq-acts">' +
       '<button class="fq-a pay' + (i.kind === 'paid' ? ' on' : '') + '" onclick="fqQuick(\'' + idq + '\',\'paid\')">✓ পরিশোধিত</button>' +
@@ -270,7 +292,7 @@
         </div>
         <div class="fq-two" style="margin:0;">
           <button class="fq-btn ok" style="font-size:14px;padding:11px 6px;" onclick="fqBulk()">✅ সবাইকে পরিশোধিত</button>
-          <button class="fq-btn ghost" style="font-size:14px;padding:11px 6px;" onclick="fqClassDefault()">⚙ সবার বেতন সেট</button>
+          <button class="fq-btn ghost" style="font-size:14px;padding:11px 6px;" onclick="fqClassDefault()">⚙ শ্রেণিভিত্তিক বেতন</button>
         </div>
         <label class="fq-chkl" style="margin:10px 0 0;font-size:12.5px;"><input type="checkbox" onchange="fqSetConfirm(this.checked)" ${S.confirm ? 'checked' : ''}><span>"পরিশোধিত" চাপলে আগে নিশ্চিত করতে চাই (না টিক দিলে সাথে সাথে সেভ হয়, ভুল হলে "ফিরিয়ে নিন" চাপা যাবে)</span></label>
       </div>`;
@@ -365,7 +387,7 @@
 
   window.fqOpen = function (id) {
     const s = stu(id), d = S.docs[id] || {}, i = info(s), idq = jsq(id);
-    const def = num(S.defaults[id]);
+    const def = effDefault(id), indiv = num(S.defaults[id]), clsFee = classFeeOf(id);
     const head = sheetHead(s.name, esc(s.className || '-') + (s.roll ? ' · রোল ' + esc(s.roll) : '') + ' · ' + esc(feeMonthLabel(S.month)));
     let body;
     if (i.kind === 'paid') {
@@ -382,7 +404,7 @@
         `<label class="fq-lb">${hasPart ? 'বাকি পরিমাণ (টাকা)' : 'বেতনের পরিমাণ (টাকা)'}</label>
         <input class="fq-in" id="fqAmt" type="number" inputmode="numeric" value="${esc(i.amt || '')}">` +
         (hasPart ? '' : `<label class="fq-chkl"><input type="checkbox" id="fqKeep" ${def ? '' : 'checked'}>
-          <span>পরের মাসগুলোতেও এই পরিমাণ থাকুক${def ? ' <span class="muted">(এখন নির্ধারিত ' + money(def) + ')</span>' : ''}</span></label>`) +
+          <span>পরের মাসগুলোতেও এই শিক্ষার্থীর বেতন এটাই থাকুক${indiv ? ' <span class="muted">(এখন আলাদা নির্ধারিত ' + money(indiv) + ')</span>' : (clsFee ? ' <span class="muted">(শ্রেণির বেতন ' + money(clsFee) + ')</span>' : '')}</span></label>`) +
         `<div class="fq-err" id="fqErr"></div>
         <button class="fq-btn ok" onclick="fqDoPay('${idq}')">✓ পরিশোধিত নিশ্চিত করুন</button>
         <div class="fq-two">
@@ -394,9 +416,23 @@
           <input class="fq-in" id="fqPartAmt" type="number" inputmode="numeric">
           <button class="fq-btn pri" onclick="fqDoPartial('${idq}')">আংশিক জমা নিশ্চিত করুন</button>
         </div>
-        <button class="fq-link" onclick="fqDoAmountOnly('${idq}')">শুধু পরিমাণ সংরক্ষণ করুন (স্ট্যাটাস না বদলে)</button>`;
+        <button class="fq-link" onclick="fqDoAmountOnly('${idq}')">শুধু পরিমাণ সংরক্ষণ করুন (স্ট্যাটাস না বদলে)</button>` +
+        (indiv && clsFee && indiv !== clsFee ? `<button class="fq-link" style="color:#7C4DCC;" onclick="fqToClass('${idq}')">↺ শ্রেণির বেতনে ফেরান (${money(clsFee)})</button>` : '');
     }
     openSheet(head + body + historyHtml(d));
+  };
+
+  window.fqToClass = function (id) {
+    const d = S.docs[id] || {}, cf = classFeeOf(id);
+    if (!(cf > 0)) return;
+    closeSheet();
+    saveCfg(null, { [id]: null }).then(ok => {
+      if (!ok) return;
+      if (d.status !== 'paid' && !(num(d.paidAmount) > 0) && num(d.amount) > 0 && num(d.amount) !== cf) {
+        persist(id, { amount: cf }, { a: 'amount', old: num(d.amount), v: cf });
+      } else { renderList(); refreshSummary(); }
+      toast(stu(id).name + ' — শ্রেণির বেতনে ফেরানো হয়েছে (' + money(cf) + ')');
+    });
   };
 
   window.fqTogglePart = function () {
@@ -412,21 +448,21 @@
   window.fqDoPay = function (id) {
     const d = S.docs[id] || {}, amt = readAmt();
     if (!(amt > 0)) return sheetErr('আগে পরিমাণ লিখুন');
-    if (keepChecked()) setDefaults({ [id]: amt });
+    if (keepChecked()) setStudentFee(id, amt);
     act(id, payPatch(d, amt), { a: 'paid', v: amt }, '✓ ' + stu(id).name + ' — ' + money(amt) + ' পরিশোধিত');
   };
 
   window.fqDoDue = function (id) {
     const amt = readAmt();
     if (!(amt > 0)) return sheetErr('আগে পরিমাণ লিখুন');
-    if (keepChecked()) setDefaults({ [id]: amt });
+    if (keepChecked()) setStudentFee(id, amt);
     act(id, { status: 'due', amount: amt }, { a: 'due', v: amt }, stu(id).name + ' — বকেয়া চিহ্নিত');
   };
 
   window.fqDoAmountOnly = function (id) {
     const d = S.docs[id] || {}, amt = readAmt();
     if (!(amt > 0)) return sheetErr('আগে পরিমাণ লিখুন');
-    if (keepChecked()) setDefaults({ [id]: amt });
+    if (keepChecked()) setStudentFee(id, amt);
     act(id, { amount: amt }, { a: 'amount', old: num(d.amount), v: amt }, 'পরিমাণ সংরক্ষিত — ' + money(amt));
   };
 
@@ -436,7 +472,7 @@
     if (!(rem > 0)) return sheetErr('আগে পরিমাণ লিখুন');
     if (!(x > 0)) return sheetErr('কত টাকা দিয়েছে লিখুন');
     if (x >= rem) return sheetErr('পুরো টাকা দিলে "পরিশোধিত নিশ্চিত করুন" চাপুন');
-    if (keepChecked() && !(num(d.paidAmount) > 0)) setDefaults({ [id]: rem });
+    if (keepChecked() && !(num(d.paidAmount) > 0)) setStudentFee(id, rem);
     act(id, {
       status: 'due',
       totalAmount: d.totalAmount ? num(d.totalAmount) : rem,
@@ -514,26 +550,53 @@
     }).catch(e => fail('সবাইকে পরিশোধিত ব্যর্থ', e));
   };
 
-  // ---------- শ্রেণির সবার নির্ধারিত বেতন ----------
+  // ---------- শ্রেণিভিত্তিক মাসিক বেতন ----------
   window.fqClassDefault = function () {
-    const n = studentsByClass(feesClassFilter).length;
-    if (!n) return;
-    const where = feesClassFilter === 'all' ? 'সকল শ্রেণির' : feesClassFilter + ' শ্রেণির';
-    openSheet(sheetHead('সবার মাসিক বেতন সেট', esc(where) + ' ' + bn(n) + ' জন') +
-      `<label class="fq-lb">প্রতিজনের মাসিক বেতন (টাকা)</label>
-      <input class="fq-in" id="fqAmt" type="number" inputmode="numeric" placeholder="যেমন ৫০০">
-      <div class="fq-err" id="fqErr"></div>
-      <p class="muted" style="font-size:13px;margin:0 0 10px;">আগে আলাদা পরিমাণ নির্ধারিত থাকলে তাও বদলে যাবে। পরে যে কারো বেতন আলাদাভাবে কমানো-বাড়ানো যাবে।</p>
-      <button class="fq-btn pri" onclick="fqClassGo()">সেট করুন</button>`);
+    const classes = getClassList();
+    if (!classes.length) return toast('কোনো শ্রেণি পাওয়া যায়নি');
+    S.clsList = classes;
+    let exTotal = 0;
+    const rows = classes.map((c, k) => {
+      const cf = num(S.classFees[c]);
+      const list = studentsCache.filter(x => x.className === c);
+      const ex = list.filter(x => { const o = num(S.defaults[x.id]); return o > 0 && o !== cf; }).length;
+      exTotal += ex;
+      return '<div style="display:flex;align-items:center;gap:10px;margin:0 0 10px;">' +
+        '<div style="flex:1;min-width:0;"><b>' + esc(c) + '</b><div class="muted" style="font-size:12px;">' + bn(list.length) + ' জন' +
+        (ex ? ' · <span style="color:#7C4DCC;">' + bn(ex) + ' জনের আলাদা বেতন আছে</span>' : '') + '</div></div>' +
+        '<input id="fqCls_' + k + '" type="number" inputmode="numeric" placeholder="টাকা" value="' + esc(cf || '') +
+        '" style="width:120px;margin:0;text-align:center;font-weight:700;font-size:18px;"></div>';
+    }).join('');
+    openSheet(sheetHead('শ্রেণিভিত্তিক মাসিক বেতন', '') +
+      '<p class="muted" style="font-size:13px;margin:0 0 12px;">প্রতি শ্রেণির বেতন একবার লিখুন। সেই শ্রেণির সবার ঘরে নিজে থেকেই বসে যাবে (নতুন ভর্তি হওয়া শিক্ষার্থীরও)। কারো কম/বেশি হলে তার সারি খুলে আলাদা করুন।</p>' +
+      rows +
+      (exTotal ? '<label class="fq-chkl"><input type="checkbox" id="fqClsReset"><span>আলাদা বেতনগুলোও মুছে সবাইকে শ্রেণির বেতনে আনুন</span></label>' : '') +
+      '<p class="muted" style="font-size:12px;margin:0 0 8px;">যাদের এই মাসের পরিমাণ আগেই লেখা বা চিহ্নিত আছে, তাদের এই মাসের হিসাব বদলাবে না।</p>' +
+      '<div class="fq-err" id="fqErr"></div>' +
+      '<button class="fq-btn pri" onclick="fqClassGo()">সংরক্ষণ করুন</button>');
   };
 
   window.fqClassGo = function () {
-    const v = readAmt();
-    if (!(v > 0)) return sheetErr('সঠিক পরিমাণ লিখুন');
-    const map = {};
-    studentsByClass(feesClassFilter).forEach(s => { map[s.id] = v; });
+    const classes = S.clsList || [], reset = !!($('fqClsReset') && $('fqClsReset').checked);
+    const cPatch = {}, aPatch = {};
+    classes.forEach((c, k) => {
+      const el = $('fqCls_' + k), v = num(el ? el.value : 0);
+      if (!(v > 0)) return;
+      const old = num(S.classFees[c]);
+      if (v !== old) cPatch[c] = v;
+      studentsCache.forEach(x => {
+        if (x.className !== c) return;
+        const o = num(S.defaults[x.id]);
+        if (o > 0 && (reset || o === v || (old > 0 && o === old))) aPatch[x.id] = null;
+      });
+    });
+    if (!Object.keys(cPatch).length && !Object.keys(aPatch).length) return sheetErr('বদলানোর জন্য কোনো শ্রেণির পরিমাণ লিখুন');
     closeSheet();
-    setDefaults(map).then(() => { renderList(); refreshSummary(); toast('✓ সবার মাসিক বেতন ' + money(v) + ' সেট হয়েছে'); });
+    saveCfg(cPatch, aPatch).then(ok => {
+      if (!ok) return;
+      renderList(); refreshSummary();
+      toast('✓ ' + bn(Object.keys(cPatch).length) + ' টি শ্রেণির বেতন সংরক্ষিত, সবার ঘরে বসে গেছে');
+    });
   };
 
   // =================== ভর্তি / পরীক্ষা ফি (fees_onetime) ===================
