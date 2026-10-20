@@ -1,4 +1,4 @@
-// ================= fees-quick.js (v5) — মাসিক বেতন + ভর্তি/পরীক্ষা ফি: সুন্দর ও দ্রুত এন্ট্রি =================
+// ================= fees-quick.js (v6) — মাসিক বেতন + ভর্তি/পরীক্ষা ফি: সুন্দর ও দ্রুত এন্ট্রি =================
 // index.html-এ সবার শেষে (class-teacher.js-এর পরে) লোড হবে। app.js ছুঁতে হয় না।
 // বন্ধ করতে: index.html থেকে এই ফাইলের লাইনটি মুছে দিন।
 //  • ওপরে সারাংশ + আদায়ের প্রগ্রেস বার
@@ -239,7 +239,7 @@
       '<div class="fq-amt">' + amtHtml + '</div><span class="fq-chev">›</span></div>' +
       '<div class="fq-acts">' +
       '<button class="fq-a pay' + (i.kind === 'paid' ? ' on' : '') + '" onclick="fqQuick(\'' + idq + '\',\'paid\')">✓ পরিশোধিত</button>' +
-      '<button class="fq-a due' + (i.kind === 'due' || i.kind === 'part' ? ' on' : '') + '" onclick="fqQuick(\'' + idq + '\',\'due\')">বকেয়া</button>' +
+      '<button class="fq-a due' + (i.kind === 'due' || i.kind === 'part' ? ' on' : '') + '" onclick="fqQuick(\'' + idq + '\',\'due\')">' + (i.kind === 'due' ? 'বকেয়া ✕' : 'বকেয়া') + '</button>' +
       '</div></div>';
   }
 
@@ -360,7 +360,8 @@
       if (S.confirm) return fqOpen(id);
       return act(id, payPatch(d, amt), { a: 'paid', v: amt }, '✓ ' + s.name + ' — ' + money(amt) + ' পরিশোধিত');
     }
-    if (i.kind === 'due' || i.kind === 'part') return;
+    if (i.kind === 'due') return fqClear(id);
+    if (i.kind === 'part') return toast('আংশিক জমা আছে — সারিতে চেপে খুলে ঠিক করুন');
     if (i.kind === 'paid') {
       const cur = num(d.amount);
       return act(id, { status: 'due', amount: d.totalAmount ? num(d.totalAmount) : cur, paidAmount: 0, paidDate: '' },
@@ -397,7 +398,8 @@
         <div class="fq-err" id="fqErr"></div>
         <button class="fq-btn pri" onclick="fqDoFix('${idq}')">সংশোধন সংরক্ষণ করুন</button>
         <div style="height:8px"></div>
-        <button class="fq-btn bad" id="fqUnpayBtn" onclick="fqUnpay('${idq}')">পরিশোধ বাতিল করুন (আবার বকেয়া)</button>`;
+        <button class="fq-btn bad" id="fqUnpayBtn" onclick="fqUnpay('${idq}')">পরিশোধ বাতিল করুন (আবার বকেয়া)</button>
+        <button class="fq-link" onclick="fqClear('${idq}')">চিহ্ন মুছে ফেলুন (এখনো চিহ্নিত নয়)</button>`;
     } else {
       const hasPart = num(d.paidAmount) > 0;
       body = (hasPart ? `<div class="fq-note">মোট ${money(d.totalAmount)} · দিয়েছে ${money(d.paidAmount)} · বাকি ${money(d.amount)}</div>` : '') +
@@ -417,9 +419,25 @@
           <button class="fq-btn pri" onclick="fqDoPartial('${idq}')">আংশিক জমা নিশ্চিত করুন</button>
         </div>
         <button class="fq-link" onclick="fqDoAmountOnly('${idq}')">শুধু পরিমাণ সংরক্ষণ করুন (স্ট্যাটাস না বদলে)</button>` +
+        (S.docs[id] && !hasPart ? `<button class="fq-link" style="color:#64748b;" onclick="fqClear('${idq}')">চিহ্ন মুছে ফেলুন (এখনো চিহ্নিত নয়)</button>` : '') +
         (indiv && clsFee && indiv !== clsFee ? `<button class="fq-link" style="color:#7C4DCC;" onclick="fqToClass('${idq}')">↺ শ্রেণির বেতনে ফেরান (${money(clsFee)})</button>` : '');
     }
     openSheet(head + body + historyHtml(d));
+  };
+
+  // চিহ্ন মুছে ফেলা: এই মাসের এন্ট্রিটিই সরে যায় → "এখনো চিহ্নিত নয়", বকেয়া তালিকায়ও আসে না
+  window.fqClear = function (id) {
+    const prev = S.docs[id];
+    if (!prev) return;
+    const month = S.month, name = stu(id).name, copy = Object.assign({}, prev);
+    closeSheet();
+    docRef(id, month).delete().then(() => {
+      if (S.month === month) { delete S.docs[id]; renderList(); refreshSummary(); }
+      toast(name + ' — চিহ্ন মুছে ফেলা হয়েছে', () => docRef(id, month).set(copy).then(() => {
+        if (S.month === month) { S.docs[id] = copy; renderList(); refreshSummary(); }
+        toast('ফিরিয়ে নেওয়া হয়েছে');
+      }).catch(e => fail('ফিরিয়ে নেওয়া ব্যর্থ', e)));
+    }).catch(e => fail('চিহ্ন মুছতে ব্যর্থ', e));
   };
 
   window.fqToClass = function (id) {
