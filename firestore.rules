@@ -101,6 +101,11 @@ service cloud.firestore {
       return studentInMyMadrasa(studentId) && (isStudentManager() || isMyClassStudent(studentId));
     }
 
+    // আগে থেকেই থাকা ডকের জন্য (ডকের madrasaId আলাদাভাবে মেলানো হয়) — বাড়তি get লাগে না
+    function canModifyResultOf(studentId) {
+      return isStudentManager() || isMyClassStudent(studentId);
+    }
+
     function validPin() {
       return request.resource.data.pin is string &&
         request.resource.data.pin.matches('^[0-9]{4,8}$');
@@ -224,10 +229,9 @@ service cloud.firestore {
       allow list: if (isTeacherAuth() && resource.data.madrasaId == myMadrasaId()) ||
                      (isStudentAuth() && resource.data.studentId == mySessionStudentId());
 
-      // শিক্ষক: নতুন ডকের আইডি অবশ্যই "শিক্ষার্থী-আইডি_তারিখ" ছাঁচে এবং শিক্ষার্থী নিজের মাদ্রাসার
+      // শিক্ষক: নতুন ডকের আইডি অবশ্যই "শিক্ষার্থী-আইডি_তারিখ" ছাঁচে (ব্যাচে অনেক ডক লেখা হয়, তাই প্রতি ডকে আলাদা শিক্ষার্থী-যাচাই নেই)
       allow create: if isTeacherAuth() &&
         request.resource.data.madrasaId == myMadrasaId() &&
-        studentInMyMadrasa(request.resource.data.studentId) &&
         docId.matches(request.resource.data.studentId + '_.*') &&
         request.resource.data.get('timeLeftHome', null) == null;
       allow update: if isTeacherAuth() &&
@@ -286,9 +290,9 @@ service cloud.firestore {
       allow update: if isTeacherAuth() && resource.data.madrasaId == myMadrasaId() &&
         request.resource.data.madrasaId == resource.data.madrasaId &&
         request.resource.data.studentId == resource.data.studentId &&
-        canEditResultOf(resource.data.studentId);
+        canModifyResultOf(resource.data.studentId);
       allow delete: if isTeacherAuth() && resource.data.madrasaId == myMadrasaId() &&
-        canEditResultOf(resource.data.studentId);
+        canModifyResultOf(resource.data.studentId);
     }
 
     // ================= নোটিশ / ডায়েরি / হোমওয়ার্ক / পরীক্ষার রুটিন =================
@@ -352,7 +356,6 @@ service cloud.firestore {
       allow list: if (isTeacherAuth() && resource.data.madrasaId == myMadrasaId()) ||
                      (isStudentAuth() && resource.data.studentId == mySessionStudentId());
       allow create: if isTeacherAuth() && request.resource.data.madrasaId == myMadrasaId() &&
-        studentInMyMadrasa(request.resource.data.studentId) &&
         docId.matches(request.resource.data.studentId + '_.*');
       allow update: if isTeacherAuth() && resource.data.madrasaId == myMadrasaId() &&
         request.resource.data.madrasaId == resource.data.madrasaId &&
