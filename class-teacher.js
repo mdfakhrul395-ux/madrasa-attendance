@@ -236,6 +236,12 @@
 
   // ---- মেধাক্রম: অ্যাডমিন সব শ্রেণির, শ্রেণি শিক্ষক শুধু নিজের শ্রেণির ----
   // (নইলে অন্য শ্রেণির রেজাল্টে লিখতে গিয়ে পুরো ব্যাচটাই সার্ভার ফিরিয়ে দিত)
+  //
+  // Firestore-এর নিয়ম: একসাথে লেখার (batch) সময় rules প্রতিটি ডকের জন্য শিক্ষার্থীর ডক দেখে
+  // শ্রেণি শিক্ষক কিনা যাচাই করে, আর পুরো ব্যাচে মোট ২০টির বেশি ডক দেখা যায় না।
+  // তাই শ্রেণিতে ১৮ জনের বেশি হলে এক ব্যাচে লিখলে সব বাতিল হতো — এখন ১৫টি করে ভাগ করে লেখা হয়।
+  const MERIT_CHUNK = 15;
+
   function recomputeOwn(examName, academicYear) {
     if (!examName || !myClass) return Promise.resolve();
     return db.collection('results')
@@ -255,20 +261,31 @@
         });
         const pass = list.filter(x => !x.failed).sort((a, b) =>
           (b.gpa - a.gpa) || (b.total - a.total) || meritRollCompare(a.roll, b.roll));
-        const batch = db.batch();
-        let any = false;
+
+        const ops = [];
         pass.forEach((x, i) => {
-          batch.update(db.collection('results').doc(x.id), { meritRank: i + 1, meritTotal: pass.length });
-          any = true;
+          ops.push({ ref: db.collection('results').doc(x.id), data: { meritRank: i + 1, meritTotal: pass.length } });
         });
         list.filter(x => x.failed).forEach(x => {
-          batch.update(db.collection('results').doc(x.id), {
-            meritRank: firebase.firestore.FieldValue.delete(),
-            meritTotal: firebase.firestore.FieldValue.delete()
+          ops.push({
+            ref: db.collection('results').doc(x.id),
+            data: {
+              meritRank: firebase.firestore.FieldValue.delete(),
+              meritTotal: firebase.firestore.FieldValue.delete()
+            }
           });
-          any = true;
         });
-        return any ? batch.commit() : undefined;
+
+        let chain = Promise.resolve();
+        for (let i = 0; i < ops.length; i += MERIT_CHUNK) {
+          const part = ops.slice(i, i + MERIT_CHUNK);
+          chain = chain.then(() => {
+            const batch = db.batch();
+            part.forEach(o => batch.update(o.ref, o.data));
+            return batch.commit();
+          });
+        }
+        return chain;
       })
       .catch(e => showDiagBanner('মেধাক্রম হিসাব ব্যর্থ: ' + e.message));
   }
