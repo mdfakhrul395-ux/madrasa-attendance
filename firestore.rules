@@ -2,6 +2,17 @@ rules_version = '2';
 service cloud.firestore {
   match /databases/{database}/documents {
 
+    // ======================================================================
+    // নিরাপত্তা হালনাগাদ (Oct 21): মূল পরিবর্তনগুলো
+    // ১) অ্যাডমিন নিজের teacher ডকের madrasaId বদলে অন্য মাদ্রাসার অ্যাডমিন হতে পারত — বন্ধ
+    // ২) শিক্ষার্থীর session-এ madrasaId নিজে বসিয়ে বাতিল মাদ্রাসা/অন্য মাদ্রাসার নোটিশে ঢোকা যেত — বন্ধ
+    // ৩) অপ্রকাশিত রেজাল্ট শিক্ষার্থী কনসোল থেকে পড়তে পারত — বন্ধ
+    // ৪) শিক্ষার্থী নিজের ছুটি "approved" করে জমা দিতে পারত — বন্ধ
+    // ৫) শিক্ষার্থী হাজিরা ডকের date/madrasaId বদলে রেকর্ড সরাতে পারত — এখন শুধু timeLeftHome
+    // ৬) এক মাদ্রাসার অ্যাডমিন/শিক্ষক অন্য মাদ্রাসার ডক (হাজিরা, বেতন, রেজাল্ট, ফোন, শিক্ষার্থী) ওভাররাইট করতে পারত — বন্ধ
+    // ৭) কোড দিয়ে যোগদান (pending) নিয়মে তৈরির অনুমতি ছিল না, আর pending শিক্ষক সার্ভারে আটকানো ছিল না — ঠিক করা
+    // ======================================================================
+
     // ================= SUPER ADMIN =================
     function isSuperAdmin() {
       return request.auth != null &&
@@ -14,11 +25,22 @@ service cloud.firestore {
         get(/databases/$(database)/documents/madrasas/$(id)).data.get('active', true) != false;
     }
 
+    // ইমেইল/পাসওয়ার্ড দিয়ে সাইন-ইন করা যে কেউ (teacher ডক থাকুক বা না থাকুক)
+    function isPasswordUser() {
+      return request.auth != null && request.auth.token.firebase.sign_in_provider == 'password';
+    }
+
+    function myTeacherDoc() {
+      return get(/databases/$(database)/documents/teachers/$(request.auth.uid)).data;
+    }
+
+    // এখন teacher ডক থাকতেই হবে; সক্রিয়, অনুমোদিত (pending নয়) এবং মাদ্রাসা সক্রিয় হতে হবে
     function isTeacherAuth() {
-      return request.auth != null && request.auth.token.firebase.sign_in_provider == 'password' &&
-        (!exists(/databases/$(database)/documents/teachers/$(request.auth.uid)) ||
-          (get(/databases/$(database)/documents/teachers/$(request.auth.uid)).data.get('active', true) != false &&
-           isMadrasaActive(get(/databases/$(database)/documents/teachers/$(request.auth.uid)).data.get('madrasaId', null))));
+      return isPasswordUser() &&
+        exists(/databases/$(database)/documents/teachers/$(request.auth.uid)) &&
+        myTeacherDoc().get('active', true) != false &&
+        myTeacherDoc().get('pending', false) != true &&
+        isMadrasaActive(myTeacherDoc().get('madrasaId', null));
     }
 
     function isStudentAuth() {
@@ -42,59 +64,81 @@ service cloud.firestore {
 
     function myMadrasaId() {
       return isTeacherAuth()
-        ? (exists(/databases/$(database)/documents/teachers/$(request.auth.uid))
-            ? get(/databases/$(database)/documents/teachers/$(request.auth.uid)).data.get('madrasaId', null)
-            : null)
-        : (exists(/databases/$(database)/documents/sessions/$(request.auth.uid))
+        ? myTeacherDoc().get('madrasaId', null)
+        : ((request.auth != null && exists(/databases/$(database)/documents/sessions/$(request.auth.uid)))
             ? get(/databases/$(database)/documents/sessions/$(request.auth.uid)).data.get('madrasaId', null)
             : null);
     }
 
     function isRequesterAdmin() {
-      return isTeacherAuth() &&
-        exists(/databases/$(database)/documents/teachers/$(request.auth.uid)) &&
-        get(/databases/$(database)/documents/teachers/$(request.auth.uid)).data.get('isAdmin', false) == true;
+      return isTeacherAuth() && myTeacherDoc().get('isAdmin', false) == true;
     }
 
     function isStudentManager() {
       return isTeacherAuth() && (isRequesterAdmin() || isSuperAdmin());
     }
 
-    // ================= শ্রেণি শিক্ষক (রেজাল্ট সম্পাদনা) =================
-    // রেজাল্ট সম্পাদনা করতে পারবেন: অ্যাডমিন/সুপার অ্যাডমিন, অথবা সংশ্লিষ্ট শিক্ষার্থীর শ্রেণির শ্রেণি শিক্ষক
-    // (teachers/{uid}.classTeacherOf == শিক্ষার্থীর className, এবং শিক্ষার্থী একই মাদ্রাসার)।
-    function myClassTeacherOf() {
-      return get(/databases/$(database)/documents/teachers/$(request.auth.uid)).data.get('classTeacherOf', '');
+    // শিক্ষার্থী আছে এবং আমার মাদ্রাসার
+    function studentInMyMadrasa(sid) {
+      return sid is string &&
+        exists(/databases/$(database)/documents/students/$(sid)) &&
+        get(/databases/$(database)/documents/students/$(sid)).data.madrasaId == myMadrasaId();
     }
 
-    // শিক্ষার্থী যদি একই মাদ্রাসার হয় এবং তার শ্রেণি == এই শিক্ষকের classTeacherOf
+    // ================= শ্রেণি শিক্ষক =================
+    function myClassTeacherOf() {
+      return myTeacherDoc().get('classTeacherOf', '');
+    }
+
     function isMyClassStudent(studentId) {
       return isTeacherAuth() &&
         myClassTeacherOf() != '' &&
-        exists(/databases/$(database)/documents/students/$(studentId)) &&
-        get(/databases/$(database)/documents/students/$(studentId)).data.madrasaId == myMadrasaId() &&
+        studentInMyMadrasa(studentId) &&
         get(/databases/$(database)/documents/students/$(studentId)).data.get('className', null) == myClassTeacherOf();
     }
 
     function canEditResultOf(studentId) {
-      return isStudentManager() || isMyClassStudent(studentId);
+      return studentInMyMadrasa(studentId) && (isStudentManager() || isMyClassStudent(studentId));
     }
 
+    function validPin() {
+      return request.resource.data.pin is string &&
+        request.resource.data.pin.matches('^[0-9]{4,8}$');
+    }
+
+    // ================= TEACHERS =================
     match /teachers/{uid} {
       allow read: if request.auth != null && (
         request.auth.uid == uid ||
         (isTeacherAuth() && resource.data.madrasaId == myMadrasaId() && isRequesterAdmin())
       );
-      allow create: if isTeacherAuth() && (
+
+      allow create: if
+        // (১) অ্যাডমিন নিজের মাদ্রাসায় শিক্ষক যোগ করছেন
         (isRequesterAdmin() && request.resource.data.madrasaId == myMadrasaId()) ||
-        (request.auth.uid == uid &&
+        // (২) নতুন মাদ্রাসা নিবন্ধন: নিজে নিজের অ্যাডমিন, madrasaId অবশ্যই নতুন (m_xxx_yyy ছাঁচে) ও অব্যবহৃত
+        (isPasswordUser() && request.auth.uid == uid &&
          request.resource.data.get('isAdmin', false) == true &&
          request.resource.data.get('active', true) == true &&
-         request.resource.data.madrasaId != 'madrasa-001' &&
-         !exists(/databases/$(database)/documents/madrasas/$(request.resource.data.madrasaId)))
-      );
+         request.resource.data.get('pending', false) == false &&
+         !('classTeacherOf' in request.resource.data) &&
+         request.resource.data.madrasaId is string &&
+         request.resource.data.madrasaId.matches('^m_[a-z0-9]+_[a-z0-9]+$') &&
+         !exists(/databases/$(database)/documents/madrasas/$(request.resource.data.madrasaId))) ||
+        // (৩) কোড দিয়ে যোগদান: সাধারণ শিক্ষক, অনুমোদনের অপেক্ষায় (pending) — pending থাকা পর্যন্ত কোনো ডেটায় ঢুকতে পারবে না
+        (isPasswordUser() && request.auth.uid == uid &&
+         request.resource.data.get('isAdmin', false) == false &&
+         request.resource.data.get('active', true) == true &&
+         request.resource.data.get('pending', false) == true &&
+         !('classTeacherOf' in request.resource.data) &&
+         request.resource.data.madrasaId is string &&
+         exists(/databases/$(database)/documents/madrasas/$(request.resource.data.madrasaId)) &&
+         isMadrasaActive(request.resource.data.madrasaId));
+
       allow update: if isTeacherAuth() && (
-        (isRequesterAdmin() && resource.data.madrasaId == myMadrasaId()) ||
+        // অ্যাডমিন নিজের মাদ্রাসার শিক্ষক বদলাতে পারে, কিন্তু madrasaId কখনো বদলাতে পারবে না
+        (isRequesterAdmin() && resource.data.madrasaId == myMadrasaId() &&
+         request.resource.data.madrasaId == resource.data.madrasaId) ||
         (request.auth.uid == uid &&
          request.resource.data.madrasaId == resource.data.madrasaId &&
          request.resource.data.get('isAdmin', false) == resource.data.get('isAdmin', false) &&
@@ -105,34 +149,34 @@ service cloud.firestore {
       allow delete: if false;
     }
 
-    // ================= MADRASAS + প্যাকেজ (plan, planExpiry, planUpdatedAt, trialEndsAt) =================
-    // প্যাকেজের ফিল্ডগুলো এবং finalResultEnabled (চূড়ান্ত ফলাফল চালু/বন্ধ) শুধু সুপার অ্যাডমিন লিখতে পারেন।
-    // মাদ্রাসার অ্যাডমিন নিজের মাদ্রাসার বাকি সব (নাম, লোগো, বন্ধের দিন ইত্যাদি) আগের মতোই বদলাতে পারেন।
+    // ================= MADRASAS + প্যাকেজ =================
+    // প্যাকেজ ফিল্ড, finalResultEnabled ও active শুধু সুপার অ্যাডমিন লিখতে পারেন
     match /madrasas/{id} {
       allow get: if request.auth != null;
       allow list: if isSuperAdmin();
       allow create: if isSuperAdmin() ||
         (isTeacherAuth() && id == myMadrasaId() &&
-         !request.resource.data.keys().hasAny(['plan', 'planExpiry', 'planUpdatedAt', 'studentLimit', 'teacherLimit', 'planPrice', 'finalResultEnabled']) &&
+         !request.resource.data.keys().hasAny(['plan', 'planExpiry', 'planUpdatedAt', 'studentLimit', 'teacherLimit', 'planPrice', 'finalResultEnabled', 'active']) &&
          (!('trialEndsAt' in request.resource.data) ||
           (request.resource.data.trialEndsAt is number &&
            request.resource.data.trialEndsAt <= request.time.toMillis() + 2678400000)));
       allow update: if isSuperAdmin() ||
         (isRequesterAdmin() && id == myMadrasaId() &&
-         !request.resource.data.diff(resource.data).affectedKeys().hasAny(['plan', 'planExpiry', 'planUpdatedAt', 'trialEndsAt', 'studentLimit', 'teacherLimit', 'planPrice', 'finalResultEnabled']));
+         !request.resource.data.diff(resource.data).affectedKeys().hasAny(['plan', 'planExpiry', 'planUpdatedAt', 'trialEndsAt', 'studentLimit', 'teacherLimit', 'planPrice', 'finalResultEnabled', 'active']));
       allow delete: if false;
     }
 
+    // ================= STUDENTS =================
+    // (জানা সীমাবদ্ধতা) নাম/রোল/শ্রেণি এখনও লগইনের আগে সবাই পড়তে পারে — পুরো সমাধানে Blaze প্ল্যান লাগবে
     match /students/{studentId} {
       allow read: if request.auth != null &&
         (!isTeacherAuth() || resource.data.madrasaId == myMadrasaId());
       allow create: if isTeacherAuth() && request.resource.data.madrasaId == myMadrasaId();
-      // অ্যাডমিন সব সম্পাদনা করতে পারেন; শ্রেণি শিক্ষক শুধু নিজের শ্রেণির শিক্ষার্থীর তথ্য, এবং শ্রেণি বদলাতে পারেন না
-      allow update: if request.resource.data.madrasaId == myMadrasaId() &&
+      allow update: if isTeacherAuth() &&
+        resource.data.madrasaId == myMadrasaId() &&
+        request.resource.data.madrasaId == resource.data.madrasaId &&
         (isStudentManager() ||
-         (isTeacherAuth() &&
-          resource.data.madrasaId == myMadrasaId() &&
-          myClassTeacherOf() != '' &&
+         (myClassTeacherOf() != '' &&
           resource.data.get('className', null) == myClassTeacherOf() &&
           request.resource.data.get('className', null) == resource.data.get('className', null)));
       allow delete: if isStudentManager() && resource.data.madrasaId == myMadrasaId();
@@ -140,101 +184,147 @@ service cloud.firestore {
 
     match /student_pins/{studentId} {
       allow read: if false;
-      allow create: if isTeacherAuth() &&
-        get(/databases/$(database)/documents/students/$(studentId)).data.madrasaId == myMadrasaId() &&
+      allow create: if isTeacherAuth() && studentInMyMadrasa(studentId) && validPin() &&
         (isStudentManager() || isMyClassStudent(studentId) ||
          get(/databases/$(database)/documents/students/$(studentId)).data.get('hasPinSet', false) == true);
       allow update: if (isStudentManager() || isMyClassStudent(studentId)) &&
-        get(/databases/$(database)/documents/students/$(studentId)).data.madrasaId == myMadrasaId();
-      allow delete: if isStudentManager() &&
-        get(/databases/$(database)/documents/students/$(studentId)).data.madrasaId == myMadrasaId();
+        studentInMyMadrasa(studentId) && validPin();
+      allow delete: if isStudentManager() && studentInMyMadrasa(studentId);
     }
 
     match /student_contacts/{studentId} {
       allow read: if isTeacherAuth() && resource.data.madrasaId == myMadrasaId();
-      allow create: if isTeacherAuth() && request.resource.data.madrasaId == myMadrasaId();
+      allow create: if isTeacherAuth() && request.resource.data.madrasaId == myMadrasaId() &&
+        studentInMyMadrasa(studentId);
       allow update: if (isStudentManager() || isMyClassStudent(studentId)) &&
+        resource.data.madrasaId == myMadrasaId() &&
         request.resource.data.madrasaId == myMadrasaId();
       allow delete: if isStudentManager() && resource.data.madrasaId == myMadrasaId();
     }
 
+    // শিক্ষার্থীর লগইন সেশন: PIN মিলতে হবে, আর session-এর madrasaId অবশ্যই শিক্ষার্থীর নিজের মাদ্রাসার হতে হবে
     match /sessions/{uid} {
       allow read: if request.auth != null && request.auth.uid == uid;
-      allow write: if isStudentAuth() && request.auth.uid == uid &&
+      allow create, update: if isStudentAuth() && request.auth.uid == uid &&
+        request.resource.data.studentId is string &&
+        exists(/databases/$(database)/documents/students/$(request.resource.data.studentId)) &&
+        request.resource.data.madrasaId ==
+          get(/databases/$(database)/documents/students/$(request.resource.data.studentId)).data.madrasaId &&
         isMadrasaActive(request.resource.data.madrasaId) &&
         exists(/databases/$(database)/documents/student_pins/$(request.resource.data.studentId)) &&
         get(/databases/$(database)/documents/student_pins/$(request.resource.data.studentId)).data.pin == request.resource.data.pin;
     }
 
+    // ================= ATTENDANCE =================
     match /attendance/{docId} {
-      allow get: if resource == null ||
+      allow get: if request.auth != null && (
+                    resource == null ||
                     (isTeacherAuth() && resource.data.madrasaId == myMadrasaId()) ||
-                    (isStudentAuth() && resource.data.studentId == mySessionStudentId());
+                    (isStudentAuth() && resource.data.studentId == mySessionStudentId()));
       allow list: if (isTeacherAuth() && resource.data.madrasaId == myMadrasaId()) ||
                      (isStudentAuth() && resource.data.studentId == mySessionStudentId());
-      allow write: if isTeacherAuth() && request.resource.data.madrasaId == myMadrasaId() &&
-        request.resource.data.get('timeLeftHome', null) ==
-          (resource == null ? null : resource.data.get('timeLeftHome', null));
-      allow write: if isStudentAuth() && request.resource.data.studentId == mySessionStudentId() &&
-        (resource == null || !resource.data.get('timeLeftHome', null)) &&
-        request.resource.data.get('status', null) ==
-          (resource == null ? null : resource.data.get('status', null)) &&
-        request.resource.data.get('reason', null) ==
-          (resource == null ? null : resource.data.get('reason', null));
+
+      // শিক্ষক: নতুন ডকের আইডি অবশ্যই "শিক্ষার্থী-আইডি_তারিখ" ছাঁচে এবং শিক্ষার্থী নিজের মাদ্রাসার
+      allow create: if isTeacherAuth() &&
+        request.resource.data.madrasaId == myMadrasaId() &&
+        studentInMyMadrasa(request.resource.data.studentId) &&
+        docId.matches(request.resource.data.studentId + '_.*') &&
+        request.resource.data.get('timeLeftHome', null) == null;
+      allow update: if isTeacherAuth() &&
+        resource.data.madrasaId == myMadrasaId() &&
+        request.resource.data.madrasaId == resource.data.madrasaId &&
+        request.resource.data.studentId == resource.data.studentId &&
+        request.resource.data.get('timeLeftHome', null) == resource.data.get('timeLeftHome', null);
+      allow delete: if isTeacherAuth() && resource.data.madrasaId == myMadrasaId();
+
+      // শিক্ষার্থী: শুধু নিজের "বের হওয়ার সময়", একবারই
+      allow create: if isStudentAuth() &&
+        request.resource.data.keys().hasOnly(['studentId', 'date', 'madrasaId', 'timeLeftHome']) &&
+        request.resource.data.studentId == mySessionStudentId() &&
+        request.resource.data.madrasaId == myMadrasaId() &&
+        request.resource.data.date is string && request.resource.data.date.size() == 10 &&
+        docId == request.resource.data.studentId + '_' + request.resource.data.date &&
+        request.resource.data.timeLeftHome is string && request.resource.data.timeLeftHome.size() <= 8;
+      allow update: if isStudentAuth() &&
+        resource.data.studentId == mySessionStudentId() &&
+        (resource.data.get('timeLeftHome', null) == null || resource.data.get('timeLeftHome', '') == '') &&
+        request.resource.data.diff(resource.data).affectedKeys().hasOnly(['timeLeftHome']) &&
+        request.resource.data.timeLeftHome is string && request.resource.data.timeLeftHome.size() <= 8;
     }
 
+    // ================= LEAVES =================
     match /leaves/{docId} {
       allow read: if (isTeacherAuth() && resource.data.madrasaId == myMadrasaId()) ||
                      (isStudentAuth() && resource.data.studentId == mySessionStudentId());
       allow create: if (isTeacherAuth() && request.resource.data.madrasaId == myMadrasaId()) ||
-                       (isStudentAuth() && request.resource.data.studentId == mySessionStudentId());
-      allow update, delete: if isTeacherAuth() && resource.data.madrasaId == myMadrasaId();
+                       (isStudentAuth() &&
+                        request.resource.data.studentId == mySessionStudentId() &&
+                        request.resource.data.madrasaId == myMadrasaId() &&
+                        request.resource.data.get('status', null) == 'pending' &&
+                        request.resource.data.reason is string &&
+                        request.resource.data.reason.size() <= 1000);
+      allow update: if isTeacherAuth() && resource.data.madrasaId == myMadrasaId() &&
+        request.resource.data.madrasaId == resource.data.madrasaId;
+      allow delete: if isTeacherAuth() && resource.data.madrasaId == myMadrasaId();
     }
 
+    // ================= RESULTS =================
+    // শিক্ষার্থী শুধু নিজের "প্রকাশিত" রেজাল্ট দেখতে পারবে (আগে প্রকাশের শর্ত শুধু অ্যাপে ছিল)
     match /results/{docId} {
       allow get: if request.auth != null && (
                       resource == null ||
                       (isTeacherAuth() && resource.data.madrasaId == myMadrasaId()) ||
-                      (isStudentAuth() && resource.data.studentId == mySessionStudentId())
+                      (isStudentAuth() && resource.data.studentId == mySessionStudentId() &&
+                       resource.data.published == true)
                     );
       allow list: if (isTeacherAuth() && resource.data.madrasaId == myMadrasaId()) ||
-                     (isStudentAuth() && resource.data.studentId == mySessionStudentId());
+                     (isStudentAuth() && resource.data.studentId == mySessionStudentId() &&
+                      resource.data.published == true);
       allow create: if isTeacherAuth() && request.resource.data.madrasaId == myMadrasaId() &&
+        docId.matches(request.resource.data.studentId + '_.*') &&
         canEditResultOf(request.resource.data.studentId);
-      allow update: if isTeacherAuth() && request.resource.data.madrasaId == myMadrasaId() &&
+      allow update: if isTeacherAuth() && resource.data.madrasaId == myMadrasaId() &&
+        request.resource.data.madrasaId == resource.data.madrasaId &&
         request.resource.data.studentId == resource.data.studentId &&
         canEditResultOf(resource.data.studentId);
       allow delete: if isTeacherAuth() && resource.data.madrasaId == myMadrasaId() &&
         canEditResultOf(resource.data.studentId);
     }
 
-    // ===== নোটিশ: create/update ও delete আলাদা (delete-এ request.resource থাকে না, তাই আগে মোছা ব্লক হতো) =====
+    // ================= নোটিশ / ডায়েরি / হোমওয়ার্ক / পরীক্ষার রুটিন =================
+    // create ও update আলাদা: update-এ ডকের আগের madrasaId-ও নিজের হতে হবে
     match /notices/{docId} {
       allow read: if request.auth != null && resource.data.madrasaId == myMadrasaId();
-      allow create, update: if isTeacherAuth() && request.resource.data.madrasaId == myMadrasaId();
+      allow create: if isTeacherAuth() && request.resource.data.madrasaId == myMadrasaId();
+      allow update: if isTeacherAuth() && resource.data.madrasaId == myMadrasaId() &&
+        request.resource.data.madrasaId == myMadrasaId();
       allow delete: if isTeacherAuth() && resource.data.madrasaId == myMadrasaId();
     }
 
     match /diary/{docId} {
       allow read: if (isTeacherAuth() && resource.data.madrasaId == myMadrasaId()) ||
                      (isStudentAuth() && resource.data.madrasaId == myMadrasaId() && resource.data.className == myClassName());
-      allow create, update: if isTeacherAuth() && request.resource.data.madrasaId == myMadrasaId();
+      allow create: if isTeacherAuth() && request.resource.data.madrasaId == myMadrasaId();
+      allow update: if isTeacherAuth() && resource.data.madrasaId == myMadrasaId() &&
+        request.resource.data.madrasaId == myMadrasaId();
       allow delete: if isTeacherAuth() && resource.data.madrasaId == myMadrasaId();
     }
 
-    // ================= HOMEWORK (হোমওয়ার্ক) =================
     match /homework/{docId} {
       allow read: if (isTeacherAuth() && resource.data.madrasaId == myMadrasaId()) ||
                      (isStudentAuth() && resource.data.madrasaId == myMadrasaId() && resource.data.className == myClassName());
-      allow create, update: if isTeacherAuth() && request.resource.data.madrasaId == myMadrasaId();
+      allow create: if isTeacherAuth() && request.resource.data.madrasaId == myMadrasaId();
+      allow update: if isTeacherAuth() && resource.data.madrasaId == myMadrasaId() &&
+        request.resource.data.madrasaId == myMadrasaId();
       allow delete: if isTeacherAuth() && resource.data.madrasaId == myMadrasaId();
     }
 
-    // ================= EXAM ROUTINES (পরীক্ষার রুটিন) =================
     match /examRoutines/{docId} {
       allow read: if (isTeacherAuth() && resource.data.madrasaId == myMadrasaId()) ||
                      (isStudentAuth() && resource.data.madrasaId == myMadrasaId() && resource.data.className == myClassName());
-      allow create, update: if isTeacherAuth() && request.resource.data.madrasaId == myMadrasaId();
+      allow create: if isTeacherAuth() && request.resource.data.madrasaId == myMadrasaId();
+      allow update: if isTeacherAuth() && resource.data.madrasaId == myMadrasaId() &&
+        request.resource.data.madrasaId == myMadrasaId();
       allow delete: if isTeacherAuth() && resource.data.madrasaId == myMadrasaId();
     }
 
@@ -253,34 +343,40 @@ service cloud.firestore {
       allow delete: if isRequesterAdmin() && resource.data.madrasaId == myMadrasaId();
     }
 
+    // ================= FEES =================
     match /fees_monthly/{docId} {
-      allow get: if resource == null ||
+      allow get: if request.auth != null && (
+                    resource == null ||
                     (isTeacherAuth() && resource.data.madrasaId == myMadrasaId()) ||
-                    (isStudentAuth() && resource.data.studentId == mySessionStudentId());
+                    (isStudentAuth() && resource.data.studentId == mySessionStudentId()));
       allow list: if (isTeacherAuth() && resource.data.madrasaId == myMadrasaId()) ||
                      (isStudentAuth() && resource.data.studentId == mySessionStudentId());
-      allow create, update: if isTeacherAuth() && request.resource.data.madrasaId == myMadrasaId();
+      allow create: if isTeacherAuth() && request.resource.data.madrasaId == myMadrasaId() &&
+        studentInMyMadrasa(request.resource.data.studentId) &&
+        docId.matches(request.resource.data.studentId + '_.*');
+      allow update: if isTeacherAuth() && resource.data.madrasaId == myMadrasaId() &&
+        request.resource.data.madrasaId == resource.data.madrasaId &&
+        request.resource.data.studentId == resource.data.studentId;
       allow delete: if isTeacherAuth() && resource.data.madrasaId == myMadrasaId();
     }
 
     match /fees_onetime/{docId} {
       allow read: if (isTeacherAuth() && resource.data.madrasaId == myMadrasaId()) ||
                      (isStudentAuth() && resource.data.studentId == mySessionStudentId());
-      allow create, update: if isTeacherAuth() && request.resource.data.madrasaId == myMadrasaId();
+      allow create: if isTeacherAuth() && request.resource.data.madrasaId == myMadrasaId() &&
+        studentInMyMadrasa(request.resource.data.studentId);
+      allow update: if isTeacherAuth() && resource.data.madrasaId == myMadrasaId() &&
+        request.resource.data.madrasaId == resource.data.madrasaId &&
+        request.resource.data.studentId == resource.data.studentId;
       allow delete: if isTeacherAuth() && resource.data.madrasaId == myMadrasaId();
     }
 
-    // ================= PAYMENTS (পেমেন্ট) =================
-    // Nagad নম্বর ও দাম: শুধু সুপার অ্যাডমিন লিখতে পারেন; মাদ্রাসার অ্যাডমিনরা পড়তে পারেন।
+    // ================= PAYMENTS =================
     match /payment_settings/{id} {
       allow read: if isRequesterAdmin() || isSuperAdmin();
       allow write: if isSuperAdmin();
     }
 
-    // পেমেন্টের আবেদন: মাদ্রাসার অ্যাডমিন শুধু নিজের মাদ্রাসার জন্য, শুধু "pending" অবস্থায় তৈরি করতে পারেন।
-    // ডকুমেন্ট আইডি = মাদ্রাসা আইডি + "_" + TrxID, তাই একই TrxID দ্বিতীয়বার জমা দেওয়া যায় না
-    // (আগের ডকুমেন্ট থাকলে সেটি update হিসেবে ধরা হয়, যা শুধু সুপার অ্যাডমিন পারেন)।
-    // অনুমোদন/প্রত্যাখ্যান (update) শুধু সুপার অ্যাডমিন।
     match /payment_requests/{reqId} {
       allow read: if isSuperAdmin() ||
                      (isRequesterAdmin() && resource.data.madrasaId == myMadrasaId());
@@ -300,19 +396,21 @@ service cloud.firestore {
       allow delete: if false;
     }
 
-    // ================= USAGE TRACKER (ব্যবহারের হিসাব) =================
+    // ================= USAGE TRACKER =================
     match /usage_stats/{date} {
       allow read: if isRequesterAdmin() || isSuperAdmin();
 
       allow write: if request.auth != null &&
         date.matches('^[0-9]{4}-[0-9]{2}-[0-9]{2}$') &&
         request.resource.data.keys().hasOnly(['reads', 'writes', 'deletes', 'lastUpdated']) &&
-        request.resource.data.reads is number && request.resource.data.reads >= 0 &&
-        request.resource.data.writes is number && request.resource.data.writes >= 0 &&
-        request.resource.data.deletes is number && request.resource.data.deletes >= 0 &&
-        (!('reads' in resource.data) || request.resource.data.reads >= resource.data.reads) &&
-        (!('writes' in resource.data) || request.resource.data.writes >= resource.data.writes) &&
-        (!('deletes' in resource.data) || request.resource.data.deletes >= resource.data.deletes);
+        request.resource.data.reads is number && request.resource.data.reads >= 0 && request.resource.data.reads <= 100000000 &&
+        request.resource.data.writes is number && request.resource.data.writes >= 0 && request.resource.data.writes <= 100000000 &&
+        request.resource.data.deletes is number && request.resource.data.deletes >= 0 && request.resource.data.deletes <= 100000000 &&
+        (resource == null || (
+          (!('reads' in resource.data) || request.resource.data.reads >= resource.data.reads) &&
+          (!('writes' in resource.data) || request.resource.data.writes >= resource.data.writes) &&
+          (!('deletes' in resource.data) || request.resource.data.deletes >= resource.data.deletes)
+        ));
     }
 
     match /_ping/{doc} {
