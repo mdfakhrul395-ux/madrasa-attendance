@@ -81,7 +81,6 @@ service cloud.firestore {
     // শিক্ষার্থী আছে এবং আমার মাদ্রাসার
     function studentInMyMadrasa(sid) {
       return sid is string &&
-        exists(/databases/$(database)/documents/students/$(sid)) &&
         get(/databases/$(database)/documents/students/$(sid)).data.madrasaId == myMadrasaId();
     }
 
@@ -229,9 +228,10 @@ service cloud.firestore {
       allow list: if (isTeacherAuth() && resource.data.madrasaId == myMadrasaId()) ||
                      (isStudentAuth() && resource.data.studentId == mySessionStudentId());
 
-      // শিক্ষক: নতুন ডকের আইডি অবশ্যই "শিক্ষার্থী-আইডি_তারিখ" ছাঁচে (ব্যাচে অনেক ডক লেখা হয়, তাই প্রতি ডকে আলাদা শিক্ষার্থী-যাচাই নেই)
+      // শিক্ষক: নতুন ডকের আইডি অবশ্যই "শিক্ষার্থী-আইডি_তারিখ" ছাঁচে এবং শিক্ষার্থী নিজের মাদ্রাসার (batch-chunk.js ব্যাচ ১০টি করে ভাগ করে, তাই ২০-র সীমা পার হয় না)
       allow create: if isTeacherAuth() &&
         request.resource.data.madrasaId == myMadrasaId() &&
+        studentInMyMadrasa(request.resource.data.studentId) &&
         docId.matches(request.resource.data.studentId + '_.*') &&
         request.resource.data.get('timeLeftHome', null) == null;
       allow update: if isTeacherAuth() &&
@@ -260,7 +260,8 @@ service cloud.firestore {
     match /leaves/{docId} {
       allow read: if (isTeacherAuth() && resource.data.madrasaId == myMadrasaId()) ||
                      (isStudentAuth() && resource.data.studentId == mySessionStudentId());
-      allow create: if (isTeacherAuth() && request.resource.data.madrasaId == myMadrasaId()) ||
+      allow create: if (isTeacherAuth() && request.resource.data.madrasaId == myMadrasaId() &&
+                        studentInMyMadrasa(request.resource.data.studentId)) ||
                        (isStudentAuth() &&
                         request.resource.data.studentId == mySessionStudentId() &&
                         request.resource.data.madrasaId == myMadrasaId() &&
@@ -356,6 +357,7 @@ service cloud.firestore {
       allow list: if (isTeacherAuth() && resource.data.madrasaId == myMadrasaId()) ||
                      (isStudentAuth() && resource.data.studentId == mySessionStudentId());
       allow create: if isTeacherAuth() && request.resource.data.madrasaId == myMadrasaId() &&
+        studentInMyMadrasa(request.resource.data.studentId) &&
         docId.matches(request.resource.data.studentId + '_.*');
       allow update: if isTeacherAuth() && resource.data.madrasaId == myMadrasaId() &&
         request.resource.data.madrasaId == resource.data.madrasaId &&
@@ -372,6 +374,14 @@ service cloud.firestore {
         request.resource.data.madrasaId == resource.data.madrasaId &&
         request.resource.data.studentId == resource.data.studentId;
       allow delete: if isTeacherAuth() && resource.data.madrasaId == myMadrasaId();
+    }
+
+    // শ্রেণিভিত্তিক / ব্যক্তিগত নির্ধারিত মাসিক বেতন (fees-quick.js)। ডকের আইডি = মাদ্রাসার আইডি
+    match /fee_defaults/{id} {
+      allow read: if isTeacherAuth() && id == myMadrasaId();
+      allow create, update: if isTeacherAuth() && id == myMadrasaId() &&
+        request.resource.data.madrasaId == myMadrasaId();
+      allow delete: if false;
     }
 
     // ================= PAYMENTS =================
