@@ -77,6 +77,20 @@
     auth.signOut().then(done, done);
   }
 
+  // ---------- ডেমো লিংক: শুধু ?demo=1 দিয়ে খুললে ডেমো বাটন দেখা যায় ----------
+  let autoOpenUntil = 0;
+  (function readDemoLink() {
+    try {
+      const params = new URLSearchParams(location.search);
+      if (params.get('demo') !== '1') return;
+      ls.set('demoLinkOk', '1');             // এই ফোনে বাটন থেকে যাবে
+      autoOpenUntil = Date.now() + 8000;     // এখন সরাসরি ডেমোর পাতা খুলবে
+      params.delete('demo');
+      const qs = params.toString();
+      history.replaceState(null, '', location.pathname + (qs ? '?' + qs : '') + location.hash);
+    } catch (e) { /* ignore */ }
+  })();
+
   // ---------- স্ক্রিন ----------
   let lastKind = 'teacher';
 
@@ -461,8 +475,11 @@
   const prevRoleSelect = window.showRoleSelect;
   window.showRoleSelect = function () {
     const r = prevRoleSelect.apply(this, arguments);
+    if (inDemo()) return r;
+    if (Date.now() < autoOpenUntil) { autoOpenUntil = 0; window.showDemoChoice(); return r; }
+    if (ls.get('demoLinkOk') !== '1') return r; // ডেমো লিংক না খুললে বাটন দেখাবে না
     const card = document.querySelector('#app .card');
-    if (card && !card.querySelector('[data-demo-btn]') && !inDemo()) {
+    if (card && !card.querySelector('[data-demo-btn]')) {
       card.insertAdjacentHTML('beforeend',
         '<button data-demo-btn="1" class="secondary" onclick="showDemoChoice()" style="margin-top:14px;background:#fff7e0;color:#8a5a00;">🎬 ডেমো দেখুন</button>');
     }
