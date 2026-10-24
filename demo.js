@@ -118,7 +118,7 @@
     }
     const b = 'width:auto;margin:0;padding:5px 10px;font-size:12px;';
     bar.innerHTML = '<b style="flex:1;">🎬 ডেমো মোড (নকল তথ্য)</b>'
-      + (kind === 'teacher' ? '<button class="small secondary" style="' + b + '" onclick="demoRefresh()">🔄 তাজা করুন</button>' : '')
+      + (kind === 'teacher' ? '<button class="small secondary" style="' + b + '" onclick="demoRefresh()">🔄 রিসেট</button>' : '')
       + '<button class="small" style="' + b + '" onclick="demoExit()">বের হোন</button>';
   }
   if (inDemo()) showDemoBar(ss.get('demoKind') || 'teacher');
@@ -165,7 +165,11 @@
     if (!m.exists) {
       await mRef.set({ madrasaName: DEMO_NAME, isDemo: true, weeklyOff: [5], createdAt: Date.now() });
     }
-    if (!(m.exists && m.data().demoSeededOn)) await seedAll();
+    const seededOn = m.exists ? m.data().demoSeededOn : null;
+    if (seededOn !== todayLocal()) {
+      prog('ডেমো আজকের তারিখ অনুযায়ী সাজানো হচ্ছে...');
+      await seedAll();
+    }
   }
 
   async function enterTeacher() {
@@ -178,6 +182,7 @@
     try {
       stopAll();
       const user = await teacherSignIn();
+      lockUser(user);
       await ensureDemoReady(user);
       await ensureTeacherDoc(user);
       signupInProgress = false;
@@ -228,10 +233,33 @@
     auth.signOut().then(done, done);
   };
 
+  async function delAll(refs, label) {
+    for (let i = 0; i < refs.length; i += 8) {
+      const b = db.batch();
+      refs.slice(i, i + 8).forEach(r => b.delete(r));
+      await b.commit();
+      prog(label + ' মোছা হচ্ছে ' + bn(Math.min(i + 8, refs.length)) + '/' + bn(refs.length));
+    }
+  }
+
+  // ডেমো মাদ্রাসার সব তথ্য মোছা (শিক্ষার্থী সবার শেষে, কারণ rule শিক্ষার্থী-ডক দেখে PIN/রেজাল্ট মুছতে দেয়)
+  async function wipeDemo() {
+    const q = n => db.collection(n).where('madrasaId', '==', DEMO_ID).get();
+    const cols = ['attendance', 'leaves', 'results', 'fees_monthly', 'fees_onetime', 'notices', 'diary', 'homework', 'examRoutines', 'student_contacts'];
+    for (const n of cols) {
+      const snap = await q(n);
+      await delAll(snap.docs.map(d => d.ref), n);
+    }
+    const st = await q('students');
+    await delAll(st.docs.map(d => db.collection('student_pins').doc(d.id)), 'PIN');
+    await delAll(st.docs.map(d => d.ref), 'শিক্ষার্থী');
+  }
+
   window.demoRefresh = async function () {
-    if (!confirm('ডেমোর তারিখ ও নকল তথ্য আজকের হিসেবে নতুন করে সাজানো হবে। এগিয়ে যাবেন?')) return;
-    demoLoading('ডেমো তাজা করা হচ্ছে...');
+    if (!confirm('ডেমোর সব তথ্য (সবার করা পরিবর্তনসহ) মুছে নতুন করে সাজানো হবে। এগিয়ে যাবেন?')) return;
+    demoLoading('ডেমো রিসেট হচ্ছে...');
     try {
+      await wipeDemo();
       await seedAll();
       teacherTab('home');
     } catch (e) { fail(e); }
@@ -381,6 +409,53 @@
 
     await col('madrasas').doc(DEMO_ID).set({ demoSeededOn: today }, { merge: true });
   }
+
+  // ---------- ডেমোতে বন্ধ রাখা কাজ ----------
+  const DEMO_MSG = 'ডেমো মোডে এটি বন্ধ আছে';
+  const demoErr = () => new Error(DEMO_MSG);
+
+  // সেটিংস, বন্ধের দিন, শিক্ষক-ব্যবস্থাপনা ও সুপার অ্যাডমিনের কাজ
+  ['saveSettings', 'removeLogo', 'saveWeeklyOff', 'addHolidays', 'removeHoliday', 'saveHolidayPatch',
+   'addTeacherAccount', 'toggleTeacherAdmin', 'toggleTeacherActive', 'approveTeacher', 'toggleMadrasaActive'
+  ].forEach(name => {
+    const orig = window[name];
+    if (typeof orig !== 'function') return;
+    window[name] = function () {
+      if (inDemo()) { alert(DEMO_MSG); return; }
+      return orig.apply(this, arguments);
+    };
+  });
+
+  // পেমেন্ট: ডেমোতে payment_requests / payment_settings এ কোনো লেখা চলবে না
+  const LOCKED_COLLECTIONS = ['payment_requests', 'payment_settings'];
+  const origCollection = db.collection.bind(db);
+  db.collection = function (name) {
+    const c = origCollection(name);
+    if (!inDemo() || LOCKED_COLLECTIONS.indexOf(name) === -1) return c;
+    const rej = () => Promise.reject(demoErr());
+    c.add = rej;
+    const origDoc = c.doc.bind(c);
+    c.doc = function () {
+      const d = origDoc.apply(c, arguments);
+      d.set = rej; d.update = rej; d.delete = rej;
+      return d;
+    };
+    return c;
+  };
+
+  // ডেমো অ্যাকাউন্টের পাসওয়ার্ড/ইমেইল বদল বা মোছা বন্ধ (যেন কেউ ডেমো আটকে দিতে না পারে)
+  function lockUser(u) {
+    if (!u) return;
+    ['updatePassword', 'updateEmail', 'verifyBeforeUpdateEmail', 'delete'].forEach(m => {
+      if (typeof u[m] === 'function') u[m] = () => Promise.reject(demoErr());
+    });
+  }
+  const origReset = auth.sendPasswordResetEmail.bind(auth);
+  auth.sendPasswordResetEmail = function (email) {
+    if (inDemo() || email === EMAIL) return Promise.reject(demoErr());
+    return origReset.apply(auth, arguments);
+  };
+  auth.onAuthStateChanged(u => { if (u && u.email === EMAIL) lockUser(u); });
 
   // ---------- app.js এর সাথে জোড়া লাগানো ----------
   const prevRoleSelect = window.showRoleSelect;
