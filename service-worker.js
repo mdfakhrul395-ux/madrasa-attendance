@@ -1,31 +1,50 @@
+// ShikkhaOS service worker v33 — "আগে ক্যাশ, পরে নেটওয়ার্ক" (stale-while-revalidate)
+// অ্যাপ আইকনে চাপলে সব ফাইল সাথে সাথে ক্যাশ থেকে আসে, আর ব্যাকগ্রাউন্ডে নতুন কপি নেমে ক্যাশ হালনাগাদ হয়।
+// ফাইল বদলালে এই CACHE_NAME-এর সংখ্যা বাড়িয়ে দিন: তাহলে অ্যাপ খোলার কয়েক সেকেন্ডের মধ্যেই নিজে একবার রিফ্রেশ হয়ে নতুন কোড নেবে।
+// না বাড়ালেও নতুন কোড পরের বার অ্যাপ খুললে চলে আসবে।
 const CACHE_NAME = 'madrasa-attendance-v33';
 const ASSETS = [
+  './',
   './index.html',
   './style.css',
-  './app.js',
-  './dashboard.js',
-  './icons.js',
-  './ui-polish.js',
-  './desktop.js',
-  './NotoSansBengali-Regular.woff',
-  './NotoSansBengali-Bold.woff',
-  './homework.js',
-  './exam-routine.js',
-  './diary-ict.js',
-  './firebase-config.js',
-  './batch-chunk.js',
   './manifest.json',
   './icon-192.png',
-  './icon-512.png'
+  './icon-512.png',
+  './NotoSansBengali-Regular.woff',
+  './NotoSansBengali-Bold.woff',
+  './firebase-config.js',
+  './batch-chunk.js',
+  './usage-tracker.js',
+  './app.js',
+  './suggestion-patch.js',
+  './dashboard.js',
+  './leave-format.js',
+  './diary-ict.js',
+  './student-edit.js',
+  './tenant-link.js',
+  './homework.js',
+  './exam-routine.js',
+  './plans.js',
+  './plans-gate.js',
+  './plans-expiry.js',
+  './payments.js',
+  './reads-saver.js',
+  './icons.js',
+  './ui-polish.js',
+  './final-result.js',
+  './class-teacher.js',
+  './fees-quick.js',
+  './demo.js',
+  './desktop.js'
 ];
 
-// নেটওয়ার্ক রিকোয়েস্ট এত সময়ের মধ্যে (ms) সাড়া না দিলে সাথে সাথে ক্যাশ থেকে দেখানো হবে,
-// যাতে দুর্বল নেটওয়ার্কেও অ্যাপ দ্রুত খোলে। ভালো নেটে এই টাইমআউট স্পর্শই হয় না — নেটওয়ার্ক
-// রেসপন্সই আগে চলে আসে এবং সেটাই দেখানো হয় (তাই লেটেস্ট কোড পাওয়া নিশ্চিত থাকে)।
-const NETWORK_TIMEOUT_MS = 1500;
-
+// কোনো একটি ফাইল না পাওয়া গেলেও ইনস্টল ব্যর্থ হয় না (আগের addAll-এ একটি ফাইল না থাকলে সবকিছু ব্যর্থ হতো)
 self.addEventListener('install', e => {
-  e.waitUntil(caches.open(CACHE_NAME).then(c => c.addAll(ASSETS)));
+  e.waitUntil(
+    caches.open(CACHE_NAME).then(cache =>
+      Promise.all(ASSETS.map(u => cache.add(new Request(u, { cache: 'reload' })).catch(() => {})))
+    )
+  );
   self.skipWaiting();
 });
 
@@ -37,38 +56,28 @@ self.addEventListener('activate', e => {
 });
 
 self.addEventListener('fetch', e => {
-  // Only handle our own app-shell files; let everything else (Firebase/Firestore) go straight to network.
-  const url = new URL(e.request.url);
+  const req = e.request;
+  if (req.method !== 'GET') return;
+  const url = new URL(req.url);
+  // শুধু অ্যাপের নিজের ফাইল; Firebase/Firestore সরাসরি নেটওয়ার্কে যায়
   if (url.origin !== self.location.origin) return;
+  const isNav = req.mode === 'navigate';
 
-  e.respondWith(
-    (async () => {
-      const cachePromise = caches.match(e.request);
+  e.respondWith((async () => {
+    const cache = await caches.open(CACHE_NAME);
+    // ?m=কোড-সহ লিংকে খুললেও (মাদ্রাসার নিজস্ব লিংক) ক্যাশ থেকে index.html আসে
+    let cached = await cache.match(req, { ignoreSearch: isNav });
+    if (!cached && isNav) cached = await cache.match('./index.html');
 
-      // নেটওয়ার্ক রিকোয়েস্ট শুরু করা হয় — সফল হলে ক্যাশ আপডেট হয়, ব্যাকগ্রাউন্ডে চলতে থাকে
-      // এমনকি যদি টাইমআউটের কারণে আমরা আগেই ক্যাশড কপি দিয়ে দিই।
-      const networkPromise = fetch(e.request)
-        .then(response => {
-          const copy = response.clone();
-          caches.open(CACHE_NAME).then(c => c.put(e.request, copy));
-          return response;
-        })
-        .catch(() => null);
+    const update = fetch(req).then(async res => {
+      if (res && res.ok && res.type === 'basic') await cache.put(isNav ? './index.html' : req, res.clone());
+      return res;
+    }).catch(() => null);
 
-      const timeoutPromise = new Promise(resolve => setTimeout(() => resolve(null), NETWORK_TIMEOUT_MS));
-
-      // যেটা আগে সাড়া দেয় (নেটওয়ার্ক বা টাইমআউট) সেটাই আগে চেষ্টা করা হয়,
-      // নেটওয়ার্ক ব্যর্থ/দেরি হলে ক্যাশড কপি, তাও না থাকলে নেটওয়ার্ক রেসপন্সের জন্য অপেক্ষা।
-      const early = await Promise.race([networkPromise, timeoutPromise]);
-      if (early) return early;
-
-      const cached = await cachePromise;
-      if (cached) return cached;
-
-      const late = await networkPromise;
-      if (late) return late;
-
-      return new Response('অফলাইন — ইন্টারনেট সংযোগ পরীক্ষা করুন', { status: 503, headers: { 'Content-Type': 'text/plain; charset=utf-8' } });
-    })()
-  );
+    if (cached) { e.waitUntil(update); return cached; }
+    const res = await update;
+    return res || new Response('অফলাইন — ইন্টারনেট সংযোগ পরীক্ষা করুন', {
+      status: 503, headers: { 'Content-Type': 'text/plain; charset=utf-8' }
+    });
+  })());
 });

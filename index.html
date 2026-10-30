@@ -53,10 +53,16 @@
 <script defer src="class-teacher.js"></script>
 <script defer src="fees-quick.js"></script>
 <script defer src="demo.js"></script>
-  <script defer src="desktop.js?v=5"></script>
-  
+<script defer src="desktop.js?v=5"></script>
+
 <script>
 if ('serviceWorker' in navigator) {
+  const hadController = !!navigator.serviceWorker.controller;
+  let reloaded = false;
+  navigator.serviceWorker.addEventListener('controllerchange', () => {
+    if (!hadController || reloaded || performance.now() > 30000) return;
+    reloaded = true; location.reload();
+  });
   window.addEventListener('load', () => {
     navigator.serviceWorker.register('service-worker.js').catch(()=>{});
   });
