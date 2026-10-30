@@ -22,9 +22,26 @@
 <div id="app" class="screen active" style="display:block;">
   <div style="text-align:center;padding:60px 20px;color:#555;">
     <div style="font-size:15px;">লোড হচ্ছে...</div>
+    <div id="bootStage" style="font-size:12px;color:#94a3b8;margin-top:10px;"></div>
   </div>
 </div>
 <nav id="bottomNav" class="tabs" style="display:none;"></nav>
+
+<!-- "লোড হচ্ছে..." এর নিচে এখন কোন ধাপে অপেক্ষা চলছে ও কত সেকেন্ড হলো, তা দেখায় (অ্যাপ খুললেই মুছে যায়) -->
+<script>
+(function () {
+  var t0 = Date.now();
+  window.__bootStage = 'ফাইল নামছে';
+  function paint() {
+    var el = document.getElementById('bootStage');
+    if (!el) return false;
+    el.textContent = window.__bootStage + ' · ' + (Math.round((Date.now() - t0) / 100) / 10) + ' সেকেন্ড';
+    return true;
+  }
+  window.bootStage = function (s) { window.__bootStage = s; paint(); };
+  var iv = setInterval(function () { if (!paint()) clearInterval(iv); }, 250);
+})();
+</script>
 
 <!-- Firebase SDK (compat, no build step needed) -->
 <script defer src="https://www.gstatic.com/firebasejs/10.12.2/firebase-app-compat.js"></script>

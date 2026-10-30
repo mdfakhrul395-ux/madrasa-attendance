@@ -2,7 +2,11 @@
 // অ্যাপ আইকনে চাপলে সব ফাইল সাথে সাথে ক্যাশ থেকে আসে, আর ব্যাকগ্রাউন্ডে নতুন কপি নেমে ক্যাশ হালনাগাদ হয়।
 // ফাইল বদলালে এই CACHE_NAME-এর সংখ্যা বাড়িয়ে দিন: তাহলে অ্যাপ খোলার কয়েক সেকেন্ডের মধ্যেই নিজে একবার রিফ্রেশ হয়ে নতুন কোড নেবে।
 // না বাড়ালেও নতুন কোড পরের বার অ্যাপ খুললে চলে আসবে।
-const CACHE_NAME = 'madrasa-attendance-v35';
+const CACHE_NAME = 'madrasa-attendance-v37';
+// Firebase SDK (gstatic, ভার্সন-ঠিক করা ফাইল) একবার নামলে ফোনে রাখা হয়: নেট ধীর বা না থাকলেও অ্যাপ চালু হয়
+const SDK_CACHE = 'shikkhaos-sdk-v1';
+const isSdk = url => url.origin === 'https://www.gstatic.com' && url.pathname.indexOf('/firebasejs/10.12.2/') === 0;
+
 const ASSETS = [
   './',
   './index.html',
@@ -51,7 +55,7 @@ self.addEventListener('install', e => {
 
 self.addEventListener('activate', e => {
   e.waitUntil(
-    caches.keys().then(keys => Promise.all(keys.filter(k => k !== CACHE_NAME).map(k => caches.delete(k))))
+    caches.keys().then(keys => Promise.all(keys.filter(k => k !== CACHE_NAME && k !== SDK_CACHE).map(k => caches.delete(k))))
   );
   self.clients.claim();
 });
@@ -60,7 +64,20 @@ self.addEventListener('fetch', e => {
   const req = e.request;
   if (req.method !== 'GET') return;
   const url = new URL(req.url);
-  // শুধু অ্যাপের নিজের ফাইল; Firebase/Firestore সরাসরি নেটওয়ার্কে যায়
+
+  if (isSdk(url)) {
+    e.respondWith((async () => {
+      const sdk = await caches.open(SDK_CACHE);
+      const hit = await sdk.match(req);
+      if (hit) return hit;
+      const res = await fetch(req);
+      if (res && (res.ok || res.type === 'opaque')) { try { await sdk.put(req, res.clone()); } catch (x) { /* ignore */ } }
+      return res;
+    })());
+    return;
+  }
+
+  // বাকি সবকিছু: শুধু অ্যাপের নিজের ফাইল; Firestore/Auth সরাসরি নেটওয়ার্কে যায়
   if (url.origin !== self.location.origin) return;
   const isNav = req.mode === 'navigate';
 
