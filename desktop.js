@@ -3,7 +3,7 @@
  * index.html এ সবার শেষে (demo.js এর নিচে) লোড হয়:
  *   <script defer src="desktop.js"></script>
  *
- * শুধু কম্পিউটারে (৯০০px+ চওড়া স্ক্রিন + মাউস/টাচপ্যাড) কাজ করে। কোনো ফোনে, এমনকি বড় ফোন বা আড়াআড়ি ধরলেও, ডিজাইন একটুও বদলায় না।
+ * ৯৬০px বা তার চেয়ে চওড়া স্ক্রিনে কাজ করে: কম্পিউটারে, অথবা ফোনে "Desktop site" চালু করলে। সাধারণ মোবাইল ভিউতে ডিজাইন একটুও বদলায় না।
  * app.js, dashboard.js, icons.js, ui-polish.js কিছুই বদলাতে হয় না।
  *   1) নিচের নেভিগেশন বার বাঁ পাশের সাইডবার হয়ে যায় (প্রাথমিক ট্যাব + "আরও" মেনুর সব গ্রুপ একসাথে)
  *   2) উপরের হেডার বাঁ-সারিবদ্ধ হয়, হোম/লগআউট আইকন ডান পাশে যায়
@@ -13,11 +13,10 @@
 (function () {
   'use strict';
   try {
-    // TEST_ON_PHONE = true: ফোনে Desktop site চালু করলেও ডেস্কটপ চেহারা দেখা যায় (পরীক্ষার জন্য)।
-    // সব ধাপ পরীক্ষা শেষে false করা হবে: তখন শুধু আসল কম্পিউটারে (মাউস/টাচপ্যাডসহ) চালু হবে, কোনো ফোনে নয়।
-    var TEST_ON_PHONE = true;
-    var MQ = TEST_ON_PHONE ? '(min-width:900px)' : '(min-width:900px) and (hover:hover) and (pointer:fine)';
-    var MQP = TEST_ON_PHONE ? 'print and (min-width:900px)' : 'print and (hover:hover) and (pointer:fine)';
+    // ফোনের লক নেই: ফোনে Chrome-এর "Desktop site" চালু করলে (পর্দা প্রায় ৯৮০px চওড়া ধরা হয়) ডেস্কটপ চেহারা দেখা যায়।
+    // সাধারণ মোবাইল ভিউতে (আড়াআড়ি ধরলেও, ৯৬০px-এর কম) ফোনের ডিজাইন একটুও বদলায় না।
+    var MQ = '(min-width:960px)';
+    var MQP = 'print and (min-width:960px)';
     var nav = document.getElementById('bottomNav');
     if (!nav) return;
 
@@ -112,8 +111,8 @@
       'body.ds-on .fq-toast{left:50%;right:auto;width:min(460px,60vw);transform:translateX(calc(-50% + 134px));bottom:28px}' +
       'body.ds-on tbody tr:hover td{background:#f4fafb}' +
 
-      /* ভাসমান গোল বাটন কোণায় সরে যায় */
-      'body.ds-on .ds-float{right:28px!important;bottom:28px!important}' +
+      /* ভাসমান গোল বাটন উপরের হেডারে (হোম আইকনের পাশে) সরে যায়, কোনো কনটেন্ট ঢাকে না */
+      'body.ds-on .ds-float{top:8px!important;bottom:auto!important;right:84px!important;z-index:60!important}' +
       '}' +
 
       /* ---------- প্রিন্ট (শুধু কম্পিউটারে): সাইডবার ছাপা হয় না ---------- */
