@@ -343,6 +343,26 @@
     setTimeout(function () { obs.disconnect(); if (currentObs === obs) currentObs = null; }, 10000);
   }
 
+  // ---------- প্রিন্ট: মার্কশিটের উপরের অংশ (টেবিল + নম্বরের বক্স) যেন ১ম পেজে ধরে ----------
+  (function addPrintStyle() {
+    if (document.getElementById('marksSplitPrintStyle')) return;
+    var st = document.createElement('style');
+    st.id = 'marksSplitPrintStyle';
+    st.textContent =
+      '@media print {' +
+      '  @page { margin: 6mm; }' +
+      '  html, body, #app { margin: 0 !important; padding: 0 !important; }' +
+      '  #marksheetPrintArea { margin: 0 !important; padding: 6px 8px !important; box-shadow: none !important; }' +
+      '  #marksheetPrintArea hr { margin: 5px 0 !important; }' +
+      '  #marksheetPrintArea table th, #marksheetPrintArea table td { padding: 3px 5px !important; line-height: 1.2 !important; }' +
+      '  #marksheetPrintArea table { margin-top: 6px !important; }' +
+      '  #marksheetPrintArea div[style*="flex-wrap"][style*="margin-top:14px"] { margin-top: 6px !important; gap: 6px !important; break-inside: avoid; page-break-inside: avoid; }' +
+      '  #marksheetPrintArea div[style*="flex-wrap"][style*="margin-top:14px"] > div { padding: 5px 6px !important; }' +
+      '  #marksheetPrintArea p.muted { margin: 6px 0 0 !important; }' +
+      '}';
+    document.head.appendChild(st);
+  })();
+
   var origView = window.viewMarksheet;
   if (typeof origView === 'function') {
     window.viewMarksheet = function (studentId, docId) {
