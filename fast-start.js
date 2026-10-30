@@ -9,6 +9,7 @@
  *  2) অ্যাপ খোলার সময় Firebase-এর লগইন-যাচাই শেষ হওয়ার অপেক্ষা করে না:
  *     - কোনো ভূমিকা বাছা না থাকলে "আপনি কে?" পাতা সাথে সাথে দেখায়
  *     - শিক্ষক আগে লগইন করা থাকলে শিক্ষকের হোম পাতা সাথে সাথে খোলে (শেষবারের ডেটাসহ)
+     - শিক্ষার্থী আগে লগইন করা থাকলে শিক্ষার্থীর হোম পাতা সাথে সাথে খোলে
  *     লগইন যাচাই পেছনে চলে; কিছু ভুল হলে (যেমন লগইন নেই) আগের মতোই লগইন পাতা আসে।
  *     নিরাপত্তা firestore.rules-এ সার্ভারেই জোর করা থাকে, তাই এতে কিছু বদলায় না।
  *  3) শিক্ষকের তথ্য ফোনের ক্যাশে থাকলে সার্ভারের অপেক্ষা ছাড়াই চলে।
@@ -97,6 +98,7 @@
     // ---------- ৪) লগইন-যাচাইয়ের অপেক্ষা ছাড়াই প্রথম পাতা ----------
     try {
       var oShow = window.showTeacherApp;
+      var oShowStu = window.showStudentApp;
       var navVisible = function () {
         var n = document.getElementById('bottomNav');
         return !!(n && n.style.display !== 'none');
@@ -117,6 +119,12 @@
         myTeacherPending = false;
         listenStudents(); listenSettings(); listenStudentContacts();
         oShow.call(window);
+      } else if (r0 === 'student' && localStorage.getItem('myStudentId') &&
+                 typeof oShowStu === 'function' && typeof listenStudents === 'function') {
+        // শিক্ষার্থী: সেশন যাচাই পেছনে চলে, ভুল হলে (সেশন নেই) আগের মতোই নাম-বাছাই পাতা আসে
+        window.__fsOptimisticStu = true;
+        listenStudents(); listenSettings();
+        oShowStu.call(window);
       }
 
       // লগইন যাচাই শেষে app.js আবার showTeacherApp() ডাকে: পাতা যদি ইতিমধ্যে খোলা থাকে, তাহলে আর
@@ -126,6 +134,25 @@
           if (window.__fsOptimistic && navVisible()) { window.__fsOptimistic = false; return; }
           window.__fsOptimistic = false;
           return oShow.apply(this, arguments);
+        };
+      }
+      if (typeof oShowStu === 'function') {
+        window.showStudentApp = function () {
+          if (window.__fsOptimisticStu && navVisible()) { window.__fsOptimisticStu = false; return; }
+          window.__fsOptimisticStu = false;
+          return oShowStu.apply(this, arguments);
+        };
+      }
+
+      // আগাম খোলা শিক্ষার্থী-পাতার পর সেশন যাচাই ব্যর্থ হলে নাম-বাছাই পাতার আগে চলতে থাকা লিসেনার বন্ধ করা
+      var oPicker = window.showStudentPicker;
+      if (typeof oPicker === 'function') {
+        window.showStudentPicker = function () {
+          if (window.__fsOptimisticStu) {
+            window.__fsOptimisticStu = false;
+            try { if (window.stopTeacherDashboard) window.stopTeacherDashboard(); stopUnreadListeners(); } catch (e) { /* ignore */ }
+          }
+          return oPicker.apply(this, arguments);
         };
       }
     } catch (e) {
@@ -138,6 +165,7 @@
       if (typeof oLogout === 'function') {
         window.logout = function () {
           window.__fsOptimistic = false;
+          window.__fsOptimisticStu = false;
           try { localStorage.removeItem('fsTeacher'); } catch (e) { /* ignore */ }
           return oLogout.apply(this, arguments);
         };
