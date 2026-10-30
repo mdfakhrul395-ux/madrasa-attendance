@@ -1,9 +1,9 @@
-/* ShikkhaOS — desktop.js (ধাপ ১: কম্পিউটারের জন্য সাইডবার লেআউট)
+/* ShikkhaOS — desktop.js (ধাপ ১-৩: সাইডবার, ড্যাশবোর্ড গ্রিড, তালিকা দুই কলামে, ফর্ম/টেবিল, প্রিন্ট)
  *
  * index.html এ সবার শেষে (demo.js এর নিচে) লোড হয়:
  *   <script defer src="desktop.js"></script>
  *
- * শুধু ৯০০px বা তার চেয়ে চওড়া স্ক্রিনে কাজ করে। ফোনের ডিজাইন একটুও বদলায় না।
+ * শুধু কম্পিউটারে (৯০০px+ চওড়া স্ক্রিন + মাউস/টাচপ্যাড) কাজ করে। কোনো ফোনে, এমনকি বড় ফোন বা আড়াআড়ি ধরলেও, ডিজাইন একটুও বদলায় না।
  * app.js, dashboard.js, icons.js, ui-polish.js কিছুই বদলাতে হয় না।
  *   1) নিচের নেভিগেশন বার বাঁ পাশের সাইডবার হয়ে যায় (প্রাথমিক ট্যাব + "আরও" মেনুর সব গ্রুপ একসাথে)
  *   2) উপরের হেডার বাঁ-সারিবদ্ধ হয়, হোম/লগআউট আইকন ডান পাশে যায়
@@ -13,6 +13,11 @@
 (function () {
   'use strict';
   try {
+    // TEST_ON_PHONE = true: ফোনে Desktop site চালু করলেও ডেস্কটপ চেহারা দেখা যায় (পরীক্ষার জন্য)।
+    // সব ধাপ পরীক্ষা শেষে false করা হবে: তখন শুধু আসল কম্পিউটারে (মাউস/টাচপ্যাডসহ) চালু হবে, কোনো ফোনে নয়।
+    var TEST_ON_PHONE = true;
+    var MQ = TEST_ON_PHONE ? '(min-width:900px)' : '(min-width:900px) and (hover:hover) and (pointer:fine)';
+    var MQP = TEST_ON_PHONE ? 'print and (min-width:900px)' : 'print and (hover:hover) and (pointer:fine)';
     var nav = document.getElementById('bottomNav');
     if (!nav) return;
 
@@ -26,14 +31,20 @@
 
     var CAP = "url(\"data:image/svg+xml,%3Csvg xmlns='http://www.w3.org/2000/svg' viewBox='0 0 24 24' fill='none' stroke='white' stroke-width='1.8' stroke-linecap='round' stroke-linejoin='round'%3E%3Cpath d='M2.5 9.5 12 5l9.5 4.5L12 14z'/%3E%3Cpath d='M6.5 11.8V16c0 1.4 2.5 2.8 5.5 2.8s5.5-1.4 5.5-2.8v-4.2'/%3E%3Cpath d='M21.5 9.5V15'/%3E%3C/svg%3E\")";
 
-    var CSS = '@media (min-width:900px){' +
+    // যেসব তালিকা ডেস্কটপে দুই কলামে সাজবে (app.js ও fees-quick.js-এর আসল আইডি অনুযায়ী)
+    var LISTS = ['#studentsListWrap', '#resultsWrap', '#leavesWrap', '#noticesWrap', '#suggestionsWrap', '#diaryWrap',
+      '#tlWrap', '#teachersListWrap', '#madrasasListWrap', '#attList', '#fqList'];
+    var gridSel = LISTS.map(function (x) { return 'body.ds-on ' + x; }).join(',');
+    var spanSel = LISTS.map(function (x) { return 'body.ds-on ' + x + ' > :not(.student-row):not(.card):not(.fq-row)'; }).join(',');
+
+    var CSS = '@media ' + MQ + '{' +
 
       /* ---------- পুরো পাতা ---------- */
       'body.ds-on{padding:0 0 32px 268px;background:#eef3f5}' +
-      'body.ds-on .screen{max-width:1040px;padding:30px 36px}' +
+      'body.ds-on .screen{max-width:1120px;padding:30px 36px}' +
 
       /* ---------- উপরের হেডার ---------- */
-      'body.ds-on header{text-align:left;padding:18px 32px;font-size:19px;letter-spacing:.2px;background:#0f766e;box-shadow:0 2px 14px rgba(15,23,42,.12)}' +
+      'body.ds-on header{text-align:left;display:flex;align-items:center;height:60px;box-sizing:border-box;padding:0 32px;font-size:19px;letter-spacing:.2px;background:#0f766e;box-shadow:0 2px 14px rgba(15,23,42,.12)}' +
       'body.ds-on header > span:first-child{left:auto!important;right:24px;top:50%;transform:translateY(-50%);padding:5px;border-radius:10px;line-height:0;transition:background .15s}' +
       'body.ds-on header > span:first-child:hover{background:rgba(255,255,255,.18)}' +
 
@@ -74,7 +85,39 @@
       'body.ds-on .student-row:hover{background:#f4f9fa}' +
       'body.ds-on .dash .dash-actions .dash-act{cursor:pointer}' +
       'body.ds-on .dash .dash-actions .dash-act:hover .dash-act-ic{transform:translateY(-4px)}' +
-      '}';
+      /* ---------- ড্যাশবোর্ড (শিক্ষক ও শিক্ষার্থী): ১২ কলামের গ্রিড ---------- */
+      'body.ds-on .dash{display:grid;grid-template-columns:repeat(12,minmax(0,1fr));gap:18px;align-items:start;padding-bottom:0}' +
+      'body.ds-on .dash > *{margin:0!important}' +
+      'body.ds-on .dash > .dash-hero{grid-column:1 / 8;grid-row:1 / 3;align-self:stretch;display:flex;flex-direction:column;justify-content:space-between}' +
+      'body.ds-on .dash > .dash-strip{grid-column:8 / 13;grid-row:1;grid-template-columns:repeat(2,1fr)}' +
+      'body.ds-on .dash > .dash-strip .dash-cell:nth-child(n+3){border-top:1px solid #e6ebef}' +
+      'body.ds-on .dash > .dash-strip .dash-cell:nth-child(3){border-left:0}' +
+      'body.ds-on .dash > .dash-actions{grid-column:8 / 13;grid-row:2;align-self:stretch;align-items:center;padding:18px 10px;background:#fff;border-radius:18px;box-shadow:0 0 0 1px #e6ebef}' +
+      'body.ds-on .dash > .dash-sec{grid-column:span 6}' +
+      'body.ds-on .dash > #dashLeaves,body.ds-on .dash > #dashMerit{grid-column:1 / -1}' +
+
+      /* ---------- ফর্ম, তালিকা, টেবিল ---------- */
+      'body.ds-on .card input:not([type=checkbox]):not([type=radio]):not([type=file]),body.ds-on .card select,body.ds-on .card textarea{max-width:560px}' +
+      gridSel + '{display:grid;grid-template-columns:repeat(2,minmax(0,1fr));column-gap:24px}' +
+      spanSel + '{grid-column:1 / -1}' +
+      'body.ds-on #feesResultWrap{display:grid;grid-template-columns:repeat(2,minmax(0,1fr));column-gap:24px}' +
+      'body.ds-on #feesResultWrap > :not(.fq-row){grid-column:1 / -1}' +
+      'body.ds-on #marksheetPrintArea{max-width:820px;margin-left:auto;margin-right:auto}' +
+      'body.ds-on #topBar{top:60px!important;z-index:9!important;padding:10px 32px!important}' +
+
+      /* ---------- বেতনের শিট ও বার্তা: মাঝখানে পপআপ ---------- */
+      'body.ds-on .fq-bd{align-items:center;justify-content:center}' +
+      'body.ds-on .fq-pn{width:480px;max-width:92vw;border-radius:22px;padding-bottom:18px}' +
+      'body.ds-on .fq-pn:before{display:none}' +
+      'body.ds-on .fq-toast{left:50%;right:auto;width:min(460px,60vw);transform:translateX(calc(-50% + 134px));bottom:28px}' +
+      'body.ds-on tbody tr:hover td{background:#f4fafb}' +
+
+      /* ভাসমান গোল বাটন কোণায় সরে যায় */
+      'body.ds-on .ds-float{right:28px!important;bottom:28px!important}' +
+      '}' +
+
+      /* ---------- প্রিন্ট (শুধু কম্পিউটারে): সাইডবার ছাপা হয় না ---------- */
+      '@media ' + MQP + '{body.ds-on{padding-left:0!important}body.ds-on nav.tabs,body.ds-on .ds-float{display:none!important}}';
 
     if (!document.getElementById('desktopStyles')) {
       var st = document.createElement('style');
@@ -82,6 +125,18 @@
       st.textContent = CSS;
       document.head.appendChild(st);
     }
+    // নীল গোল ভাসমান বাটন (যে ফাইল থেকেই আসুক) শনাক্ত করে ds-float ক্লাস দেয়
+    var tagFloat = function () {
+      var els = document.querySelectorAll('body > *');
+      for (var i = 0; i < els.length; i++) {
+        var e = els[i];
+        if (e === nav || e.tagName === 'HEADER' || e.classList.contains('ds-float')) continue;
+        var cs = getComputedStyle(e);
+        if (cs.position === 'fixed' && e.offsetWidth > 0 && e.offsetWidth <= 72 && e.offsetHeight <= 72 && parseFloat(cs.borderTopLeftRadius) >= 20) e.classList.add('ds-float');
+      }
+    };
+    tagFloat();
+    setInterval(tagFloat, 3000);
   } catch (e) {
     console.error('[desktop] ডেস্কটপ লেআউট চালু হয়নি, আগের ডিজাইনই থাকবে:', e);
   }
