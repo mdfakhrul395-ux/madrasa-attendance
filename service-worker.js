@@ -2,7 +2,7 @@
 // অ্যাপ আইকনে চাপলে সব ফাইল সাথে সাথে ক্যাশ থেকে আসে, আর ব্যাকগ্রাউন্ডে নতুন কপি নেমে ক্যাশ হালনাগাদ হয়।
 // ফাইল বদলালে এই CACHE_NAME-এর সংখ্যা বাড়িয়ে দিন: তাহলে অ্যাপ খোলার কয়েক সেকেন্ডের মধ্যেই নিজে একবার রিফ্রেশ হয়ে নতুন কোড নেবে।
 // না বাড়ালেও নতুন কোড পরের বার অ্যাপ খুললে চলে আসবে।
-const CACHE_NAME = 'madrasa-attendance-v33';
+const CACHE_NAME = 'madrasa-attendance-v35';
 const ASSETS = [
   './',
   './index.html',
@@ -13,6 +13,7 @@ const ASSETS = [
   './NotoSansBengali-Regular.woff',
   './NotoSansBengali-Bold.woff',
   './firebase-config.js',
+  './fast-start.js',
   './batch-chunk.js',
   './usage-tracker.js',
   './app.js',
