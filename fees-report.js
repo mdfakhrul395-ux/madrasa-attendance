@@ -1,9 +1,9 @@
-// ================= fees-report.js (v2) — দৈনিক ও মাসিক আদায় রিপোর্ট (বেতন/ফি) =================
+// ================= fees-report.js (v3) — দৈনিক ও মাসিক আদায় রিপোর্ট (বেতন/ফি) =================
 // index.html-এ সবার শেষে (fees-quick.js-এর পরে) লোড হবে। app.js / fees-quick.js ছুঁতে হয় না।
 // বন্ধ করতে: index.html থেকে এই ফাইলের লাইনটি মুছে দিন।
 //  • "বেতন" ট্যাবে নতুন বাটন "আদায় রিপোর্ট" (শুধু শিক্ষকের জন্য)
 //  • দৈনিক: তারিখ ও শ্রেণি বেছে সেদিনের মোট আদায়, শ্রেণিভিত্তিক যোগফল ও কে কত দিয়েছে তার তালিকা
-//  • মাসিক: মাসের মোট আদায়, দিনভিত্তিক ও শ্রেণিভিত্তিক হিসাব, শিক্ষার্থীভিত্তিক যোগফল, ওই মাসের বেতনের আদায়/বকেয়া ও হার
+//  • মাসিক: মাসের মোট আদায়, দিনভিত্তিক ও শ্রেণিভিত্তিক হিসাব, শিক্ষার্থীভিত্তিক যোগফল
 //  • দুটোই প্রিন্টযোগ্য
 //  • প্রতিটি পরিশোধের সাথে তারিখ/মাস চিহ্ন (payDates, payMonths) জমা হয়
 (function () {
@@ -122,11 +122,10 @@
     return Promise.all(jobs).then(parts => merge(parts, warns));
   }
 
-  // মাসের প্রতিটি দিনের (আজ পর্যন্ত) পরিশোধ + ওই মাসের বেতনের সব ডকুমেন্ট
+  // মাসের প্রতিটি দিনের (আজ পর্যন্ত) পরিশোধ
   function fetchMonth(month) {
     const warns = [], jobs = [];
     COLS.forEach(col => jobs.push(getDocs(col, 'payMonths', 'array-contains', month, warns)));
-    jobs.push(getDocs('fees_monthly', 'month', '==', month, warns));
     const y = Number(month.slice(0, 4)), m = Number(month.slice(5, 7));
     const last = new Date(y, m, 0).getDate(), today = todayLocal();
     for (let d = 1; d <= last; d++) {
@@ -282,39 +281,12 @@
       <td style="${TD}text-align:center;">${toBanglaNumeral(byDay[ds].n)}</td>
       <td style="${TD}text-align:right;font-weight:bold;">${feeMoney(byDay[ds].amt)}</td></tr>`).join('');
 
-    // ওই মাসের বেতনের অবস্থা (যেদিনই পরিশোধ হোক)
-    let tCol = 0, tPend = 0, tPaidN = 0, tDueN = 0;
-    const pendByClass = {};
-    docs.forEach(x => {
-      if (x.col !== 'fees_monthly' || x.data.month !== month) return;
-      const s = scope[x.data.studentId];
-      if (!s) return;
-      const d = x.data;
-      if (d.status === 'paid') {
-        tCol += num(d.paidAmount) > 0 ? num(d.paidAmount) : num(d.amount);
-        tPaidN++;
-      } else {
-        tCol += num(d.paidAmount);
-        const rem = num(d.amount);
-        if (rem > 0) {
-          tPend += rem; tDueN++;
-          const c = s.className || '-';
-          pendByClass[c] = (pendByClass[c] || 0) + rem;
-        }
-      }
-    });
-    const tTotal = tCol + tPend;
-    const rate = tTotal > 0 ? Math.round(tCol / tTotal * 1000) / 10 : null;
-
     // শ্রেণিভিত্তিক
     const by = groupByClass(rows);
-    const classNames = {};
-    Object.keys(by).forEach(c => { classNames[c] = true; });
-    Object.keys(pendByClass).forEach(c => { classNames[c] = true; });
-    const classRows = Object.keys(classNames).sort((a, b) => a.localeCompare(b, 'bn')).map(c => `
+    const classRows = Object.keys(by).sort((a, b) => a.localeCompare(b, 'bn')).map(c => `
       <tr><td style="${TD}">${esc(c)}</td>
-      <td style="${TD}text-align:right;font-weight:bold;">${feeMoney(by[c] ? by[c].amt : 0)}</td>
-      <td style="${TD}text-align:right;color:#b91c1c;">${feeMoney(pendByClass[c] || 0)}</td></tr>`).join('');
+      <td style="${TD}text-align:center;">${toBanglaNumeral(Object.keys(by[c].ids).length)}</td>
+      <td style="${TD}text-align:right;font-weight:bold;">${feeMoney(by[c].amt)}</td></tr>`).join('');
 
     // শিক্ষার্থীভিত্তিক যোগফল
     const per = {};
@@ -334,28 +306,17 @@
         <h2 style="text-align:center;margin-bottom:2px;">মাসিক আদায় রিপোর্ট</h2>
         <p class="muted" style="text-align:center;margin-top:0;">${esc(feeMonthLabel(month))}${feesClassFilter !== 'all' ? ' | শ্রেণি: ' + esc(feesClassFilter) : ''}</p>
         ${summaryBox(total, Object.keys(per).length, rows.length)}
-        <p style="text-align:center;font-size:13px;">মাসিক বেতন: <b>${feeMoney(monthlyTotal)}</b> &nbsp;|&nbsp; অন্যান্য ফি: <b>${feeMoney(total - monthlyTotal)}</b></p>
-
-        <div style="background:#eef2ff;border-radius:12px;padding:10px;margin:10px 0;">
-          <div style="font-weight:bold;color:#3730a3;text-align:center;">${esc(feeMonthLabel(month))}-এর বেতনের অবস্থা</div>
-          ${tTotal > 0 ? `
-          <div style="text-align:center;font-size:13px;margin-top:4px;">
-            আদায় <b>${feeMoney(tCol)}</b> · বকেয়া <b style="color:#b91c1c;">${feeMoney(tPend)}</b><br>
-            পরিশোধিত <b>${toBanglaNumeral(tPaidN)}</b> জন · বকেয়া <b>${toBanglaNumeral(tDueN)}</b> জন · আদায়ের হার <b>${toBanglaNumeral(rate)}%</b>
-          </div>` : '<div class="muted" style="text-align:center;font-size:13px;">এই মাসের বেতন এখনো চিহ্নিত করা হয়নি</div>'}
-          <div class="muted" style="text-align:center;font-size:11px;margin-top:4px;">এখানে যেদিনই পরিশোধ হোক, এই মাসের বেতনটাই ধরা হয়েছে। যাদের চিহ্নিত করা হয়নি, তারা হিসাবে আসেনি।</div>
-        </div>
-
+        <p style="text-align:center;font-size:13px;">বেতন বাবদ: <b>${feeMoney(monthlyTotal)}</b> &nbsp;|&nbsp; ভর্তি/কোচিং/অন্যান্য ফি বাবদ: <b>${feeMoney(total - monthlyTotal)}</b></p>
         ${rows.length ? `
         <h3 style="margin:14px 0 4px;font-size:15px;">দিনভিত্তিক আদায়</h3>
         <table style="width:100%;border-collapse:collapse;">
           <thead><tr><th style="${TH}">দিন</th><th style="${TH}">পেমেন্ট</th><th style="${TH}">আদায়</th></tr></thead>
           <tbody>${dayRows}</tbody>
         </table>
-        ${Object.keys(classNames).length > 1 ? `
+        ${Object.keys(by).length > 1 ? `
         <h3 style="margin:14px 0 4px;font-size:15px;">শ্রেণিভিত্তিক</h3>
         <table style="width:100%;border-collapse:collapse;">
-          <thead><tr><th style="${TH}">শ্রেণি</th><th style="${TH}">এই মাসে আদায়</th><th style="${TH}">বেতন বকেয়া</th></tr></thead>
+          <thead><tr><th style="${TH}">শ্রেণি</th><th style="${TH}">জন</th><th style="${TH}">আদায়</th></tr></thead>
           <tbody>${classRows}</tbody>
         </table>` : ''}
         <h3 style="margin:14px 0 4px;font-size:15px;">কে কত দিয়েছে</h3>
@@ -365,7 +326,7 @@
             <tbody>${perRows}</tbody>
           </table>
         </div>` : '<p class="muted" style="text-align:center;">এই মাসে কোনো আদায় নেই</p>'}
-        <p class="muted" style="font-size:12px;margin-top:8px;">"এই মাসে আদায়" মানে এই মাসে যত টাকা হাতে এসেছে (আগের মাসের বেতনও হতে পারে)। এই আপডেটের আগে দেওয়া আংশিক জমা ধরা নাও পড়তে পারে।</p>
+        <p class="muted" style="font-size:12px;margin-top:8px;">এই মাসে যত টাকা হাতে এসেছে তার সবটাই ধরা হয়েছে (আগের মাসের বেতন বা অন্য ফি হলেও)। এই আপডেটের আগে দেওয়া আংশিক জমা ধরা নাও পড়তে পারে।</p>
         ${PRINT_BTN}
       </div>`;
   }
