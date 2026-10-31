@@ -17,8 +17,8 @@
   };
   // কলামের শিরোনাম অনুযায়ী প্রস্থ (%) — গ্রেডকে বেশি জায়গা দেওয়া হয়েছে
   var WIDTHS = [
-    ['বিষয়', 25], ['পূর্ণ', 9], ['মূল্যায়ন', 12], ['সেমিস্টার', 14],
-    ['প্রাপ্ত', 12], ['গ্রেড', 14], ['GPA', 14]
+    ['বিষয়', 24], ['পূর্ণ', 12], ['মূল্যায়ন', 12], ['সেমিস্টার', 14],
+    ['প্রাপ্ত', 12], ['গ্রেড', 13], ['GPA', 13]
   ];
 
   function colorsFor(g) {
@@ -45,6 +45,8 @@
       '#marksheetPrintArea table thead th { vertical-align: middle; line-height: 1.25; }' +
       '#marksheetPrintArea table tbody td { vertical-align: middle; font-variant-numeric: tabular-nums; }' +
       '#marksheetPrintArea table tbody tr:nth-child(even) td:first-child { background: #f9fafb; }' +
+      '#marksheetPrintArea table th:not(:first-child), #marksheetPrintArea table td:not(:first-child) { word-break: normal !important; overflow-wrap: normal !important; }' +
+      '#marksheetPrintArea table tbody td:not(:first-child) { white-space: nowrap; }' +
       '#marksheetPrintArea td.ms-grade-cell { white-space: nowrap; text-align: center; padding-left: 2px !important; padding-right: 2px !important; }' +
       '#marksheetPrintArea td.ms-gpa-cell { font-weight: 700; color: #3730a3; }' +
       '.ms-grade { display: inline-block; white-space: nowrap; min-width: 36px; padding: 3px 8px; border-radius: 999px;' +
