@@ -23,7 +23,7 @@
   }
   function r2(n) { return Math.round(n * 100) / 100; }
   function isNum(v) { return typeof v === 'number' && !isNaN(v); }
-  function hasSplit(s) { return !!s && isNum(s.eval) && isNum(s.sem); }
+  function hasSplit(s) { return !!s && isNum(s.sem); }
   function el(id) { return document.getElementById(id); }
 
   // Firestore-এ undefined ফিল্ড লেখা যায় না, তাই শুধু থাকা ফিল্ডগুলো রাখা হয়
@@ -52,8 +52,10 @@
       '<label style="font-size:13px;margin-top:0;">মূল্যায়নের পূর্ণ নম্বর</label>' +
       '<input id="resEvalFull" type="number" inputmode="decimal" value="' + evalFullDefault() + '">' +
       '<p id="resSemFullHint" style="margin:4px 0 10px;font-size:12px;color:' + C.hint + ';"></p>' +
+      '<label style="display:flex;align-items:center;gap:8px;font-size:13px;margin:0 0 10px;color:' + C.evalFg + ';">' +
+        '<input id="resNoEval" type="checkbox" style="width:auto;margin:0;"> এই বিষয়ে মূল্যায়ন নেই (শুধু সেমিস্টার পরীক্ষা)</label>' +
       '<div style="display:grid;grid-template-columns:repeat(2,minmax(0,1fr));gap:10px;">' +
-        '<div style="background:' + C.evalBg + ';border:1px solid ' + C.evalBorder + ';border-radius:10px;padding:8px 10px;">' +
+        '<div id="resEvalBox" style="background:' + C.evalBg + ';border:1px solid ' + C.evalBorder + ';border-radius:10px;padding:8px 10px;">' +
           '<label style="font-size:12px;margin-top:0;color:' + C.evalFg + ';">মূল্যায়নের নম্বর</label>' +
           '<input id="resSubjectEval" type="number" inputmode="decimal" placeholder="যেমন: 18">' +
         '</div>' +
@@ -78,6 +80,14 @@
       var e = el(id);
       if (e) e.addEventListener('input', updatePreview);
     });
+    el('resNoEval').addEventListener('change', function () {
+      var ev = el('resSubjectEval');
+      ev.disabled = this.checked;
+      if (this.checked) ev.value = '';
+      el('resEvalBox').style.opacity = this.checked ? '0.45' : '1';
+      updatePreview();
+      if (this.checked) el('resSubjectSem').focus();
+    });
     var nameEl = el('resSubjectName');
     if (nameEl) nameEl.onkeydown = function (ev) { if (ev.key === 'Enter') { ev.preventDefault(); el('resSubjectEval').focus(); } };
     el('resSubjectEval').onkeydown = function (ev) { if (ev.key === 'Enter') { ev.preventDefault(); el('resSubjectSem').focus(); } };
@@ -87,22 +97,23 @@
   function updatePreview() {
     var chipEl = el('resSubjectTotalChip');
     if (!chipEl) return;
+    var noEval = !!(el('resNoEval') && el('resNoEval').checked);
     var full = Number(el('resSubjectFull').value) || 0;
-    var ef = Number(el('resEvalFull').value) || 0;
-    var e = Number(el('resSubjectEval').value) || 0;
-    var s = Number(el('resSubjectSem').value) || 0;
+    var ef = noEval ? 0 : (Number(el('resEvalFull').value) || 0);
+    var e = noEval ? 0 : (Number(el('resSubjectEval').value) || 0);
+    var sv = Number(el('resSubjectSem').value) || 0;
     var semFull = r2(full - ef);
     var hint = el('resSemFullHint');
-    if (hint) hint.textContent = (ef > 0 && ef < full)
-      ? 'সেমিস্টার পরীক্ষার পূর্ণ নম্বর: ' + semFull + ' (পূর্ণ ' + full + ' − মূল্যায়ন ' + ef + ')'
-      : '';
-    chipEl.textContent = r2(e + s) + ' / ' + full;
+    if (hint) hint.textContent = noEval
+      ? 'মূল্যায়ন নেই — সেমিস্টার পরীক্ষার পূর্ণ নম্বর: ' + full
+      : ((ef > 0 && ef < full) ? 'সেমিস্টার পরীক্ষার পূর্ণ নম্বর: ' + semFull + ' (পূর্ণ ' + full + ' − মূল্যায়ন ' + ef + ')' : '');
+    chipEl.textContent = r2(e + sv) + ' / ' + full;
     var warn = el('resSplitWarn');
     if (!warn) return;
     var msg = '';
-    if (full > 0 && (ef <= 0 || ef >= full)) msg = 'মূল্যায়নের পূর্ণ নম্বর ০ থেকে বেশি এবং পূর্ণ নম্বরের চেয়ে কম হতে হবে';
-    else if (e > ef) msg = 'মূল্যায়নের নম্বর ' + ef + '-এর বেশি হতে পারে না';
-    else if (s > semFull) msg = 'সেমিস্টারের নম্বর ' + semFull + '-এর বেশি হতে পারে না';
+    if (!noEval && full > 0 && (ef <= 0 || ef >= full)) msg = 'মূল্যায়নের পূর্ণ নম্বর ০ থেকে বেশি এবং পূর্ণ নম্বরের চেয়ে কম হতে হবে। মূল্যায়ন না থাকলে উপরের টিক দিন।';
+    else if (!noEval && e > ef) msg = 'মূল্যায়নের নম্বর ' + ef + '-এর বেশি হতে পারে না';
+    else if (sv > semFull) msg = 'সেমিস্টারের নম্বর ' + semFull + '-এর বেশি হতে পারে না';
     warn.textContent = msg;
   }
 
@@ -117,22 +128,34 @@
     var semEl = el('resSubjectSem');
     if (!nameEl || !fullEl || !evalFullEl || !evalEl || !semEl) return;
 
+    var noEval = !!(el('resNoEval') && el('resNoEval').checked);
     var name = nameEl.value.trim();
     var full = Number(fullEl.value);
-    var evalFull = Number(evalFullEl.value);
+    var evalFull = noEval ? 0 : Number(evalFullEl.value);
     if (!name) return alert('বিষয়ের নাম লিখুন');
     if (!full || full <= 0) return alert('পূর্ণ নম্বর সঠিকভাবে দিন');
-    if (!evalFull || evalFull <= 0 || evalFull >= full) return alert('মূল্যায়নের পূর্ণ নম্বর ০ থেকে বেশি এবং পূর্ণ নম্বরের চেয়ে কম হতে হবে');
-    if (evalEl.value === '' || isNaN(Number(evalEl.value))) return alert('মূল্যায়নের নম্বর দিন');
     if (semEl.value === '' || isNaN(Number(semEl.value))) return alert('সেমিস্টার পরীক্ষার নম্বর দিন');
-    var e = Number(evalEl.value), s = Number(semEl.value);
-    if (e < 0 || s < 0) return alert('নম্বর ঋণাত্মক হতে পারে না');
-    if (e > evalFull) return alert('মূল্যায়নের নম্বর ' + evalFull + '-এর বেশি হতে পারে না');
-    if (s > full - evalFull) return alert('সেমিস্টার পরীক্ষার নম্বর ' + r2(full - evalFull) + '-এর বেশি হতে পারে না');
-
-    currentMarksheetSubjects.push({ name: name, full: full, obtained: r2(e + s), evalFull: evalFull, eval: e, sem: s });
+    var s = Number(semEl.value);
+    if (s < 0) return alert('নম্বর ঋণাত্মক হতে পারে না');
+    if (noEval) {
+      if (s > full) return alert('সেমিস্টার পরীক্ষার নম্বর ' + full + '-এর বেশি হতে পারে না');
+      currentMarksheetSubjects.push({ name: name, full: full, obtained: r2(s), evalFull: 0, sem: s });
+    } else {
+      if (!evalFull || evalFull <= 0 || evalFull >= full) return alert('মূল্যায়নের পূর্ণ নম্বর ০ থেকে বেশি এবং পূর্ণ নম্বরের চেয়ে কম হতে হবে। মূল্যায়ন না থাকলে "মূল্যায়ন নেই" টিক দিন।');
+      if (evalEl.value === '' || isNaN(Number(evalEl.value))) return alert('মূল্যায়নের নম্বর দিন');
+      var e = Number(evalEl.value);
+      if (e < 0) return alert('নম্বর ঋণাত্মক হতে পারে না');
+      if (e > evalFull) return alert('মূল্যায়নের নম্বর ' + evalFull + '-এর বেশি হতে পারে না');
+      if (s > full - evalFull) return alert('সেমিস্টার পরীক্ষার নম্বর ' + r2(full - evalFull) + '-এর বেশি হতে পারে না');
+      currentMarksheetSubjects.push({ name: name, full: full, obtained: r2(e + s), evalFull: evalFull, eval: e, sem: s });
+      try { localStorage.setItem(EVAL_KEY, String(evalFull)); } catch (err) { /* ignore */ }
+    }
     lastUsedSubjectFullMarks = full;
-    try { localStorage.setItem(EVAL_KEY, String(evalFull)); } catch (err) { /* ignore */ }
+    if (el('resNoEval') && el('resNoEval').checked) {
+      el('resNoEval').checked = false;
+      evalEl.disabled = false;
+      el('resEvalBox').style.opacity = '1';
+    }
 
     nameEl.value = '';
     evalEl.value = '';
@@ -153,8 +176,9 @@
     wrap.innerHTML = currentMarksheetSubjects.map(function (s, i) {
       var chips = '';
       if (hasSplit(s)) {
-        chips += chip('মূল্যায়ন', s.eval + '/' + (s.evalFull || '?'), C.evalBg, C.evalFg, C.evalBorder) + ' ';
-        chips += chip('সেমিস্টার', s.sem + '/' + (isNum(s.evalFull) ? r2(s.full - s.evalFull) : '?'), C.semBg, C.semFg, C.semBorder) + ' ';
+        if (isNum(s.eval)) chips += chip('মূল্যায়ন', s.eval + '/' + (s.evalFull || '?'), C.evalBg, C.evalFg, C.evalBorder) + ' ';
+        else chips += '<span style="display:inline-block;color:#9ca3af;border:1px dashed #d1d5db;border-radius:999px;padding:2px 10px;font-size:12px;">মূল্যায়ন নেই</span> ';
+        chips += chip('সেমিস্টার', s.sem + '/' + r2(s.full - (isNum(s.evalFull) ? s.evalFull : 0)), C.semBg, C.semFg, C.semBorder) + ' ';
       }
       chips += chip('প্রাপ্ত', s.obtained + '/' + s.full, C.totBg, C.totFg, C.totBorder);
       return '<div class="student-row" style="display:block;">' +
@@ -180,9 +204,17 @@
     var full = ask('পূর্ণ নম্বর (' + s.name + '):', s.full);
     if (full === null) return;
     if (isNaN(full) || full <= 0) return alert('পূর্ণ নম্বর সঠিকভাবে দিন');
-    var evalFull = ask('মূল্যায়নের পূর্ণ নম্বর:', isNum(s.evalFull) ? s.evalFull : evalFullDefault());
+    var evalFull = ask('মূল্যায়নের পূর্ণ নম্বর (মূল্যায়ন না থাকলে ০ লিখুন):', isNum(s.evalFull) ? s.evalFull : evalFullDefault());
     if (evalFull === null) return;
-    if (isNaN(evalFull) || evalFull <= 0 || evalFull >= full) return alert('মূল্যায়নের পূর্ণ নম্বর ০ থেকে বেশি এবং পূর্ণ নম্বরের চেয়ে কম হতে হবে');
+    if (isNaN(evalFull) || evalFull < 0 || evalFull >= full) return alert('মূল্যায়নের পূর্ণ নম্বর ০ (মূল্যায়ন নেই) অথবা ০-এর বেশি ও পূর্ণ নম্বরের কম হতে হবে');
+    if (evalFull === 0) {
+      var only = ask('সেমিস্টার পরীক্ষার নম্বর (সর্বোচ্চ ' + full + '):', isNum(s.sem) ? s.sem : '');
+      if (only === null) return;
+      if (isNaN(only) || only < 0 || only > full) return alert('সেমিস্টারের নম্বর ০ থেকে ' + full + '-এর মধ্যে দিন');
+      currentMarksheetSubjects[index] = { name: s.name, full: full, obtained: r2(only), evalFull: 0, sem: only };
+      window.renderSubjectRows();
+      return;
+    }
     var e = ask('মূল্যায়নের নম্বর (সর্বোচ্চ ' + evalFull + '):', isNum(s.eval) ? s.eval : '');
     if (e === null) return;
     if (isNaN(e) || e < 0 || e > evalFull) return alert('মূল্যায়নের নম্বর ০ থেকে ' + evalFull + '-এর মধ্যে দিন');
@@ -278,8 +310,9 @@
     var eSum = 0, eFull = 0, sSum = 0, sFull = 0;
     subs.forEach(function (s) {
       if (!hasSplit(s)) return;
-      eSum += s.eval; sSum += s.sem;
-      if (isNum(s.evalFull)) { eFull += s.evalFull; sFull += r2(s.full - s.evalFull); }
+      sSum += s.sem;
+      sFull += r2(s.full - (isNum(s.evalFull) ? s.evalFull : 0));
+      if (isNum(s.eval)) { eSum += s.eval; eFull += isNum(s.evalFull) ? s.evalFull : 0; }
     });
     eSum = r2(eSum); sSum = r2(sSum);
 
@@ -294,11 +327,11 @@
       var s2 = isTotal ? null : subs[subjIdx++];
       var e, m;
       if (isTotal) {
-        e = cellHtml(eSum, eFull || null, C.evalFg, true);
+        e = eFull ? cellHtml(eSum, eFull, C.evalFg, true) : '<span style="color:#9ca3af;">–</span>';
         m = cellHtml(sSum, sFull || null, C.semFg, true);
       } else if (s2 && hasSplit(s2)) {
-        e = cellHtml(s2.eval, isNum(s2.evalFull) ? s2.evalFull : null, C.evalFg, false);
-        m = cellHtml(s2.sem, isNum(s2.evalFull) ? r2(s2.full - s2.evalFull) : null, C.semFg, false);
+        e = isNum(s2.eval) ? cellHtml(s2.eval, isNum(s2.evalFull) ? s2.evalFull : null, C.evalFg, false) : '<span style="color:#9ca3af;">–</span>';
+        m = cellHtml(s2.sem, r2(s2.full - (isNum(s2.evalFull) ? s2.evalFull : 0)), C.semFg, false);
       } else {
         e = m = '<span style="color:#9ca3af;">–</span>';
       }
@@ -332,7 +365,7 @@
           (full ? '<span style="font-size:11px;color:#9ca3af;font-weight:normal;">/' + esc(full) + '</span>' : '') + '</div></div>';
       };
       boxes.insertAdjacentHTML('afterbegin',
-        mkBox('মূল্যায়ন', eSum, eFull, C.evalBg, C.evalFg) + mkBox('সেমিস্টার পরীক্ষা', sSum, sFull, C.semBg, C.semFg));
+        (eFull ? mkBox('মূল্যায়ন', eSum, eFull, C.evalBg, C.evalFg) : '') + mkBox('সেমিস্টার পরীক্ষা', sSum, sFull, C.semBg, C.semFg));
       boxes.setAttribute('data-split-boxes', '1');
     }
     return true;
