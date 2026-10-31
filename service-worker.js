@@ -2,7 +2,7 @@
 // অ্যাপ আইকনে চাপলে সব ফাইল সাথে সাথে ক্যাশ থেকে আসে, আর ব্যাকগ্রাউন্ডে নতুন কপি নেমে ক্যাশ হালনাগাদ হয়।
 // ফাইল বদলালে এই CACHE_NAME-এর সংখ্যা বাড়িয়ে দিন: তাহলে অ্যাপ খোলার কয়েক সেকেন্ডের মধ্যেই নিজে একবার রিফ্রেশ হয়ে নতুন কোড নেবে।
 // না বাড়ালেও নতুন কোড পরের বার অ্যাপ খুললে চলে আসবে।
-const CACHE_NAME = 'madrasa-attendance-v43';
+const CACHE_NAME = 'madrasa-attendance-v44';
 // Firebase SDK (gstatic, ভার্সন-ঠিক করা ফাইল) একবার নামলে ফোনে রাখা হয়: নেট ধীর বা না থাকলেও অ্যাপ চালু হয়
 const SDK_CACHE = 'shikkhaos-sdk-v1';
 const isSdk = url => url.origin === 'https://www.gstatic.com' && url.pathname.indexOf('/firebasejs/10.12.2/') === 0;
