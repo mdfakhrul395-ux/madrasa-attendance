@@ -312,6 +312,15 @@
       rows[r].insertBefore(tdS, ref);
     }
     table.setAttribute('data-split', '1');
+    if (table.querySelectorAll('thead th').length === 7 && !table.querySelector('colgroup')) {
+      var cg = document.createElement('colgroup');
+      [24, 11, 13, 15, 13, 11, 13].forEach(function (w) {
+        var c = document.createElement('col');
+        c.style.width = w + '%';
+        cg.appendChild(c);
+      });
+      table.insertBefore(cg, table.firstChild);
+    }
 
     // নিচের রঙিন বক্সের সারিতে দুটি নতুন বক্স
     var boxes = area.querySelector('div[style*="margin-top:14px"][style*="flex-wrap"]');
@@ -334,34 +343,54 @@
     if (currentObs) { currentObs.disconnect(); currentObs = null; }
     var app = el('app');
     if (!app) return;
-    if (augment(data) && el('marksheetPrintArea')) {
-      // টেবিল বসে গেছে; অন্য প্যাচ পুনরায় আঁকলে ধরার জন্য অল্প সময় নজর রাখা হয়
-    }
-    var obs = new MutationObserver(function () { augment(data); });
+    augment(data);
+    markFinalBreak();
+    var obs = new MutationObserver(function () { augment(data); markFinalBreak(); });
     obs.observe(app, { childList: true, subtree: true });
     currentObs = obs;
     setTimeout(function () { obs.disconnect(); if (currentObs === obs) currentObs = null; }, 10000);
   }
 
-  // ---------- প্রিন্ট: মার্কশিটের উপরের অংশ (টেবিল + নম্বরের বক্স) যেন ১ম পেজে ধরে ----------
-  (function addPrintStyle() {
-    if (document.getElementById('marksSplitPrintStyle')) return;
+  // ---------- স্টাইল: মোবাইলে সরু কলাম + প্রিন্টে ১ম পেজে নম্বরের বক্স ----------
+  (function addStyles() {
+    if (document.getElementById('marksSplitStyle')) return;
     var st = document.createElement('style');
-    st.id = 'marksSplitPrintStyle';
+    st.id = 'marksSplitStyle';
     st.textContent =
+      '#marksheetPrintArea table[data-split] { table-layout: fixed; width: 100%; }' +
+      '#marksheetPrintArea table[data-split] th, #marksheetPrintArea table[data-split] td { padding: 6px 3px !important; font-size: 13px; line-height: 1.3; word-break: break-word; }' +
+      '#marksheetPrintArea table[data-split] th { font-size: 12px; }' +
+      '#marksheetPrintArea table[data-split] th:first-child, #marksheetPrintArea table[data-split] td:first-child { padding-left: 6px !important; }' +
       '@media print {' +
-      '  @page { margin: 6mm; }' +
-      '  html, body, #app { margin: 0 !important; padding: 0 !important; }' +
-      '  #marksheetPrintArea { margin: 0 !important; padding: 6px 8px !important; box-shadow: none !important; }' +
-      '  #marksheetPrintArea hr { margin: 5px 0 !important; }' +
-      '  #marksheetPrintArea table th, #marksheetPrintArea table td { padding: 3px 5px !important; line-height: 1.2 !important; }' +
+      '  #marksheetPrintArea hr { margin: 6px 0 !important; }' +
+      '  #marksheetPrintArea table[data-split] th, #marksheetPrintArea table[data-split] td { padding: 3px 3px !important; line-height: 1.2; }' +
       '  #marksheetPrintArea table { margin-top: 6px !important; }' +
       '  #marksheetPrintArea div[style*="flex-wrap"][style*="margin-top:14px"] { margin-top: 6px !important; gap: 6px !important; break-inside: avoid; page-break-inside: avoid; }' +
       '  #marksheetPrintArea div[style*="flex-wrap"][style*="margin-top:14px"] > div { padding: 5px 6px !important; }' +
-      '  #marksheetPrintArea p.muted { margin: 6px 0 0 !important; }' +
       '}';
     document.head.appendChild(st);
   })();
+
+  // "পরীক্ষার চূড়ান্ত ফলাফল" অংশ প্রিন্টে নতুন (২য়) পেজ থেকে শুরু হবে
+  function markFinalBreak() {
+    var area = el('marksheetPrintArea');
+    var table = area && findSubjectTable(area);
+    if (!area || !table) return;
+    var all = document.querySelectorAll('#app *');
+    var leaf = null;
+    for (var i = 0; i < all.length; i++) {
+      if (all[i].children.length === 0 && all[i].textContent.trim() === 'পরীক্ষার চূড়ান্ত ফলাফল') { leaf = all[i]; break; }
+    }
+    if (!leaf) return;
+    var node = leaf;
+    while (node.parentElement && !node.parentElement.contains(table)) node = node.parentElement;
+    if (node === leaf && !node.parentElement) return;
+    if (!node.getAttribute('data-split-break')) {
+      node.style.breakBefore = 'page';
+      node.style.pageBreakBefore = 'always';
+      node.setAttribute('data-split-break', '1');
+    }
+  }
 
   var origView = window.viewMarksheet;
   if (typeof origView === 'function') {
