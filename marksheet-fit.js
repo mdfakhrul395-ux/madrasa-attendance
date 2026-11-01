@@ -47,6 +47,7 @@
       '#marksheetPrintArea table tbody tr:nth-child(even) td:first-child { background: #f9fafb; }' +
       '#marksheetPrintArea table th:not(:first-child), #marksheetPrintArea table td:not(:first-child) { word-break: normal !important; overflow-wrap: normal !important; }' +
       '#marksheetPrintArea table tbody td:not(:first-child) { white-space: nowrap; }' +
+      '#marksheetPrintArea table[data-split] tbody td:not(:first-child) > div { display: none !important; }' + /* "/২০" অংশ লুকানো — শুধু প্রাপ্ত নম্বর দেখায় */
       '#marksheetPrintArea table thead th:not(:first-child) { overflow-wrap: anywhere !important; overflow: hidden; font-size: 11.5px !important; padding-left: 2px !important; padding-right: 2px !important; }' +
       '#marksheetPrintArea td.ms-grade-cell { white-space: nowrap; text-align: center; padding-left: 2px !important; padding-right: 2px !important; }' +
       '#marksheetPrintArea td.ms-gpa-cell { font-weight: 700; color: #3730a3; }' +
@@ -58,7 +59,21 @@
       '  #marksheetPrintArea table[data-split] th, #marksheetPrintArea table[data-split] td { font-size: 12px !important; }' +
       '  .ms-grade { min-width: 32px; padding: 2px 6px; font-size: 12px; }' +
       '}' +
-      '@media print { .ms-grade { box-shadow: none; } }';
+      /* স্ক্রিনে সারির উচ্চতা: আরামদায়ক, সুন্দর */
+      '#marksheetPrintArea table[data-split] tbody td { padding-top: 8px !important; padding-bottom: 8px !important; line-height: 1.35; }' +
+      /* চূড়ান্ত ফলাফল: জোর করে ২য় পেজ নয়। ১ম পেজে পুরোটা আঁটলে সেখানেই, না আঁটলে পুরো অংশ একসাথে ২য় পেজে */
+      '#finalResultBox, #finalResultBox[data-split-break] { break-before: auto !important; page-break-before: auto !important; break-inside: avoid !important; page-break-inside: avoid !important; }' +
+      '@media print {' +
+      '  @page { margin-bottom: 6mm; }' +
+      '  #marksheetPrintArea table[data-split] tbody td { padding-top: 4px !important; padding-bottom: 4px !important; line-height: 1.25; }' +
+      '  #marksheetPrintArea table tr { break-inside: avoid; page-break-inside: avoid; }' +
+      '  #finalResultBox { margin-top: 10px !important; padding-top: 8px !important; }' +
+      '  #finalResultBox h3 { margin: 0 0 6px !important; }' +
+      '  #finalResultBox th, #finalResultBox td { padding: 4px 8px !important; }' +
+      '  #finalResultBox div[style*="flex-wrap"] { margin-top: 8px !important; gap: 6px !important; }' +
+      '  #finalResultBox div[style*="flex-wrap"] > div { padding: 6px !important; }' +
+      '  .ms-grade { box-shadow: none; }' +
+      '}';
     document.head.appendChild(st);
   })();
 
