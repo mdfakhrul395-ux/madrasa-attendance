@@ -1,5 +1,8 @@
-    match /fee_defaults/{id} {
-      allow read: if isTeacherAuth() && id == myMadrasaId();
-      allow create, update: if isTeacherAuth() && id == myMadrasaId()
-        && request.resource.data.madrasaId == myMadrasaId();
-    }
+// match /student_contacts/{studentId} { ... } ব্লকের ভেতরে, আগের allow update-এর নিচে যোগ করুন:
+
+      allow update: if isTeacherAuth() &&
+        resource.data.madrasaId == myMadrasaId() &&
+        request.resource.data.madrasaId == resource.data.madrasaId &&
+        request.resource.data.diff(resource.data).affectedKeys().hasOnly(['fatherName', 'motherName']) &&
+        resource.data.get('fatherName', '') == '' &&
+        resource.data.get('motherName', '') == '';

@@ -1,16 +1,8 @@
-ShikkhaOS — শিক্ষক লগইন করা ফোনেও শিক্ষার্থী পাতায় প্রবেশ
+ShikkhaOS - পিতার নাম ও মাতার নাম (ধাপ ১ + মার্কশিট/রিপোর্ট)
 
-কী করবেন (ধাপে ধাপে):
-১. student-access.js ফাইলটি GitHub রিপোজিটরির মূল ফোল্ডারে আপলোড করুন (অন্য ফাইলের পাশে)।
-২. index.html খুলে সবচেয়ে শেষের <script src="..."></script> লাইনটির ঠিক নিচে এই লাইনটি যোগ করুন:
-
-   <script src="student-access.js"></script>
-
-   (এটি অবশ্যই সবার শেষে থাকতে হবে, final-result.js-এর পরেও)
-৩. service-worker.js এ CACHE_NAME-এর সংখ্যা এক বাড়ান (যেমন v33 থেকে v34)।
-   যদি service-worker.js-এ ফাইলের তালিকা (urlsToCache / ASSETS) থাকে, সেখানে "student-access.js"-ও যোগ করুন।
-৪. কমিট করে কয়েক মিনিট পর অ্যাপ খুলুন। শিক্ষক লগইন করা ফোনেও "শিক্ষার্থী" বাটন চালু থাকবে।
-
-মনে রাখবেন:
-- শিক্ষার্থী পাতায় ঢুকতে এখনও ক্লাস → নাম → ৪-ডিজিট PIN লাগবে।
-- আবার আগের নিয়মে ফিরতে চাইলে index.html থেকে ওই script লাইনটি মুছে দিন।
+১) parent-names.js GitHub repo-তে আপলোড করুন (পুরনো থাকলে প্রতিস্থাপন করুন)।
+২) index.html-এ সবার শেষে (final-result.js / ui-polish.js এর পরে) যোগ করুন:
+   <script src="parent-names.js"></script>
+৩) Firestore rules-এ student_contacts ব্লকে নতুন allow update লাইনটি যোগ করুন
+   (firestore-rules-snippet.txt দেখুন), তারপর Publish করুন।
+৪) service-worker.js-এর CACHE_NAME-এর সংস্করণ বাড়াতে ভুলবেন না।
