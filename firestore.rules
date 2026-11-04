@@ -177,12 +177,6 @@ service cloud.firestore {
         (!isTeacherAuth() || resource.data.madrasaId == myMadrasaId());
       allow create: if isTeacherAuth() && request.resource.data.madrasaId == myMadrasaId();
       allow update: if isTeacherAuth() &&
-      allow update: if isTeacherAuth() &&
-        resource.data.madrasaId == myMadrasaId() &&
-        request.resource.data.madrasaId == resource.data.madrasaId &&
-        request.resource.data.diff(resource.data).affectedKeys().hasOnly(['fatherName', 'motherName']) &&
-        resource.data.get('fatherName', '') == '' &&
-        resource.data.get('motherName', '') == '';
         resource.data.madrasaId == myMadrasaId() &&
         request.resource.data.madrasaId == resource.data.madrasaId &&
         (isStudentManager() ||
