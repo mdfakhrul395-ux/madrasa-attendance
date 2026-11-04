@@ -203,6 +203,13 @@ service cloud.firestore {
       allow update: if (isStudentManager() || isMyClassStudent(studentId)) &&
         resource.data.madrasaId == myMadrasaId() &&
         request.resource.data.madrasaId == myMadrasaId();
+      // পিতা-মাতার নাম: যেকোনো শিক্ষক শুধু প্রথমবার (ফাঁকা থাকলে) বসাতে পারবেন, পরে বদলাতে পারবেন শুধু অ্যাডমিন/শ্রেণি শিক্ষক
+      allow update: if isTeacherAuth() &&
+        resource.data.madrasaId == myMadrasaId() &&
+        request.resource.data.madrasaId == resource.data.madrasaId &&
+        request.resource.data.diff(resource.data).affectedKeys().hasOnly(['fatherName', 'motherName']) &&
+        resource.data.get('fatherName', '') == '' &&
+        resource.data.get('motherName', '') == '';
       allow delete: if isStudentManager() && resource.data.madrasaId == myMadrasaId();
     }
 
