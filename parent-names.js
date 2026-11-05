@@ -164,4 +164,45 @@
   if (appEl && typeof MutationObserver !== 'undefined') {
     new MutationObserver(injectParents).observe(appEl, { childList: true, subtree: true });
   }
+
+  // ---- ৫) "✏️ সম্পাদনা" ফর্মে পিতা-মাতার নাম বদলানো (ধাপ ৩, student-edit.js এর ওপর) ----
+  if (typeof window.editStudentInfo === 'function') {
+    const prevEdit = window.editStudentInfo;
+    window.editStudentInfo = function (id) {
+      prevEdit.apply(this, arguments);
+      const modal = document.getElementById('stuEditModal');
+      if (!modal || document.getElementById('seFather')) return; // মডাল খোলেনি (অ্যাডমিন নন) বা আগেই যোগ হয়েছে
+      const errEl = document.getElementById('seError');
+      const saveBtn = document.getElementById('seSave');
+      if (!errEl || !saveBtn) return;
+
+      const c = (typeof studentContactsCache !== 'undefined' && studentContactsCache[id]) || {};
+      const tmp = document.createElement('div');
+      tmp.innerHTML =
+        '<label>পিতার নাম</label><input id="seFather" placeholder="পিতার নাম">' +
+        '<label>মাতার নাম</label><input id="seMother" placeholder="মাতার নাম">';
+      while (tmp.firstChild) errEl.parentNode.insertBefore(tmp.firstChild, errEl);
+      document.getElementById('seFather').value = c.fatherName || '';
+      document.getElementById('seMother').value = c.motherName || '';
+
+      const origSave = saveBtn.onclick;
+      saveBtn.onclick = function () {
+        const f = document.getElementById('seFather').value.trim();
+        const m = document.getElementById('seMother').value.trim();
+        const name = document.getElementById('seName').value.trim();
+        const old = (typeof studentContactsCache !== 'undefined' && studentContactsCache[id]) || {};
+        if (name && (f !== (old.fatherName || '') || m !== (old.motherName || ''))) {
+          db.collection('student_contacts').doc(id)
+            .set({ madrasaId: madrasaId, fatherName: f, motherName: m }, { merge: true })
+            .catch(e => {
+              alert('পিতা-মাতার নাম সংরক্ষণ ব্যর্থ: ' + e.message);
+              if (typeof showDiagBanner === 'function') showDiagBanner('পিতা-মাতার নাম সংরক্ষণ ব্যর্থ: ' + (e.code || '') + ' ' + e.message);
+            });
+        }
+        return origSave.apply(this, arguments);
+      };
+    };
+  } else {
+    console.warn('[parent-names] student-edit.js আগে লোড করুন, নইলে সম্পাদনা ফর্মে পিতা-মাতার ঘর আসবে না।');
+  }
 })();
