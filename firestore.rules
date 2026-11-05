@@ -213,6 +213,32 @@ service cloud.firestore {
       allow delete: if isStudentManager() && resource.data.madrasaId == myMadrasaId();
     }
 
+    // শিক্ষার্থীর ছবি: শুধু অ্যাডমিন লিখতে/পড়তে পারে, আর শিক্ষার্থী শুধু নিজের ছবি পড়তে পারে।
+    // শ্রেণি শিক্ষক বা অন্য কোনো শিক্ষক পড়তে বা লিখতে পারবে না। list (সব ছবি একসাথে) বন্ধ।
+    match /student_photos/{studentId} {
+      allow get: if (isRequesterAdmin() &&
+                     (resource == null || resource.data.madrasaId == myMadrasaId())) ||
+                    (isStudentAuth() && studentId == mySessionStudentId());
+      allow list: if false;
+      allow create: if isRequesterAdmin() &&
+        studentInMyMadrasa(studentId) &&
+        request.resource.data.madrasaId == myMadrasaId() &&
+        request.resource.data.keys().hasOnly(['madrasaId', 'photo', 'updatedAt']) &&
+        request.resource.data.photo is string &&
+        request.resource.data.photo.size() < 80000 &&
+        request.resource.data.photo[0:23] == 'data:image/jpeg;base64,' &&
+        request.resource.data.updatedAt is number;
+      allow update: if isRequesterAdmin() &&
+        resource.data.madrasaId == myMadrasaId() &&
+        request.resource.data.madrasaId == resource.data.madrasaId &&
+        request.resource.data.keys().hasOnly(['madrasaId', 'photo', 'updatedAt']) &&
+        request.resource.data.photo is string &&
+        request.resource.data.photo.size() < 80000 &&
+        request.resource.data.photo[0:23] == 'data:image/jpeg;base64,' &&
+        request.resource.data.updatedAt is number;
+      allow delete: if isRequesterAdmin() && resource.data.madrasaId == myMadrasaId();
+    }
+
     // শিক্ষার্থীর লগইন সেশন: PIN মিলতে হবে, আর session-এর madrasaId অবশ্যই শিক্ষার্থীর নিজের মাদ্রাসার হতে হবে
     match /sessions/{uid} {
       allow read: if request.auth != null && request.auth.uid == uid;
