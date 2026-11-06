@@ -381,6 +381,32 @@ service cloud.firestore {
       allow delete: if isRequesterAdmin() && resource.data.madrasaId == myMadrasaId();
     }
 
+    // ================= প্রশ্ন-উত্তর বক্স (qa.js) =================
+    // শিক্ষার্থী শুধু নিজের নামে প্রশ্ন করতে পারে; উত্তর (answer, answeredBy, answeredAt) শুধু শিক্ষক লিখতে পারেন।
+    // শিক্ষার্থী উত্তর আসার আগে পর্যন্ত নিজের প্রশ্ন মুছতে পারে।
+    match /questions/{docId} {
+      allow read: if (isTeacherAuth() && resource.data.madrasaId == myMadrasaId()) ||
+                     (isStudentAuth() && resource.data.studentId == mySessionStudentId());
+      allow create: if isStudentAuth() &&
+        request.resource.data.keys().hasOnly(['madrasaId', 'studentId', 'studentName', 'className', 'subject', 'text', 'createdAt']) &&
+        request.resource.data.studentId == mySessionStudentId() &&
+        request.resource.data.madrasaId == myMadrasaId() &&
+        request.resource.data.text is string &&
+        request.resource.data.text.size() > 0 &&
+        request.resource.data.text.size() <= 1000 &&
+        request.resource.data.subject is string && request.resource.data.subject.size() <= 40 &&
+        request.resource.data.studentName is string && request.resource.data.studentName.size() <= 80 &&
+        request.resource.data.className is string && request.resource.data.className.size() <= 60 &&
+        request.resource.data.createdAt is number;
+      allow update: if isTeacherAuth() && resource.data.madrasaId == myMadrasaId() &&
+        request.resource.data.diff(resource.data).affectedKeys().hasOnly(['answer', 'answeredBy', 'answeredAt']) &&
+        request.resource.data.answer is string &&
+        request.resource.data.answer.size() > 0 &&
+        request.resource.data.answer.size() <= 2000;
+      allow delete: if (isTeacherAuth() && resource.data.madrasaId == myMadrasaId()) ||
+                       (isStudentAuth() && resource.data.studentId == mySessionStudentId() && !('answer' in resource.data));
+    }
+
     // ================= FEES =================
     match /fees_monthly/{docId} {
       allow get: if request.auth != null && (
