@@ -1,9 +1,6 @@
-ShikkhaOS - পিতার নাম ও মাতার নাম (যোগ করা + তালিকা + মার্কশিট + মাসিক রিপোর্ট + সম্পাদনা)
+ShikkhaOS - নতুন থিম (style.css)
 
-১) parent-names.js GitHub repo-তে আপলোড করুন (পুরনো থাকলে প্রতিস্থাপন করুন)।
-২) index.html-এ সবার শেষে (final-result.js / ui-polish.js এর পরে) যোগ করুন (আগে না করে থাকলে):
-   <script src="parent-names.js"></script>
-৩) firestore.rules ফাইলটি প্রতিস্থাপন করুন (বা Firebase Console > Firestore > Rules-এ পুরো লেখা পেস্ট করুন) এবং Publish করুন।
-   শুধু student_contacts ব্লকে একটি নতুন allow update লাইন যোগ হয়েছে, বাকি সব আগের মতোই।
-৪) service-worker.js-এর CACHE_NAME-এর সংস্করণ বাড়াতে ভুলবেন না।
-৫) parent-names.js অবশ্যই student-edit.js এর পরে লোড হতে হবে (index.html-এ সবার শেষে রাখলে ঠিক থাকবে)। এতে অ্যাডমিনের ✏️ সম্পাদনা ফর্মে পিতা-মাতার নাম বদলানো যাবে।
+করণীয়:
+1. GitHub রিপোজিটরিতে পুরনো style.css এর জায়গায় এই style.css আপলোড করুন (Replace)।
+2. service-worker.js খুলে CACHE_NAME এর ভার্সন নম্বর একটি বাড়িয়ে দিন (যেমন v33 হলে v34)।
+3. Commit করুন, কিছুক্ষণ পর অ্যাপ খুলে দেখুন। পুরনো ডিজাইন দেখালে একবার অ্যাপ বন্ধ করে আবার খুলুন।
