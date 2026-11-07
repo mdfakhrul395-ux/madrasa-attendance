@@ -1,16 +1,24 @@
-রিড কমানোর স্তর — reads-cut.js
+ShikkhaOS আপডেট: প্রশ্ন-উত্তর বক্স + রিড কমানো
 
-১) reads-cut.js রিপোর root-এ আপলোড করুন।
-২) index.html এ reads-saver.js এর লাইনের ঠিক নিচে (icons.js এর আগে) যোগ করুন:
-     <script defer src="reads-cut.js"></script>
-৩) service-worker.js এ ফাইলের তালিকা থাকলে 'reads-cut.js' যোগ করুন এবং CACHE_NAME এক বাড়ান।
-৪) (একবার, শিক্ষার্থীর উপস্থিতি হালকা করার জন্য) Firebase Console → Firestore → Indexes → Composite → Create index:
-     Collection ID: attendance
-     Field 1: studentId — Ascending
-     Field 2: date — Ascending
-     Query scope: Collection
-   ইনডেক্স "Enabled" না হওয়া পর্যন্ত অ্যাপ নিজে থেকে আগের কোয়েরিতে চলবে, কিছু ভাঙবে না।
+ফাইল চারটি:
+  qa.js              — প্রশ্ন-উত্তর বক্স (শিক্ষার্থী ও শিক্ষক দুই পাশ, দুই ধরনের ব্যাজসহ)
+  reads-cut.js       — রিড কমানোর স্তর
+  firestore.rules    — questions ব্লকসহ পুরো রুলস ফাইল
+  service-worker.js  — নতুন দুই ফাইল যোগ, CACHE_NAME v54
 
-কোনো সমস্যা হলে index.html থেকে reads-cut.js এর লাইনটি মুছে দিলেই আগের অবস্থায় ফিরে যাবে।
+আপলোডের ক্রম:
+১) Firebase Console → Firestore → Rules: firestore.rules এর পুরো লেখা পেস্ট করে Publish করুন
+   (প্রশ্ন-উত্তর আগে থেকেই চালু থাকলে এটি আগেই করা হয়ে থাকবে)
+২) GitHub রিপোর root-এ qa.js ও reads-cut.js আপলোড করুন
+৩) index.html এ লাইন দুটি আছে কিনা দেখুন:
+     <script defer src="qa.js"></script>          (exam-routine.js এর নিচে)
+     <script defer src="reads-cut.js"></script>   (reads-saver.js এর নিচে, icons.js এর আগে)
+৪) সবার শেষে service-worker.js আপলোড করুন
+৫) অ্যাপ বন্ধ করে আবার খুলুন (প্রথমবার পুরোনো দেখালে আরেকবার)
 
-যা বদলায় না: শিক্ষকের তালিকা পাতাগুলো (ছুটি, ডায়েরি, বেতন ইত্যাদি), রেজাল্ট ও মেধাক্রম হিসাব — হুবহু আগের মতো।
+ইনডেক্স (Firebase Console → Firestore → Indexes → Composite):
+  questions   : madrasaId (Ascending) + createdAt (Descending)   — আগেই তৈরি করা হয়েছে
+  attendance  : studentId (Ascending) + date (Ascending)         — নতুন, শিক্ষার্থীর উপস্থিতির রিড কমাতে
+  (attendance এর ইনডেক্স না থাকলেও অ্যাপ ঠিক চলে, শুধু ওই অংশে রিড কমে না)
+
+সমস্যা হলে: index.html থেকে reads-cut.js এর লাইন মুছলে রিড-কমানো বন্ধ হয়ে আগের অবস্থা ফিরবে।
