@@ -332,8 +332,10 @@
   }
 
   const prevTeacherTab = window.teacherTab;
+  let activeTeacherKey = 'home';
   window.teacherTab = function (tab) {
     qaStop();
+    activeTeacherKey = tab;
     if (tab === 'qa') {
       stopDash();
       renderTeacherNav('qa');
@@ -406,8 +408,45 @@
     };
   }
 
+
+  // =====================================================================
+  //   শিক্ষকের "উত্তর বাকি" ব্যাজ
+  //   রিড কম রাখতে শুধু সর্বশেষ ২০টি প্রশ্নের লিসেনার (লগইনে সর্বোচ্চ ২০ রিড)
+  //   আগের তৈরি করা (madrasaId + createdAt) ইনডেক্সই এখানে কাজ করে
+  // =====================================================================
+  let tBadgeUnsub = null;
+
+  function startTeacherBadge() {
+    if (typeof unreadCounts === 'undefined' || typeof madrasaId === 'undefined' || !madrasaId) return;
+    if (tBadgeUnsub && tBadgeUnsub.mid === madrasaId) return;
+    if (tBadgeUnsub) { try { tBadgeUnsub.unsub(); } catch (e) { /* ignore */ } tBadgeUnsub = null; }
+    const mid = madrasaId;
+    const unsub = db.collection('questions').where('madrasaId', '==', mid).orderBy('createdAt', 'desc').limit(20)
+      .onSnapshot(snap => {
+        unreadCounts.qa = snap.docs.filter(d => !d.data().answer).length;
+        const isStu = typeof role !== 'undefined' && role === 'student';
+        if (!isStu && typeof renderTeacherNav === 'function') {
+          renderTeacherNav(typeof currentTeacherTab !== 'undefined' ? currentTeacherTab : activeTeacherKey);
+        }
+      }, err => console.error('[qa] teacher badge', err));
+    tBadgeUnsub = { unsub, mid };
+  }
+  function stopTeacherBadge() {
+    if (tBadgeUnsub) { try { tBadgeUnsub.unsub(); } catch (e) { /* ignore */ } tBadgeUnsub = null; }
+    if (typeof unreadCounts !== 'undefined') unreadCounts.qa = 0;
+  }
+
+  const prevShowTeacherApp = window.showTeacherApp;
+  if (typeof prevShowTeacherApp === 'function') {
+    window.showTeacherApp = function () {
+      const r = prevShowTeacherApp.apply(this, arguments);
+      startTeacherBadge();
+      return r;
+    };
+  }
+
   const prevLogout = window.logout;
   if (typeof prevLogout === 'function') {
-    window.logout = function () { qaStop(); return prevLogout.apply(this, arguments); };
+    window.logout = function () { qaStop(); stopTeacherBadge(); stopQaBadge(); return prevLogout.apply(this, arguments); };
   }
 })();
