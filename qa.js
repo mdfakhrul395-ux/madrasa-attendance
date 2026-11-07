@@ -43,6 +43,7 @@
 .qa-badge{flex:none;font-size:11.5px;font-weight:700;padding:3px 10px;border-radius:99px;white-space:nowrap}
 .qa-badge.wait{background:#fef3c7;color:var(--warn)}
 .qa-badge.done{background:#dcfce7;color:var(--ok)}
+.qa-badge.pub{background:#dbeafe;color:#1e40af}
 .qa-meta{font-size:12px;color:var(--mute);margin-top:2px}
 .qa-q{font-size:14px;line-height:1.65;margin:10px 0 0;overflow-wrap:anywhere;white-space:pre-wrap}
 .qa-ans{margin-top:12px;padding:11px 13px;border-radius:12px;background:#e7f5f2}
@@ -81,13 +82,17 @@
   let unsubs = [];
   let token = 0;
   let Q = null;                 // বর্তমান ডেটা: { items, error }
+  let pubUnsub = null;          // শিক্ষার্থীর "শ্রেণির প্রশ্নোত্তর" লিসেনার
   let filter = 'pending';       // শিক্ষকের তালিকার ফিল্টার
   let classFilter = '';         // শিক্ষকের তালিকার শ্রেণি ফিল্টার
   const drafts = {};            // শিক্ষকের লেখা অসম্পূর্ণ উত্তর (নতুন প্রশ্ন এলে যাতে মুছে না যায়)
   const editing = {};           // উত্তর দেওয়া প্রশ্নের উত্তর বদলানো হচ্ছে কিনা
 
+  function stopPub() { if (pubUnsub) { try { pubUnsub(); } catch (e) { /* ignore */ } pubUnsub = null; } }
+
   function qaStop() {
     token++;
+    stopPub();
     unsubs.forEach(fn => { try { fn(); } catch (e) { /* ignore */ } });
     unsubs = [];
   }
@@ -106,6 +111,11 @@
 <div id="qaStuScreen" class="qa">
   <div class="qa-title">প্রশ্ন-উত্তর বক্স</div>
   <div class="qa-sub">পড়ার কোনো বিষয়ে প্রশ্ন থাকলে এখানে লিখুন। শিক্ষক উত্তর দিলে এখানেই দেখতে পাবেন।</div>
+  <div class="qa-chips">
+    <button class="qa-chip on" id="qaTabMine" onclick="qaStuView('mine')">আমার প্রশ্ন</button>
+    <button class="qa-chip" id="qaTabPub" onclick="qaStuView('pub')">শ্রেণির প্রশ্নোত্তর</button>
+  </div>
+  <div id="qaMineWrap">
   <div class="qa-box">
     <label for="qaSubj">বিষয়</label>
     <select id="qaSubj">${opts}</select>
@@ -116,6 +126,11 @@
   </div>
   <div class="qa-title" style="font-size:16px">আমার প্রশ্নগুলো</div>
   <div id="qaStuList"><div class="qa-empty">লোড হচ্ছে...</div></div>
+  </div>
+  <div id="qaPubWrap" style="display:none">
+    <div class="qa-sub">আপনার শ্রেণির কোনো শিক্ষার্থীর প্রশ্নের উত্তর শিক্ষক প্রকাশ করলে সেটি এখানে দেখা যাবে। প্রশ্নকারীর নাম দেখানো হয় না।</div>
+    <div id="qaPubList"><div class="qa-empty">লোড হচ্ছে...</div></div>
+  </div>
 </div>`;
   }
 
@@ -173,11 +188,77 @@
       return `
 <div class="qa-card${answered ? ' new' : ''}">
   <div class="qa-top"><span class="qa-name">${esc(q.subject || 'প্রশ্ন')}</span><span class="qa-badge ${answered ? 'done' : 'wait'}">${answered ? 'উত্তর এসেছে' : 'উত্তরের অপেক্ষায়'}</span></div>
-  <div class="qa-meta">${esc(fmtWhen(q.createdAt))}</div>
+  <div class="qa-meta">${esc(fmtWhen(q.createdAt))}${q.isPublic ? ' · শ্রেণির জন্য প্রকাশিত' : ''}</div>
   <p class="qa-q">${esc(q.text)}</p>
   ${answered ? `<div class="qa-ans"><b>শিক্ষকের উত্তর${q.answeredAt ? ' · ' + esc(fmtWhen(q.answeredAt)) : ''}</b><p>${esc(q.answer)}</p></div>` : `<div class="qa-act"><button class="qa-btn no" onclick="qaStuDelete('${jsq(q.id)}')">মুছুন</button></div>`}
 </div>`;
     }).join('');
+  }
+
+  // ---------- শ্রেণির প্রশ্নোত্তর (শিক্ষক যেগুলো প্রকাশ করেছেন) ----------
+  let P = null;
+
+  window.qaStuView = function (v) {
+    const mine = el('qaMineWrap'), pub = el('qaPubWrap');
+    if (!mine || !pub) return;
+    const isPub = v === 'pub';
+    mine.style.display = isPub ? 'none' : '';
+    pub.style.display = isPub ? '' : 'none';
+    const a = el('qaTabMine'), b = el('qaTabPub');
+    if (a) a.classList.toggle('on', !isPub);
+    if (b) b.classList.toggle('on', isPub);
+    if (isPub) startPub(); else stopPub();
+  };
+
+  function startPub() {
+    if (pubUnsub) return;
+    const tok = token;
+    P = { items: null, error: false };
+    const me = studentsCache.find(s => s.id === myStudentId);
+    const myClass = me ? (me.className || '') : '';
+    if (!myClass) { P.items = []; P.noClass = true; paintPub(); return; }
+    paintPub();
+    const col = db.collection('public_qa');
+    const handle = snap => {
+      if (tok !== token || !P) return;
+      P.items = snap.docs.map(d => Object.assign({ id: d.id }, d.data())).sort((a, b) => (b.answeredAt || 0) - (a.answeredAt || 0));
+      P.error = false;
+      paintPub();
+    };
+    const fail = err => {
+      if (tok !== token || !P) return;
+      P.error = true;
+      diag('public', err);
+      paintPub();
+    };
+    // শুধু নিজের শ্রেণির প্রকাশিত প্রশ্নোত্তর, সর্বশেষ ৩০টি
+    // (ইনডেক্স: public_qa → madrasaId + className + answeredAt; না থাকলে ইনডেক্সহীন কোয়েরিতে ফিরে যায়)
+    pubUnsub = col.where('madrasaId', '==', madrasaId).where('className', '==', myClass).orderBy('answeredAt', 'desc').limit(30).onSnapshot(handle, err => {
+      if (tok !== token) return;
+      if (err && err.code === 'failed-precondition') {
+        try { if (pubUnsub) pubUnsub(); } catch (e) { /* ignore */ }
+        diag('public-index', err);
+        pubUnsub = col.where('madrasaId', '==', madrasaId).where('className', '==', myClass).limit(50).onSnapshot(handle, fail);
+      } else {
+        fail(err);
+      }
+    });
+  }
+
+  function paintPub() {
+    const box = el('qaPubList');
+    if (!box || !P) return;
+    if (P.error) { box.innerHTML = '<div class="qa-err">লোড করা যায়নি। ইন্টারনেট দেখে আবার চেষ্টা করুন।</div>'; return; }
+    if (P.noClass) { box.innerHTML = '<div class="qa-empty">আপনার শ্রেণির তথ্য পাওয়া যায়নি।</div>'; return; }
+    if (!P.items) { box.innerHTML = '<div class="qa-empty">লোড হচ্ছে...</div>'; return; }
+    if (!P.items.length) { box.innerHTML = '<div class="qa-empty">আপনার শ্রেণির জন্য এখনো কোনো প্রশ্নোত্তর প্রকাশ করা হয়নি।</div>'; return; }
+    box.innerHTML = P.items.map(q => `
+<div class="qa-card">
+  <div class="qa-top"><span class="qa-name">${esc(q.subject || 'প্রশ্ন')}</span></div>
+  <div class="qa-meta">${esc(fmtWhen(q.answeredAt))}</div>
+  <p class="qa-q">${esc(q.text)}</p>
+  <div class="qa-ans"><b>শিক্ষকের উত্তর</b><p>${esc(q.answer)}</p></div>
+</div>`).join('');
   }
 
   function renderStudent() {
@@ -234,14 +315,51 @@
     if (text.length > 2000) { alert('উত্তর সর্বোচ্চ ২০০০ অক্ষরের হতে পারে।'); return; }
     let who = '';
     try { who = String((typeof myTeacherName !== 'undefined' && myTeacherName) || '').slice(0, 80); } catch (e) { /* ignore */ }
-    db.collection('questions').doc(id).update({ answer: text, answeredBy: who, answeredAt: Date.now() })
-      .then(() => { delete drafts[id]; delete editing[id]; })
+    const q0 = Q && Q.items && Q.items.find(x => x.id === id);
+    const at = Date.now();
+    db.collection('questions').doc(id).update({ answer: text, answeredBy: who, answeredAt: at })
+      .then(() => {
+        delete drafts[id]; delete editing[id];
+        // আগে শ্রেণির জন্য প্রকাশ করা থাকলে প্রকাশিত কপিও নতুন উত্তরে হালনাগাদ হয়
+        if (q0 && q0.isPublic) return db.collection('public_qa').doc(id).set(pubDoc(q0, text, at));
+      })
       .catch(err => { diag('answer', err); alert('উত্তর পাঠানো যায়নি। ইন্টারনেট দেখে আবার চেষ্টা করুন।'); });
+  };
+
+  // প্রকাশিত কপিতে শিক্ষার্থীর নাম/আইডি থাকে না — শুধু শ্রেণি, বিষয়, প্রশ্ন ও উত্তর
+  function pubDoc(q, answer, answeredAt) {
+    return {
+      madrasaId: madrasaId,
+      className: String(q.className || '').slice(0, 60),
+      subject: String(q.subject || '').slice(0, 40),
+      text: q.text,
+      answer: answer,
+      answeredAt: answeredAt,
+      createdAt: q.createdAt || 0
+    };
+  }
+
+  window.qaPublish = function (id) {
+    const q = Q && Q.items && Q.items.find(x => x.id === id);
+    if (!q || !q.answer) { alert('আগে উত্তর দিন।'); return; }
+    if (!confirm('এই প্রশ্ন ও উত্তর ' + (q.className ? q.className + ' শ্রেণির' : 'ওই শ্রেণির') + ' সব শিক্ষার্থী দেখতে পাবে (অন্য শ্রেণি নয়)। শিক্ষার্থীর নাম দেখানো হবে না। প্রকাশ করবেন?')) return;
+    db.collection('public_qa').doc(id).set(pubDoc(q, q.answer, q.answeredAt || Date.now()))
+      .then(() => db.collection('questions').doc(id).update({ isPublic: true }))
+      .catch(err => { diag('publish', err); alert('প্রকাশ করা যায়নি। ইন্টারনেট দেখে আবার চেষ্টা করুন।'); });
+  };
+
+  window.qaUnpublish = function (id) {
+    if (!confirm('এটি আর শ্রেণির শিক্ষার্থীদের জন্য দেখানো হবে না। প্রকাশ বন্ধ করবেন?')) return;
+    db.collection('public_qa').doc(id).delete()
+      .then(() => db.collection('questions').doc(id).update({ isPublic: false }))
+      .catch(err => { diag('unpublish', err); alert('প্রকাশ বন্ধ করা যায়নি। ইন্টারনেট দেখে আবার চেষ্টা করুন।'); });
   };
 
   window.qaDelete = function (id) {
     if (!confirm('এই প্রশ্নটি মুছে ফেলবেন? এটি আর ফেরানো যাবে না।')) return;
-    db.collection('questions').doc(id).delete()
+    const q0 = Q && Q.items && Q.items.find(x => x.id === id);
+    const pubDel = (q0 && q0.isPublic) ? db.collection('public_qa').doc(id).delete().catch(() => {}) : Promise.resolve();
+    pubDel.then(() => db.collection('questions').doc(id).delete())
       .then(() => { delete drafts[id]; delete editing[id]; })
       .catch(err => { diag('delete', err); alert('মোছা যায়নি।'); });
   };
@@ -261,6 +379,7 @@
     let html = `<div class="qa-chips">
       <button class="qa-chip${filter === 'pending' ? ' on' : ''}" onclick="qaFilter('pending')">উত্তর বাকি (${bn(pendingN)})</button>
       <button class="qa-chip${filter === 'answered' ? ' on' : ''}" onclick="qaFilter('answered')">উত্তর দেওয়া</button>
+      <button class="qa-chip${filter === 'public' ? ' on' : ''}" onclick="qaFilter('public')">প্রকাশিত</button>
       <button class="qa-chip${filter === 'all' ? ' on' : ''}" onclick="qaFilter('all')">সব</button>
     </div>`;
     if (classes.length > 1) {
@@ -272,6 +391,7 @@
     const shown = all.filter(q => {
       if (filter === 'pending' && q.answer) return false;
       if (filter === 'answered' && !q.answer) return false;
+      if (filter === 'public' && !q.isPublic) return false;
       if (classFilter && (q.className || '') !== classFilter) return false;
       return true;
     });
@@ -287,13 +407,13 @@
       let body;
       if (answered && !editing[q.id]) {
         body = `<div class="qa-ans"><b>আপনার উত্তর${q.answeredAt ? ' · ' + esc(fmtWhen(q.answeredAt)) : ''}</b><p>${esc(q.answer)}</p></div>
-          <div class="qa-act"><button class="qa-btn ghost" onclick="qaEdit('${id}')">উত্তর বদলান</button><button class="qa-btn no" onclick="qaDelete('${id}')">মুছুন</button></div>`;
+          <div class="qa-act"><button class="qa-btn ghost" onclick="qaEdit('${id}')">উত্তর বদলান</button>${q.isPublic ? `<button class="qa-btn ghost" onclick="qaUnpublish('${id}')">প্রকাশ বন্ধ করুন</button>` : `<button class="qa-btn" onclick="qaPublish('${id}')">শ্রেণির জন্য প্রকাশ করুন</button>`}<button class="qa-btn no" onclick="qaDelete('${id}')">মুছুন</button></div>`;
       } else {
         body = `<textarea maxlength="2000" placeholder="উত্তর লিখুন" oninput="qaDraft('${id}',this.value)">${esc(drafts[q.id] || '')}</textarea>
           <div class="qa-act"><button class="qa-btn" onclick="qaAnswer('${id}')">উত্তর পাঠান</button>${editing[q.id] ? `<button class="qa-btn ghost" onclick="qaCancelEdit('${id}')">বাতিল</button>` : ''}<button class="qa-btn no" onclick="qaDelete('${id}')">মুছুন</button></div>`;
       }
       return `<div class="qa-card${answered ? '' : ' new'}">
-        <div class="qa-top"><span class="qa-name">${esc(q.studentName || 'শিক্ষার্থী')}</span><span class="qa-badge ${answered ? 'done' : 'wait'}">${answered ? 'উত্তর দেওয়া হয়েছে' : 'উত্তর বাকি'}</span></div>
+        <div class="qa-top"><span class="qa-name">${esc(q.studentName || 'শিক্ষার্থী')}</span><span style="display:flex;gap:6px;flex-wrap:wrap;justify-content:flex-end"><span class="qa-badge ${answered ? 'done' : 'wait'}">${answered ? 'উত্তর দেওয়া হয়েছে' : 'উত্তর বাকি'}</span>${q.isPublic ? '<span class="qa-badge pub">শ্রেণির জন্য প্রকাশিত</span>' : ''}</span></div>
         <div class="qa-meta">${meta}</div>
         <p class="qa-q">${esc(q.text)}</p>
         ${body}

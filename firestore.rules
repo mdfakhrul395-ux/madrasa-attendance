@@ -110,6 +110,16 @@ service cloud.firestore {
         request.resource.data.pin.matches('^[0-9]{4,8}$');
     }
 
+    // প্রকাশিত প্রশ্নোত্তরের (public_qa) ফিল্ড যাচাই: শিক্ষার্থীর নাম/আইডি রাখা যাবে না
+    function validPublicQa() {
+      return request.resource.data.keys().hasOnly(['madrasaId', 'className', 'subject', 'text', 'answer', 'answeredAt', 'createdAt']) &&
+        request.resource.data.text is string && request.resource.data.text.size() > 0 && request.resource.data.text.size() <= 1000 &&
+        request.resource.data.answer is string && request.resource.data.answer.size() > 0 && request.resource.data.answer.size() <= 2000 &&
+        request.resource.data.className is string && request.resource.data.className.size() <= 60 &&
+        request.resource.data.subject is string && request.resource.data.subject.size() <= 40 &&
+        request.resource.data.answeredAt is number && request.resource.data.createdAt is number;
+    }
+
     // ================= TEACHERS =================
     match /teachers/{uid} {
       allow read: if request.auth != null && (
@@ -399,12 +409,24 @@ service cloud.firestore {
         request.resource.data.className is string && request.resource.data.className.size() <= 60 &&
         request.resource.data.createdAt is number;
       allow update: if isTeacherAuth() && resource.data.madrasaId == myMadrasaId() &&
-        request.resource.data.diff(resource.data).affectedKeys().hasOnly(['answer', 'answeredBy', 'answeredAt']) &&
+        request.resource.data.diff(resource.data).affectedKeys().hasOnly(['answer', 'answeredBy', 'answeredAt', 'isPublic']) &&
+        (!('isPublic' in request.resource.data) || request.resource.data.isPublic is bool) &&
         request.resource.data.answer is string &&
         request.resource.data.answer.size() > 0 &&
         request.resource.data.answer.size() <= 2000;
       allow delete: if (isTeacherAuth() && resource.data.madrasaId == myMadrasaId()) ||
                        (isStudentAuth() && resource.data.studentId == mySessionStudentId() && !('answer' in resource.data));
+    }
+
+    // ================= শ্রেণির জন্য প্রকাশিত প্রশ্নোত্তর (qa.js) =================
+    // শিক্ষক প্রকাশ করেন; মাদ্রাসার শিক্ষকগণ সব পড়তে পারেন, শিক্ষার্থী শুধু নিজের শ্রেণির। এতে শিক্ষার্থীর নাম/আইডি থাকে না।
+    match /public_qa/{docId} {
+      allow read: if (isTeacherAuth() && resource.data.madrasaId == myMadrasaId()) ||
+                     (isStudentAuth() && resource.data.madrasaId == myMadrasaId() && resource.data.className == myClassName());
+      allow create: if isTeacherAuth() && request.resource.data.madrasaId == myMadrasaId() && validPublicQa();
+      allow update: if isTeacherAuth() && resource.data.madrasaId == myMadrasaId() &&
+        request.resource.data.madrasaId == resource.data.madrasaId && validPublicQa();
+      allow delete: if isTeacherAuth() && resource.data.madrasaId == myMadrasaId();
     }
 
     // ================= FEES =================
