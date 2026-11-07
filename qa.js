@@ -52,6 +52,7 @@
 .qa-card textarea{width:100%;box-sizing:border-box;margin:12px 0 0;padding:11px 12px;min-height:80px;border:0;border-radius:12px;background:#f4f7f9;font:inherit;font-size:14.5px;box-shadow:inset 0 0 0 1px var(--line);resize:vertical;line-height:1.55}
 .qa-empty{text-align:center;color:var(--mute);font-size:13.5px;line-height:1.7;padding:26px 10px}
 .qa-err{color:var(--bad);font-size:13px;line-height:1.6;padding:10px 2px}
+.qa-nav-badge{position:absolute;top:-5px;right:-8px;min-width:16px;height:16px;line-height:16px;padding:0 4px;border-radius:99px;background:#dc2626;color:#fff;font-size:10px;font-weight:700;text-align:center;box-sizing:border-box;pointer-events:none;z-index:2}
 `;
   if (!document.getElementById('qaStyles')) {
     const st = document.createElement('style');
@@ -414,6 +415,47 @@
   //   রিড কম রাখতে শুধু সর্বশেষ ২০টি প্রশ্নের লিসেনার (লগইনে সর্বোচ্চ ২০ রিড)
   //   আগের তৈরি করা (madrasaId + createdAt) ইনডেক্সই এখানে কাজ করে
   // =====================================================================
+  // app.js ও dashboard.js এর শিক্ষক-নেভ ব্যাজ নেয় না (শুধু শিক্ষার্থী-নেভ নেয়), তাই
+  // কে নেভ আঁকল তা না দেখে সরাসরি নেভের HTML-এ ব্যাজ বসানো হয়; নেভ নতুন করে আঁকা হলেও আবার বসে।
+  function paintTeacherNavBadge() {
+    const nav = document.getElementById('bottomNav');
+    if (!nav) return;
+    const isTeacher = typeof role !== 'undefined' && role === 'teacher';
+    const n = (isTeacher && typeof unreadCounts !== 'undefined') ? (unreadCounts.qa || 0) : 0;
+    const targets = [
+      nav.querySelector('[onclick*="toggleMoreMenu"]'),
+      nav.querySelector('[onclick*="teacherTab(\'qa\')"]')
+    ];
+    targets.forEach(t => {
+      if (!t) return;
+      const host = t.querySelector('.tab-icon, .more-icon') || t;
+      let b = host.querySelector(':scope > .qa-nav-badge');
+      if (n > 0) {
+        if (!b) {
+          if (getComputedStyle(host).position === 'static') host.style.position = 'relative';
+          b = document.createElement('span');
+          b.className = 'qa-nav-badge';
+          host.appendChild(b);
+        }
+        b.textContent = n > 9 ? '9+' : bn(n);
+      } else if (b) {
+        b.remove();
+      }
+    });
+  }
+  let navObs = null;
+  function watchTeacherNav() {
+    const nav = document.getElementById('bottomNav');
+    if (!nav || navObs || typeof MutationObserver === 'undefined') return;
+    navObs = new MutationObserver(() => {
+      navObs.disconnect();
+      paintTeacherNavBadge();
+      navObs.observe(nav, { childList: true, subtree: true });
+    });
+    navObs.observe(nav, { childList: true, subtree: true });
+  }
+  watchTeacherNav();
+
   let tBadgeUnsub = null;
 
   function startTeacherBadge() {
@@ -424,16 +466,14 @@
     const unsub = db.collection('questions').where('madrasaId', '==', mid).orderBy('createdAt', 'desc').limit(20)
       .onSnapshot(snap => {
         unreadCounts.qa = snap.docs.filter(d => !d.data().answer).length;
-        const isStu = typeof role !== 'undefined' && role === 'student';
-        if (!isStu && typeof renderTeacherNav === 'function') {
-          renderTeacherNav(typeof currentTeacherTab !== 'undefined' ? currentTeacherTab : activeTeacherKey);
-        }
+        paintTeacherNavBadge();
       }, err => console.error('[qa] teacher badge', err));
     tBadgeUnsub = { unsub, mid };
   }
   function stopTeacherBadge() {
     if (tBadgeUnsub) { try { tBadgeUnsub.unsub(); } catch (e) { /* ignore */ } tBadgeUnsub = null; }
     if (typeof unreadCounts !== 'undefined') unreadCounts.qa = 0;
+    paintTeacherNavBadge();
   }
 
   const prevShowTeacherApp = window.showTeacherApp;
