@@ -11,6 +11,8 @@ service cloud.firestore {
     // ৫) শিক্ষার্থী হাজিরা ডকের date/madrasaId বদলে রেকর্ড সরাতে পারত — এখন শুধু timeLeftHome
     // ৬) এক মাদ্রাসার অ্যাডমিন/শিক্ষক অন্য মাদ্রাসার ডক (হাজিরা, বেতন, রেজাল্ট, ফোন, শিক্ষার্থী) ওভাররাইট করতে পারত — বন্ধ
     // ৭) কোড দিয়ে যোগদান (pending) নিয়মে তৈরির অনুমতি ছিল না, আর pending শিক্ষক সার্ভারে আটকানো ছিল না — ঠিক করা
+    // হালনাগাদ (Nov 9): একজন শ্রেণি শিক্ষক এখন একাধিক শ্রেণির হতে পারেন (classTeacherClasses তালিকা;
+    // তালিকা না থাকলে পুরোনো classTeacherOf ধরা হয়)
     // ======================================================================
 
     // ================= SUPER ADMIN =================
@@ -84,16 +86,21 @@ service cloud.firestore {
         get(/databases/$(database)/documents/students/$(sid)).data.madrasaId == myMadrasaId();
     }
 
-    // ================= শ্রেণি শিক্ষক =================
-    function myClassTeacherOf() {
-      return myTeacherDoc().get('classTeacherOf', '');
+    // ================= শ্রেণি শিক্ষক (এক বা একাধিক শ্রেণি) =================
+    // classTeacherClasses তালিকা থাকলে সেটিই; না থাকলে পুরোনো classTeacherOf (একটি শ্রেণি)
+    function myClassTeacherList() {
+      return myTeacherDoc().get('classTeacherClasses', null) is list
+        ? myTeacherDoc().get('classTeacherClasses', [])
+        : (myTeacherDoc().get('classTeacherOf', '') != ''
+            ? [myTeacherDoc().get('classTeacherOf', '')]
+            : []);
     }
 
     function isMyClassStudent(studentId) {
       return isTeacherAuth() &&
-        myClassTeacherOf() != '' &&
+        myClassTeacherList().size() > 0 &&
         studentInMyMadrasa(studentId) &&
-        get(/databases/$(database)/documents/students/$(studentId)).data.get('className', null) == myClassTeacherOf();
+        get(/databases/$(database)/documents/students/$(studentId)).data.get('className', null) in myClassTeacherList();
     }
 
     function canEditResultOf(studentId) {
@@ -136,6 +143,7 @@ service cloud.firestore {
          request.resource.data.get('active', true) == true &&
          request.resource.data.get('pending', false) == false &&
          !('classTeacherOf' in request.resource.data) &&
+         !('classTeacherClasses' in request.resource.data) &&
          request.resource.data.madrasaId is string &&
          request.resource.data.madrasaId.matches('^m_[a-z0-9]+_[a-z0-9]+$') &&
          !exists(/databases/$(database)/documents/madrasas/$(request.resource.data.madrasaId))) ||
@@ -145,6 +153,7 @@ service cloud.firestore {
          request.resource.data.get('active', true) == true &&
          request.resource.data.get('pending', false) == true &&
          !('classTeacherOf' in request.resource.data) &&
+         !('classTeacherClasses' in request.resource.data) &&
          request.resource.data.madrasaId is string &&
          exists(/databases/$(database)/documents/madrasas/$(request.resource.data.madrasaId)) &&
          isMadrasaActive(request.resource.data.madrasaId));
@@ -158,6 +167,7 @@ service cloud.firestore {
          request.resource.data.get('isAdmin', false) == resource.data.get('isAdmin', false) &&
          request.resource.data.get('active', true) == resource.data.get('active', true) &&
          request.resource.data.get('classTeacherOf', '') == resource.data.get('classTeacherOf', '') &&
+         request.resource.data.get('classTeacherClasses', []) == resource.data.get('classTeacherClasses', []) &&
          request.resource.data.get('pending', false) == resource.data.get('pending', false))
       );
       allow delete: if false;
@@ -190,8 +200,8 @@ service cloud.firestore {
         resource.data.madrasaId == myMadrasaId() &&
         request.resource.data.madrasaId == resource.data.madrasaId &&
         (isStudentManager() ||
-         (myClassTeacherOf() != '' &&
-          resource.data.get('className', null) == myClassTeacherOf() &&
+         (myClassTeacherList().size() > 0 &&
+          resource.data.get('className', null) in myClassTeacherList() &&
           request.resource.data.get('className', null) == resource.data.get('className', null)));
       allow delete: if isStudentManager() && resource.data.madrasaId == myMadrasaId();
     }

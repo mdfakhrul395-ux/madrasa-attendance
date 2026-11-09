@@ -1,8 +1,12 @@
 /* ShikkhaOS — শ্রেণি শিক্ষক নির্ধারণ (ধাপ ১) + রেজাল্ট সম্পাদনার সীমা (ধাপ ২) + শ্রেণি শিক্ষকের শিক্ষার্থী-তথ্য সম্পাদনা (ধাপ ৩)
  *
+ * হালনাগাদ (Nov 9): একজন শিক্ষককে এখন একাধিক শ্রেণির শ্রেণি শিক্ষক করা যায়।
+ *
  * শিক্ষকগণ ট্যাবের নিচে "শ্রেণি শিক্ষক নির্ধারণ" নামে একটি কার্ড যোগ করে।
- * অ্যাডমিন সেখানে প্রতিটি শিক্ষকের পাশে তাঁর শ্রেণি বেছে দেন।
- * তথ্য জমা হয় teachers/{uid} ডকুমেন্টের classTeacherOf ফিল্ডে (শ্রেণির নাম, লেখা)।
+ * অ্যাডমিন সেখানে প্রতিটি শিক্ষকের পাশে এক বা একাধিক শ্রেণিতে টিক দেন।
+ * তথ্য জমা হয় teachers/{uid} ডকুমেন্টের classTeacherClasses ফিল্ডে (শ্রেণির নামের তালিকা)।
+ * পুরোনো সামঞ্জস্যের জন্য classTeacherOf-এ তালিকার প্রথম শ্রেণিটিও লেখা হয়।
+ * আগে যাঁদের শুধু classTeacherOf (একটি শ্রেণি) দেওয়া ছিল, তাঁরা নিজে থেকেই একটি শ্রেণির তালিকা হিসেবে চলবেন।
  *
  * app.js বা অন্য কোনো ফাইল বদলাতে হয় না। index.html এ এটি সবার শেষে লোড করুন
  * (final-result.js এর পরে)।
@@ -18,6 +22,14 @@
   const origRender = window.renderTeachersScreen;
   let token = 0;
 
+  // শিক্ষকের ডকুমেন্ট থেকে শ্রেণির তালিকা: নতুন তালিকা থাকলে সেটি, নইলে পুরোনো একক শ্রেণি
+  function ctList(t) {
+    if (t && Array.isArray(t.classTeacherClasses)) {
+      return t.classTeacherClasses.filter(c => typeof c === 'string' && c !== '');
+    }
+    return (t && typeof t.classTeacherOf === 'string' && t.classTeacherOf !== '') ? [t.classTeacherOf] : [];
+  }
+
   function paint(docs) {
     const wrap = document.getElementById('classTeacherWrap');
     if (!wrap) return;
@@ -29,24 +41,27 @@
       .sort((a, b) => (a.data().createdAt || 0) - (b.data().createdAt || 0));
 
     if (!list.length) { wrap.innerHTML = '<p class="muted">কোনো শিক্ষক পাওয়া যায়নি</p>'; return; }
+    if (!classes.length) { wrap.innerHTML = '<p class="muted">এখনো কোনো শ্রেণি নেই। আগে শিক্ষার্থী যোগ করুন।</p>'; return; }
 
     wrap.innerHTML = list.map(d => {
       const t = d.data();
-      const cur = typeof t.classTeacherOf === 'string' ? t.classTeacherOf : '';
+      const cur = ctList(t);
       // শ্রেণির নাম পরে বদলে গিয়ে থাকলেও আগের মানটি তালিকায় থাকবে, যাতে হারিয়ে না যায়
-      const all = cur && classes.indexOf(cur) === -1 ? classes.concat([cur]) : classes;
-      const opts = all.map(c => `<option value="${esc(c)}" ${c === cur ? 'selected' : ''}>${esc(c)}</option>`).join('');
+      const all = classes.concat(cur.filter(c => classes.indexOf(c) === -1));
+      const boxes = all.map(c => `
+        <label style="display:inline-flex;align-items:center;gap:5px;margin:0;font-weight:normal;">
+          <input type="checkbox" style="width:auto;margin:0;" value="${esc(c)}" ${cur.indexOf(c) > -1 ? 'checked' : ''} onchange="setClassTeacher('${jsq(d.id)}')">
+          <span>${esc(c)}</span>
+        </label>`).join('');
       const tags = (d.id === myUid ? ' <span class="muted">(আপনি)</span>' : '')
         + (t.isAdmin === true ? ' <span class="muted">⭐ অ্যাডমিন</span>' : '')
         + (t.pending === true ? ' <span class="muted">(অনুমোদনের অপেক্ষায়)</span>' : '');
       return `
         <div class="student-row" style="display:block;">
           <div>${esc(t.email || d.id)}${tags}</div>
-          <select onchange="setClassTeacher('${jsq(d.id)}', this)" style="margin-top:6px;">
-            <option value="">— শ্রেণি শিক্ষক নন —</option>
-            ${opts}
-          </select>
-          <div class="muted" id="ctMsg_${esc(d.id)}" style="min-height:16px;font-size:12px;margin-top:2px;"></div>
+          <div class="muted" style="font-size:12px;margin-top:4px;">শ্রেণি শিক্ষক (এক বা একাধিক শ্রেণিতে টিক দিন; কোনোটিতে টিক না থাকলে শ্রেণি শিক্ষক নন):</div>
+          <div id="ctBox_${esc(d.id)}" style="display:flex;flex-wrap:wrap;gap:8px 16px;margin-top:6px;">${boxes}</div>
+          <div class="muted" id="ctMsg_${esc(d.id)}" style="min-height:16px;font-size:12px;margin-top:4px;"></div>
         </div>`;
     }).join('');
   }
@@ -62,12 +77,16 @@
       });
   }
 
-  window.setClassTeacher = function (uid, sel) {
+  window.setClassTeacher = function (uid) {
     if (!myTeacherIsAdmin) { alert('শ্রেণি শিক্ষক ঠিক করা শুধু অ্যাডমিন করতে পারেন'); return; }
+    const box = document.getElementById('ctBox_' + uid);
+    if (!box) return;
+    const picked = Array.from(box.querySelectorAll('input[type="checkbox"]'))
+      .filter(i => i.checked).map(i => i.value);
     const msg = document.getElementById('ctMsg_' + uid);
     if (msg) msg.textContent = 'সংরক্ষণ হচ্ছে...';
-    db.collection('teachers').doc(uid).set({ classTeacherOf: sel.value }, { merge: true })
-      .then(() => { if (msg) msg.textContent = '✓ সংরক্ষিত'; })
+    db.collection('teachers').doc(uid).set({ classTeacherClasses: picked, classTeacherOf: picked[0] || '' }, { merge: true })
+      .then(() => { if (msg) msg.textContent = picked.length ? '✓ সংরক্ষিত (' + picked.length + 'টি শ্রেণি)' : '✓ সংরক্ষিত (শ্রেণি শিক্ষক নন)'; })
       .catch(e => {
         if (msg) msg.textContent = '';
         alert('সংরক্ষণ ব্যর্থ: ' + e.message);
@@ -84,7 +103,7 @@
         app.insertAdjacentHTML('beforeend', `
           <div class="card">
             <h2>শ্রেণি শিক্ষক নির্ধারণ</h2>
-            <p class="muted">যে শিক্ষক যে শ্রেণির শ্রেণি শিক্ষক, তাঁর পাশে সেই শ্রেণি বেছে দিন। (রেজাল্ট সম্পাদনা করতে পারবেন শুধু ওই শ্রেণির শ্রেণি শিক্ষক ও অ্যাডমিন; বাকিরা শুধু দেখতে পারবেন।)</p>
+            <p class="muted">যে শিক্ষক যে শ্রেণি বা শ্রেণিগুলোর শ্রেণি শিক্ষক, তাঁর নিচে সেই শ্রেণিগুলোতে টিক দিন। (রেজাল্ট সম্পাদনা করতে পারবেন শুধু ওই শ্রেণিগুলোর শ্রেণি শিক্ষক ও অ্যাডমিন; বাকিরা শুধু দেখতে পারবেন।)</p>
             <div id="classTeacherWrap">লোড হচ্ছে...</div>
           </div>`);
         load();
@@ -100,12 +119,14 @@
   // =====================================================================
   const isAdminNow = () => !!((typeof myTeacherIsAdmin !== 'undefined' && myTeacherIsAdmin) ||
                               (typeof isSuperAdminUser !== 'undefined' && isSuperAdminUser));
-  let myClass = '';          // এই শিক্ষকের শ্রেণি ('' মানে কোনো শ্রেণির শ্রেণি শিক্ষক নন)
+  let myClasses = [];        // এই শিক্ষকের শ্রেণিগুলো ([] মানে কোনো শ্রেণির শ্রেণি শিক্ষক নন)
   let classLoaded = false;
   let listenerUid = null;
   let unsubMine = null;
   let defaultFilterApplied = false;
   let obs = null;
+
+  const classesLabel = () => myClasses.join('، ');
 
   function stopMine() {
     if (unsubMine) { try { unsubMine(); } catch (e) { /* ignore */ } unsubMine = null; }
@@ -121,9 +142,9 @@
     listenerUid = u.uid;
     unsubMine = db.collection('teachers').doc(u.uid).onSnapshot(snap => {
       const d = snap.exists ? snap.data() : {};
-      const c = typeof d.classTeacherOf === 'string' ? d.classTeacherOf : '';
-      const changed = !classLoaded || c !== myClass;
-      myClass = c;
+      const c = ctList(d);
+      const changed = !classLoaded || c.join('\u0001') !== myClasses.join('\u0001');
+      myClasses = c;
       classLoaded = true;
       if (changed) onClassChanged();
     }, err => console.error('[class-teacher] নিজের তথ্য লোড এরর', err));
@@ -141,9 +162,9 @@
 
   function canEditStudent(sid) {
     if (isAdminNow()) return true;
-    if (!myClass) return false;
+    if (!myClasses.length) return false;
     const s = studentsCache.find(x => x.id === sid);
-    return !!s && s.className === myClass;
+    return !!s && !!s.className && myClasses.indexOf(s.className) > -1;
   }
 
   // রেজাল্টের docId = শিক্ষার্থীর id + '_' + পরীক্ষার নাম ..., তাই শুরু দেখেই শিক্ষার্থী চেনা যায়
@@ -205,8 +226,8 @@
           if (ch.tagName !== 'H2' && ch.id !== 'resultsFilterWrap') ch.style.display = 'none';
         });
         const note = !classLoaded ? 'লোড হচ্ছে...'
-          : !myClass ? 'আপনাকে কোনো শ্রেণির শ্রেণি শিক্ষক করা হয়নি, তাই রেজাল্ট শুধু দেখতে পারবেন।'
-          : 'এই শ্রেণির রেজাল্ট আপনি শুধু দেখতে পারবেন। সম্পাদনা করতে পারবেন শুধু নিজের শ্রেণির (' + myClass + ')।';
+          : !myClasses.length ? 'আপনাকে কোনো শ্রেণির শ্রেণি শিক্ষক করা হয়নি, তাই রেজাল্ট শুধু দেখতে পারবেন।'
+          : 'এই শ্রেণির রেজাল্ট আপনি শুধু দেখতে পারবেন। সম্পাদনা করতে পারবেন শুধু নিজের শ্রেণির (' + classesLabel() + ')।';
         const fw = document.getElementById('resultsFilterWrap');
         const html = '<p class="muted" style="margin:8px 0 0;">' + esc(note) + '</p>';
         if (fw) fw.insertAdjacentHTML('afterend', html); else formCard.insertAdjacentHTML('beforeend', html);
@@ -222,9 +243,9 @@
     window.renderResultsScreen = function (isTeacher) {
       if (isTeacher && !isAdminNow()) {
         startMine();
-        // শ্রেণি শিক্ষক প্রথমবার রেজাল্ট ট্যাবে এলে নিজের শ্রেণিই আগে দেখান
-        if (classLoaded && myClass && !defaultFilterApplied && resultsClassFilter === 'all') {
-          resultsClassFilter = myClass;
+        // শ্রেণি শিক্ষক প্রথমবার রেজাল্ট ট্যাবে এলে নিজের (প্রথম) শ্রেণিই আগে দেখান
+        if (classLoaded && myClasses.length && !defaultFilterApplied && resultsClassFilter === 'all') {
+          resultsClassFilter = myClasses[0];
           defaultFilterApplied = true;
         }
       }
@@ -234,45 +255,51 @@
     };
   }
 
-  // ---- মেধাক্রম: অ্যাডমিন সব শ্রেণির, শ্রেণি শিক্ষক শুধু নিজের শ্রেণির ----
+  // ---- মেধাক্রম: অ্যাডমিন সব শ্রেণির, শ্রেণি শিক্ষক শুধু নিজের শ্রেণিগুলোর ----
   // (নইলে অন্য শ্রেণির রেজাল্টে লিখতে গিয়ে পুরো ব্যাচটাই সার্ভার ফিরিয়ে দিত)
+  // মেধাক্রম প্রতিটি শ্রেণির ভেতরে আলাদাভাবে হিসাব হয়।
   //
   // Firestore-এর নিয়ম: একসাথে লেখার (batch) সময় rules প্রতিটি ডকের জন্য শিক্ষার্থীর ডক দেখে
   // শ্রেণি শিক্ষক কিনা যাচাই করে, আর পুরো ব্যাচে মোট ২০টির বেশি ডক দেখা যায় না।
-  // তাই শ্রেণিতে ১৮ জনের বেশি হলে এক ব্যাচে লিখলে সব বাতিল হতো — এখন ১৫টি করে ভাগ করে লেখা হয়।
+  // তাই ১৫টি করে ভাগ করে লেখা হয়।
   const MERIT_CHUNK = 15;
 
   function recomputeOwn(examName, academicYear) {
-    if (!examName || !myClass) return Promise.resolve();
+    if (!examName || !myClasses.length) return Promise.resolve();
     return db.collection('results')
       .where('madrasaId', '==', madrasaId)
       .where('examName', '==', examName)
       .get()
       .then(snap => {
-        const list = [];
+        const groups = {};
         snap.docs.forEach(d => {
           const r = d.data();
           if ((r.academicYear || '') !== (academicYear || '')) return;
           if (!Array.isArray(r.subjects) || r.subjects.length === 0) return;
           const st = studentsCache.find(s => s.id === r.studentId);
-          if (!st || st.className !== myClass) return;
+          if (!st || !st.className || myClasses.indexOf(st.className) === -1) return;
           const t = computeMarksheetTotals(r.subjects);
-          list.push({ id: d.id, gpa: Number(t.gpa), total: t.totalObtained, roll: st.roll, failed: t.grade === 'F' });
+          (groups[st.className] = groups[st.className] || []).push({
+            id: d.id, gpa: Number(t.gpa), total: t.totalObtained, roll: st.roll, failed: t.grade === 'F'
+          });
         });
-        const pass = list.filter(x => !x.failed).sort((a, b) =>
-          (b.gpa - a.gpa) || (b.total - a.total) || meritRollCompare(a.roll, b.roll));
 
         const ops = [];
-        pass.forEach((x, i) => {
-          ops.push({ ref: db.collection('results').doc(x.id), data: { meritRank: i + 1, meritTotal: pass.length } });
-        });
-        list.filter(x => x.failed).forEach(x => {
-          ops.push({
-            ref: db.collection('results').doc(x.id),
-            data: {
-              meritRank: firebase.firestore.FieldValue.delete(),
-              meritTotal: firebase.firestore.FieldValue.delete()
-            }
+        Object.keys(groups).forEach(cn => {
+          const list = groups[cn];
+          const pass = list.filter(x => !x.failed).sort((a, b) =>
+            (b.gpa - a.gpa) || (b.total - a.total) || meritRollCompare(a.roll, b.roll));
+          pass.forEach((x, i) => {
+            ops.push({ ref: db.collection('results').doc(x.id), data: { meritRank: i + 1, meritTotal: pass.length } });
+          });
+          list.filter(x => x.failed).forEach(x => {
+            ops.push({
+              ref: db.collection('results').doc(x.id),
+              data: {
+                meritRank: firebase.firestore.FieldValue.delete(),
+                meritTotal: firebase.firestore.FieldValue.delete()
+              }
+            });
           });
         });
 
@@ -301,7 +328,7 @@
   if (typeof origRecomputeAll === 'function') {
     window.recomputeAllMeritRanks = function () {
       if (isAdminNow()) return origRecomputeAll.apply(this, arguments);
-      if (!myClass) { alert('আপনি কোনো শ্রেণির শ্রেণি শিক্ষক নন।'); return; }
+      if (!myClasses.length) { alert('আপনি কোনো শ্রেণির শ্রেণি শিক্ষক নন।'); return; }
       db.collection('results').where('madrasaId', '==', madrasaId).get().then(snap => {
         const combos = {};
         snap.docs.forEach(d => {
@@ -312,7 +339,7 @@
         let chain = Promise.resolve();
         Object.keys(combos).forEach(k => { chain = chain.then(() => recomputeOwn(combos[k].examName, combos[k].academicYear)); });
         return chain;
-      }).then(() => alert('আপনার শ্রেণির মেধাক্রম হালনাগাদ করা হয়েছে'))
+      }).then(() => alert('আপনার শ্রেণিগুলোর মেধাক্রম হালনাগাদ করা হয়েছে'))
         .catch(e => showDiagBanner('মেধাক্রম হালনাগাদ ব্যর্থ: ' + e.message));
     };
   }
@@ -367,7 +394,7 @@
     });
     if (wrap.children.length) {
       const note = !classLoaded ? 'লোড হচ্ছে...'
-        : myClass ? 'শুধু আপনার শ্রেণির (' + myClass + ') শিক্ষার্থীর তথ্য সম্পাদনা করতে পারবেন। মোছা শুধু অ্যাডমিন করতে পারেন।'
+        : myClasses.length ? 'শুধু আপনার শ্রেণির (' + classesLabel() + ') শিক্ষার্থীর তথ্য সম্পাদনা করতে পারবেন। মোছা শুধু অ্যাডমিন করতে পারেন।'
         : 'তথ্য সংশোধন ও মোছা শুধু অ্যাডমিন শিক্ষক করতে পারেন। আপনি নতুন শিক্ষার্থী যোগ করতে পারবেন।';
       wrap.insertAdjacentHTML('afterbegin', '<p class="muted" style="margin-bottom:6px;">' + esc(note) + '</p>');
     }
@@ -395,7 +422,7 @@
   if (typeof origLogout === 'function') {
     window.logout = function () {
       stopMine();
-      myClass = ''; classLoaded = false; defaultFilterApplied = false;
+      myClasses = []; classLoaded = false; defaultFilterApplied = false;
       if (obs) { obs.disconnect(); obs = null; }
       return origLogout.apply(this, arguments);
     };
