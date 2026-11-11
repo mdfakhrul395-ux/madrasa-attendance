@@ -177,7 +177,7 @@
       const cc = pos.coords, acc = cc.accuracy || 0;
       const dist = meters(cc.latitude, cc.longitude, c.lat, c.lng);
       if (acc > 200) throw { taMsg: 'GPS সংকেত দুর্বল (±' + bn(Math.round(acc)) + ' মিটার)। খোলা জায়গায় গিয়ে আবার চেষ্টা করুন।' };
-      if (dist > c.radius) throw { taMsg: 'আপনি মাদ্রাসার এরিয়ার বাইরে আছেন (প্রায় ' + bn(Math.round(dist)) + ' মিটার দূরে)। এরিয়ার ভেতরে এসে আবার চেষ্টা করুন।' };
+      if (dist > c.radius) throw { taMsg: 'আপনি মাদ্রাসার এরিয়ার বাইরে আছেন (প্রায় ' + bn(Math.round(dist)) + ' মিটার দূরে, GPS নির্ভুলতা ±' + bn(Math.round(acc)) + ' মিটার, অনুমোদিত সীমা ' + bn(c.radius) + ' মিটার)। এরিয়ার ভেতরে এসে আবার চেষ্টা করুন।' };
 
       const ts = firebase.firestore.FieldValue.serverTimestamp();
       const lat = cc.latitude, lng = cc.longitude, d = Math.round(dist), a = Math.round(acc);
@@ -484,7 +484,9 @@
       <h2>শিক্ষকের হাজিরা: অবস্থান ও সময়</h2>
       <p class="muted">শিক্ষক শুধু মাদ্রাসার এরিয়ার ভেতরে থাকলেই হাজিরা ও প্রস্থান দিতে পারবেন।</p>
       <p style="margin:6px 0;">${c ? '✅ মাদ্রাসার অবস্থান সেট করা আছে' : '❌ মাদ্রাসার অবস্থান এখনো সেট করা হয়নি'}</p>
+      ${c ? `<p style="margin:0 0 8px;"><a href="https://www.google.com/maps?q=${esc(c.lat)},${esc(c.lng)}" target="_blank" rel="noopener noreferrer">🗺️ সংরক্ষিত অবস্থান মানচিত্রে দেখুন</a></p>` : ''}
       <button class="secondary" onclick="taSetLocation()">📍 আমি এখন মাদ্রাসায় আছি, অবস্থান সেট করুন</button>
+      ${c ? '<button class="secondary" onclick="taTestLocation()" style="margin-top:8px;">📡 এখানকার দূরত্ব পরীক্ষা করুন</button>' : ''}
       <label style="margin-top:12px;">এরিয়ার সীমা (মিটার)</label>
       <input id="taRadius" type="number" inputmode="numeric" value="${esc(s.attGeoRadius || 100)}">
       <label>দেরির সময় (এর পরে এলে "দেরি" দেখাবে)</label>
@@ -531,6 +533,20 @@
       if (err) { err.style.color = '#dc2626'; err.textContent = errText(e); }
       if (!e || !e.taMsg) showDiagBanner('অবস্থান সেট এরর: ' + ((e && (e.code || '')) + ' ' + (e && e.message)));
     });
+  };
+
+  // এখন যেখানে আছেন সেখান থেকে সংরক্ষিত অবস্থানের দূরত্ব ও GPS নির্ভুলতা দেখায় (কিছু সংরক্ষণ করে না)
+  window.taTestLocation = function () {
+    const err = el('taSetErr');
+    const c = cfg();
+    if (!err || !c) return;
+    err.style.color = '';
+    err.textContent = 'অবস্থান নেওয়া হচ্ছে...';
+    getPos().then(pos => {
+      const cc = pos.coords;
+      const d = Math.round(meters(cc.latitude, cc.longitude, c.lat, c.lng));
+      err.textContent = 'এখানে: সংরক্ষিত অবস্থান থেকে ' + bn(d) + ' মিটার দূর, GPS নির্ভুলতা ±' + bn(Math.round(cc.accuracy || 0)) + ' মিটার, অনুমোদিত সীমা ' + bn(c.radius) + ' মিটার।' + (d > c.radius ? ' (সীমার বাইরে)' : ' (সীমার ভেতরে)');
+    }).catch(e => { err.style.color = '#dc2626'; err.textContent = errText(e); });
   };
 
   window.taSaveSettings = function () {
