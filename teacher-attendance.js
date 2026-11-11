@@ -8,7 +8,8 @@
  *   - শিক্ষক "হাজির" ও "প্রস্থান" বাটন চাপলে GPS দিয়ে মাদ্রাসার এরিয়ায় আছেন কিনা যাচাই করে
  *   - সময় নেয় সার্ভারের ঘড়ি (serverTimestamp) থেকে, ফোনের ঘড়ি থেকে নয়
  *   - সেটিংস পাতায় (শুধু অ্যাডমিন) মাদ্রাসার অবস্থান, দূরত্বের সীমা ও দেরির সময় ঠিক করার কার্ড যোগ করে
- *   - অ্যাডমিন "আমার হাজিরা" পাতার নিচে আজকের সব শিক্ষকের তালিকা দেখেন
+ *   - অ্যাডমিন "আমার হাজিরা" পাতার নিচে যেকোনো তারিখের সব শিক্ষকের হাজিরা দেখেন এবং হাতে সংশোধন করেন
+ *     (উপস্থিত / অনুপস্থিত / ছুটি চিহ্নিত, আগমন-প্রস্থানের সময় সম্পাদনা, রেকর্ড মোছা)
  *
  * ডেটা: teacher_attendance/{uid}_{YYYY-MM-DD}
  * মাদ্রাসার ডকে নতুন ফিল্ড: attGeoLat, attGeoLng, attGeoRadius, attLateTime
@@ -96,6 +97,7 @@
 
   // ================= শিক্ষকের পাতা =================
   function renderScreen() {
+    taTeachers = null;
     setScreen(`
       <div id="taScreen">
         <div class="card">
@@ -104,7 +106,7 @@
           <div id="taBody">লোড হচ্ছে...</div>
           <p id="taMsg" class="muted" style="margin-top:10px;"></p>
         </div>
-        ${myTeacherIsAdmin ? '<div class="card"><h2>আজকের সব শিক্ষক</h2><div id="taList">লোড হচ্ছে...</div></div>' : ''}
+        ${myTeacherIsAdmin ? '<div class="card"><h2>সব শিক্ষকের হাজিরা</h2><input type="date" id="taListDate" value="' + todayLocal() + '" onchange="taLoadList()"><div id="taList" style="margin-top:8px;">লোড হচ্ছে...</div></div>' : ''}
       </div>`);
     const d = el('taDate');
     if (d) d.textContent = new Date().toLocaleDateString('bn-BD', { weekday: 'long', day: 'numeric', month: 'long', year: 'numeric' });
@@ -143,6 +145,10 @@
     if (!d) {
       body.innerHTML = holHtml + '<p class="muted">আজকের হাজিরা এখনো দেওয়া হয়নি। মাদ্রাসার এরিয়ার ভেতরে এসে নিচের বাটন চাপুন।</p>'
         + '<button id="taBtn" onclick="taAct(\'in\')">✅ হাজির</button>';
+      return;
+    }
+    if (!d.checkInAt && (d.status === 'absent' || d.status === 'leave')) {
+      body.innerHTML = holHtml + '<p>অ্যাডমিন আজ আপনাকে <b>' + (d.status === 'leave' ? 'ছুটি' : 'অনুপস্থিত') + '</b> চিহ্নিত করেছেন।</p><p class="muted">ভুল হলে অ্যাডমিনকে জানান।</p>';
       return;
     }
     const inRow = '<div class="student-row"><span>আগমন</span><span><b>' + esc(fmtTime(d.checkInAt)) + '</b> ' + lateBadge(d.checkInAt, c.late) + '</span></div>';
@@ -191,29 +197,157 @@
     });
   };
 
-  // ================= অ্যাডমিন: আজকের তালিকা =================
+  // ================= অ্যাডমিন: সব শিক্ষকের হাজিরা (যেকোনো তারিখ) ও হাতে সংশোধন =================
+  let taTeachers = null;   // মাদ্রাসার সক্রিয় শিক্ষকদের তালিকা (একবার পড়া হয়)
+  let taDayCache = {};     // নির্বাচিত তারিখের রেকর্ড, teacherUid অনুযায়ী
+
+  function listDate() { const i = el('taListDate'); return (i && i.value) || todayLocal(); }
+
+  function teacherList() {
+    if (taTeachers) return Promise.resolve(taTeachers);
+    return db.collection('teachers').where('madrasaId', '==', madrasaId).get().then(snap => {
+      taTeachers = snap.docs
+        .map(d => { const t = d.data(); return { uid: d.id, name: t.name || t.email || d.id, active: t.active !== false, pending: t.pending === true }; })
+        .filter(t => t.active && !t.pending)
+        .sort((a, b) => String(a.name).localeCompare(String(b.name), 'bn'));
+      return taTeachers;
+    });
+  }
+
+  function toHM(ts) {
+    const d = ts.toDate();
+    return String(d.getHours()).padStart(2, '0') + ':' + String(d.getMinutes()).padStart(2, '0');
+  }
+
+  // "08:15" (বাংলা সংখ্যাও চলবে) → ওই তারিখের Timestamp; ভুল হলে null
+  function parseHM(date, v) {
+    const m = toEnglishDigits(String(v || '').trim()).match(/^(\d{1,2}):(\d{2})$/);
+    if (!m) return null;
+    const h = Number(m[1]), mi = Number(m[2]);
+    if (h > 23 || mi > 59) return null;
+    const p = date.split('-').map(Number);
+    return firebase.firestore.Timestamp.fromDate(new Date(p[0], p[1] - 1, p[2], h, mi));
+  }
+
+  function taFail(e) {
+    alert('সংরক্ষণ ব্যর্থ: ' + errText(e));
+    showDiagBanner('শিক্ষক হাজিরা সংশোধন এরর: ' + ((e && (e.code || '')) + ' ' + (e && e.message)));
+  }
+
   function loadList() {
     const box = el('taList');
     if (!box || !myTeacherIsAdmin) return;
+    const date = listDate();
     const c = cfg();
-    db.collection(COL).where('madrasaId', '==', madrasaId).where('date', '==', todayLocal()).get()
-      .then(snap => {
-        const rows = snap.docs.map(d => d.data()).sort((a, b) =>
-          ((a.checkInAt && a.checkInAt.seconds) || 0) - ((b.checkInAt && b.checkInAt.seconds) || 0));
-        if (!rows.length) { box.innerHTML = '<p class="muted">আজ এখনো কেউ হাজিরা দেননি</p>'; return; }
-        box.innerHTML = rows.map(r => `
+    box.innerHTML = 'লোড হচ্ছে...';
+    Promise.all([
+      teacherList(),
+      db.collection(COL).where('madrasaId', '==', madrasaId).where('date', '==', date).get()
+    ]).then(res => {
+      if (listDate() !== date || !el('taList')) return; // এর মধ্যে তারিখ বদলে গেছে
+      const list = res[0];
+      const byUid = {};
+      res[1].docs.forEach(d => { const x = d.data(); byUid[x.teacherUid] = x; });
+      taDayCache = byUid;
+      if (!list.length) { box.innerHTML = '<p class="muted">কোনো সক্রিয় শিক্ষক পাওয়া যায়নি</p>'; return; }
+
+      let nPresent = 0, nLate = 0, nAbsent = 0, nLeave = 0, nNone = 0;
+      const rows = list.map(t => {
+        const r = byUid[t.uid];
+        const id = jsq(t.uid);
+        let badge, detail = '';
+        if (r && r.checkInAt) {
+          nPresent++;
+          if (c && c.late && isLate(r.checkInAt, c.late)) nLate++;
+          badge = lateBadge(r.checkInAt, c ? c.late : '') || '<span class="badge present">উপস্থিত</span>';
+          detail = 'আগমন: ' + esc(fmtTime(r.checkInAt)) + ' &nbsp; প্রস্থান: ' + (r.checkOutAt ? esc(fmtTime(r.checkOutAt)) : '—');
+        } else if (r && r.status === 'absent') { nAbsent++; badge = '<span class="badge absent">অনুপস্থিত</span>'; }
+        else if (r && r.status === 'leave') { nLeave++; badge = '<span class="badge pending">ছুটি</span>'; }
+        else { nNone++; badge = '<span class="badge pending">হাজিরা নেই</span>'; }
+        const manual = r && r.manual ? ' <span class="muted" style="font-size:11px;">(অ্যাডমিন চিহ্নিত)</span>' : '';
+        return `
           <div class="student-row" style="display:block;">
-            <div style="display:flex;justify-content:space-between;align-items:center;">
-              <b>${esc(r.teacherName || '-')}</b>${lateBadge(r.checkInAt, c ? c.late : '')}
+            <div style="display:flex;justify-content:space-between;align-items:center;gap:8px;">
+              <b>${esc(t.name)}</b>${badge}
             </div>
-            <div class="muted">আগমন: ${esc(fmtTime(r.checkInAt))} &nbsp; প্রস্থান: ${r.checkOutAt ? esc(fmtTime(r.checkOutAt)) : '—'}</div>
-          </div>`).join('');
-      })
-      .catch(e => {
-        box.innerHTML = '<p class="muted" style="color:#dc2626;">লোড করা যায়নি: ' + esc(errText(e)) + '</p>';
-        showDiagBanner('শিক্ষক হাজিরা তালিকা এরর: ' + (e.code || '') + ' ' + e.message);
-      });
+            ${detail ? '<div class="muted">' + detail + manual + '</div>' : (manual ? '<div class="muted">' + manual + '</div>' : '')}
+            <div style="margin-top:6px;display:flex;flex-wrap:wrap;gap:6px;">
+              <button class="small secondary" onclick="taMark('${id}','present')">উপস্থিত</button>
+              <button class="small secondary" onclick="taMark('${id}','absent')">অনুপস্থিত</button>
+              <button class="small secondary" onclick="taMark('${id}','leave')">ছুটি</button>
+              ${r && r.checkInAt ? `<button class="small secondary" onclick="taEditTimes('${id}')">✎ সময়</button>` : ''}
+              ${r ? `<button class="small danger" onclick="taDelete('${id}')">মুছুন</button>` : ''}
+            </div>
+          </div>`;
+      }).join('');
+
+      const hol = (typeof holidayInfo === 'function') ? holidayInfo(date) : null;
+      box.innerHTML = (hol ? '<p class="muted" style="color:#4f46e5;">🚫 এই দিন বন্ধের দিন (' + esc(hol.reason) + ')</p>' : '')
+        + '<p style="margin:0 0 6px;">উপস্থিত <b>' + bn(nPresent) + '</b>'
+        + (c && c.late ? ' (দেরি <b>' + bn(nLate) + '</b>)' : '')
+        + ' &nbsp; অনুপস্থিত <b>' + bn(nAbsent) + '</b> &nbsp; ছুটি <b>' + bn(nLeave) + '</b> &nbsp; হাজিরা নেই <b>' + bn(nNone) + '</b></p>'
+        + rows;
+    }).catch(e => {
+      if (!el('taList')) return;
+      box.innerHTML = '<p class="muted" style="color:#dc2626;">লোড করা যায়নি: ' + esc(errText(e)) + '</p><button class="small secondary" onclick="taLoadList()">আবার চেষ্টা করুন</button>';
+      showDiagBanner('শিক্ষক হাজিরা তালিকা এরর: ' + (e.code || '') + ' ' + e.message);
+    });
   }
+  window.taLoadList = loadList;
+
+  // উপস্থিত / অনুপস্থিত / ছুটি চিহ্নিত
+  window.taMark = function (uid, status) {
+    if (!myTeacherIsAdmin) return;
+    const date = listDate();
+    const t = (taTeachers || []).find(x => x.uid === uid);
+    if (!t) return;
+    const cur = taDayCache[uid];
+    const ref = db.collection(COL).doc(uid + '_' + date);
+    const base = { madrasaId, teacherUid: uid, teacherName: String(t.name).slice(0, 80), date, status, manual: true };
+
+    if (status === 'present') {
+      const v = prompt('আগমনের সময় লিখুন (২৪ ঘণ্টার হিসাবে, যেমন 08:15):', cur && cur.checkInAt ? toHM(cur.checkInAt) : '');
+      if (v === null) return;
+      const ts = parseHM(date, v);
+      if (!ts) return alert('সময় সঠিক নয়। এভাবে লিখুন: 08:15');
+      base.checkInAt = ts;
+      ref.set(base, { merge: true }).then(loadList).catch(taFail);
+      return;
+    }
+    if (cur && cur.checkInAt && !confirm('এই শিক্ষকের আগমন-প্রস্থানের সময় মুছে গিয়ে "' + (status === 'leave' ? 'ছুটি' : 'অনুপস্থিত') + '" হবে। এগিয়ে যাবেন?')) return;
+    ref.set(base).then(loadList).catch(taFail); // পুরো রেকর্ড বদলে যায়
+  };
+
+  // আগমন ও প্রস্থানের সময় সম্পাদনা
+  window.taEditTimes = function (uid) {
+    if (!myTeacherIsAdmin) return;
+    const date = listDate();
+    const cur = taDayCache[uid];
+    if (!cur || !cur.checkInAt) return alert('আগে "উপস্থিত" চিহ্নিত করুন');
+    const inV = prompt('আগমনের সময় (২৪ ঘণ্টার হিসাবে, যেমন 08:15):', toHM(cur.checkInAt));
+    if (inV === null) return;
+    const outV = prompt('প্রস্থানের সময় (যেমন 14:30)। প্রস্থান না হয়ে থাকলে ফাঁকা রাখুন:', cur.checkOutAt ? toHM(cur.checkOutAt) : '');
+    if (outV === null) return;
+    const inTs = parseHM(date, inV);
+    if (!inTs) return alert('আগমনের সময় সঠিক নয়। এভাবে লিখুন: 08:15');
+    const upd = { checkInAt: inTs, manual: true };
+    if (String(outV).trim() === '') {
+      const del = firebase.firestore.FieldValue.delete();
+      upd.checkOutAt = del; upd.checkOutLat = del; upd.checkOutLng = del; upd.checkOutDist = del; upd.checkOutAcc = del;
+    } else {
+      const outTs = parseHM(date, outV);
+      if (!outTs) return alert('প্রস্থানের সময় সঠিক নয়। এভাবে লিখুন: 14:30');
+      if (outTs.toMillis() < inTs.toMillis()) return alert('প্রস্থানের সময় আগমনের আগে হতে পারে না');
+      upd.checkOutAt = outTs;
+    }
+    db.collection(COL).doc(uid + '_' + date).update(upd).then(loadList).catch(taFail);
+  };
+
+  window.taDelete = function (uid) {
+    if (!myTeacherIsAdmin) return;
+    if (!confirm('এই শিক্ষকের এই তারিখের হাজিরার রেকর্ড মুছে ফেলবেন?')) return;
+    db.collection(COL).doc(uid + '_' + listDate()).delete().then(loadList).catch(taFail);
+  };
 
   // ================= সেটিংস পাতায় অ্যাডমিনের কার্ড =================
   function settingsCardHtml() {

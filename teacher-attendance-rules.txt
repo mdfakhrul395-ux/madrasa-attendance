@@ -1,8 +1,19 @@
-    // ================= শিক্ষক হাজিরা (teacher-attendance.js) =================
-    // firestore.rules এ "match /_ping/{doc}" ব্লকের ঠিক আগে এই পুরো অংশটি বসান।
+    // ================= শিক্ষক হাজিরা (teacher-attendance.js) — ধাপ ২ সংস্করণ =================
+    // গুরুত্বপূর্ণ: আগে বসানো "teacher_attendance" ব্লকটি পুরো মুছে এই নতুন ব্লকটি বসান (দুটি একসাথে রাখবেন না)।
+    // জায়গা একই: "match /_ping/{doc}" ব্লকের ঠিক আগে।
     // শিক্ষক শুধু নিজের হাজিরা ও প্রস্থান লিখতে পারেন, সময় অবশ্যই সার্ভারের (request.time)।
-    // অ্যাডমিন নিজের মাদ্রাসার সবার হাজিরা পড়তে পারেন। মোছা বা সংশোধন এখন বন্ধ (ধাপ ২-এ অ্যাডমিনের জন্য খোলা হবে)।
+    // অ্যাডমিন নিজের মাদ্রাসার সবার হাজিরা পড়তে, হাতে চিহ্নিত/সংশোধন করতে এবং মুছতে পারেন।
     match /teacher_attendance/{docId} {
+
+      // অ্যাডমিনের লেখা রেকর্ডে যেসব ফিল্ড থাকতে পারে
+      function adminTaKeysOk() {
+        return request.resource.data.keys().hasOnly(['madrasaId', 'teacherUid', 'teacherName', 'date',
+          'checkInAt', 'checkInLat', 'checkInLng', 'checkInDist', 'checkInAcc',
+          'checkOutAt', 'checkOutLat', 'checkOutLng', 'checkOutDist', 'checkOutAcc',
+          'status', 'manual']) &&
+          request.resource.data.get('status', 'present') in ['present', 'absent', 'leave'];
+      }
+
       allow get: if isTeacherAuth() && (
         resource == null ||
         (resource.data.madrasaId == myMadrasaId() &&
@@ -12,7 +23,7 @@
         resource.data.madrasaId == myMadrasaId() &&
         (isRequesterAdmin() || resource.data.teacherUid == request.auth.uid);
 
-      // হাজির
+      // শিক্ষক: হাজির
       allow create: if isTeacherAuth() &&
         request.resource.data.keys().hasOnly(['madrasaId', 'teacherUid', 'teacherName', 'date',
           'checkInAt', 'checkInLat', 'checkInLng', 'checkInDist', 'checkInAcc']) &&
@@ -25,7 +36,16 @@
         request.resource.data.checkInLat is number && request.resource.data.checkInLng is number &&
         request.resource.data.checkInDist is number && request.resource.data.checkInAcc is number;
 
-      // প্রস্থান (একবারই, আর হাজিরা দেওয়ার পরেই)
+      // অ্যাডমিন: হাতে চিহ্নিত (নিজের মাদ্রাসার সক্রিয় শিক্ষকের জন্য)
+      allow create: if isRequesterAdmin() && adminTaKeysOk() &&
+        request.resource.data.madrasaId == myMadrasaId() &&
+        request.resource.data.teacherUid is string &&
+        request.resource.data.date is string && request.resource.data.date.size() == 10 &&
+        docId == request.resource.data.teacherUid + '_' + request.resource.data.date &&
+        request.resource.data.teacherName is string && request.resource.data.teacherName.size() <= 80 &&
+        get(/databases/$(database)/documents/teachers/$(request.resource.data.teacherUid)).data.madrasaId == myMadrasaId();
+
+      // শিক্ষক: প্রস্থান (একবারই, আর হাজিরা দেওয়ার পরেই)
       allow update: if isTeacherAuth() &&
         resource.data.teacherUid == request.auth.uid &&
         resource.data.madrasaId == myMadrasaId() &&
@@ -35,5 +55,13 @@
         request.resource.data.checkOutLat is number && request.resource.data.checkOutLng is number &&
         request.resource.data.checkOutDist is number && request.resource.data.checkOutAcc is number;
 
-      allow delete: if false;
+      // অ্যাডমিন: সংশোধন (মাদ্রাসা, শিক্ষক ও তারিখ বদলানো যাবে না)
+      allow update: if isRequesterAdmin() && adminTaKeysOk() &&
+        resource.data.madrasaId == myMadrasaId() &&
+        request.resource.data.madrasaId == resource.data.madrasaId &&
+        request.resource.data.teacherUid == resource.data.teacherUid &&
+        request.resource.data.date == resource.data.date;
+
+      // অ্যাডমিন: মোছা
+      allow delete: if isRequesterAdmin() && resource.data.madrasaId == myMadrasaId();
     }
