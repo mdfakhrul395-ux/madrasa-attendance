@@ -517,6 +517,47 @@ service cloud.firestore {
         ));
     }
 
+    // ================= শিক্ষক হাজিরা (teacher-attendance.js) =================
+
+    // firestore.rules এ "match /_ping/{doc}" ব্লকের ঠিক আগে এই পুরো অংশটি বসান।
+    // শিক্ষক শুধু নিজের হাজিরা ও প্রস্থান লিখতে পারেন, সময় অবশ্যই সার্ভারের (request.time)।
+    // অ্যাডমিন নিজের মাদ্রাসার সবার হাজিরা পড়তে পারেন। মোছা বা সংশোধন এখন বন্ধ (ধাপ ২-এ অ্যাডমিনের জন্য খোলা হবে)।
+    match /teacher_attendance/{docId} {
+      allow get: if isTeacherAuth() && (
+        resource == null ||
+        (resource.data.madrasaId == myMadrasaId() &&
+         (isRequesterAdmin() || resource.data.teacherUid == request.auth.uid)));
+
+      allow list: if isTeacherAuth() &&
+        resource.data.madrasaId == myMadrasaId() &&
+        (isRequesterAdmin() || resource.data.teacherUid == request.auth.uid);
+
+      // হাজির
+      allow create: if isTeacherAuth() &&
+        request.resource.data.keys().hasOnly(['madrasaId', 'teacherUid', 'teacherName', 'date',
+          'checkInAt', 'checkInLat', 'checkInLng', 'checkInDist', 'checkInAcc']) &&
+        request.resource.data.teacherUid == request.auth.uid &&
+        request.resource.data.madrasaId == myMadrasaId() &&
+        request.resource.data.date is string && request.resource.data.date.size() == 10 &&
+        docId == request.auth.uid + '_' + request.resource.data.date &&
+        request.resource.data.teacherName is string && request.resource.data.teacherName.size() <= 80 &&
+        request.resource.data.checkInAt == request.time &&
+        request.resource.data.checkInLat is number && request.resource.data.checkInLng is number &&
+        request.resource.data.checkInDist is number && request.resource.data.checkInAcc is number;
+
+      // প্রস্থান (একবারই, আর হাজিরা দেওয়ার পরেই)
+      allow update: if isTeacherAuth() &&
+        resource.data.teacherUid == request.auth.uid &&
+        resource.data.madrasaId == myMadrasaId() &&
+        ('checkInAt' in resource.data) && !('checkOutAt' in resource.data) &&
+        request.resource.data.diff(resource.data).affectedKeys().hasOnly(['checkOutAt', 'checkOutLat', 'checkOutLng', 'checkOutDist', 'checkOutAcc']) &&
+        request.resource.data.checkOutAt == request.time &&
+        request.resource.data.checkOutLat is number && request.resource.data.checkOutLng is number &&
+        request.resource.data.checkOutDist is number && request.resource.data.checkOutAcc is number;
+
+      allow delete: if false;
+    }
+
     match /_ping/{doc} {
       allow read: if true;
       allow write: if false;
