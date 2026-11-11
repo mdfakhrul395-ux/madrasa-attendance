@@ -139,6 +139,7 @@
   // ================= শিক্ষকের পাতা =================
   function renderScreen() {
     taTeachers = null;
+    taTeachersP = null;
     warm();
     setScreen(`
       <div id="taScreen">
@@ -148,12 +149,13 @@
           <div id="taBody">লোড হচ্ছে...</div>
           <p id="taMsg" class="muted" style="margin-top:10px;"></p>
         </div>
-        ${myTeacherIsAdmin ? '<div class="card"><h2>সব শিক্ষকের হাজিরা</h2><input type="date" id="taListDate" value="' + todayLocal() + '" onchange="taLoadList()"><div id="taList" style="margin-top:8px;">লোড হচ্ছে...</div></div><div class="card no-print"><h2>মাসিক রিপোর্ট</h2><input type="month" id="taMonth" value="' + todayLocal().slice(0, 7) + '" onchange="taClearMonth()"><button onclick="taLoadMonth()" style="margin-top:8px;">রিপোর্ট দেখুন</button></div><div id="taMonthWrap"></div>' : ''}
+        ${myTeacherIsAdmin ? '<div class="card"><h2>সব শিক্ষকের হাজিরা</h2><input type="date" id="taListDate" value="' + todayLocal() + '" onchange="taLoadList()"><div id="taList" style="margin-top:8px;">লোড হচ্ছে...</div></div><div class="card no-print"><h2>মাসিক রিপোর্ট</h2><input type="month" id="taMonth" value="' + todayLocal().slice(0, 7) + '" onchange="taClearMonth()"><button onclick="taLoadMonth()" style="margin-top:8px;">রিপোর্ট দেখুন</button></div><div id="taMonthWrap"></div><div class="card no-print"><h2>শিক্ষকদের নাম, পদবী ও ক্রম</h2><p class="muted" style="margin-top:0;">ক্রম নম্বর যত ছোট, তালিকা ও রিপোর্টে তিনি তত আগে আসবেন (যেমন মুহতামিম ১, নায়েবে মুহতামিম ২)। ক্রম না দিলে শেষে নামের ক্রমে আসবেন।</p><div id="taProfList">লোড হচ্ছে...</div></div>' : ''}
       </div>`);
     const d = el('taDate');
     if (d) d.textContent = new Date().toLocaleDateString('bn-BD', { weekday: 'long', day: 'numeric', month: 'long', year: 'numeric' });
     load();
     loadList();
+    loadProfiles();
   }
 
   function docRef() {
@@ -241,19 +243,29 @@
 
   // ================= অ্যাডমিন: সব শিক্ষকের হাজিরা (যেকোনো তারিখ) ও হাতে সংশোধন =================
   let taTeachers = null;   // মাদ্রাসার সক্রিয় শিক্ষকদের তালিকা (একবার পড়া হয়)
+  let taTeachersP = null;
   let taDayCache = {};     // নির্বাচিত তারিখের রেকর্ড, teacherUid অনুযায়ী
 
   function listDate() { const i = el('taListDate'); return (i && i.value) || todayLocal(); }
 
   function teacherList() {
-    if (taTeachers) return Promise.resolve(taTeachers);
-    return db.collection('teachers').where('madrasaId', '==', madrasaId).get().then(snap => {
+    if (taTeachersP) return taTeachersP;
+    taTeachersP = db.collection('teachers').where('madrasaId', '==', madrasaId).get().then(snap => {
       taTeachers = snap.docs
-        .map(d => { const t = d.data(); return { uid: d.id, name: t.name || t.email || d.id, active: t.active !== false, pending: t.pending === true }; })
+        .map(d => {
+          const t = d.data();
+          return {
+            uid: d.id, email: t.email || '', rawName: t.name || '', name: t.name || t.email || d.id,
+            designation: t.designation || '', serial: typeof t.serial === 'number' ? t.serial : null,
+            active: t.active !== false, pending: t.pending === true
+          };
+        })
         .filter(t => t.active && !t.pending)
-        .sort((a, b) => String(a.name).localeCompare(String(b.name), 'bn'));
+        // আগে ক্রম নম্বর (ছোট আগে; ক্রম না দেওয়া শিক্ষকরা শেষে), তারপর নাম
+        .sort((a, b) => ((a.serial == null ? 1e9 : a.serial) - (b.serial == null ? 1e9 : b.serial)) || String(a.name).localeCompare(String(b.name), 'bn'));
       return taTeachers;
-    });
+    }).catch(e => { taTeachersP = null; throw e; });
+    return taTeachersP;
   }
 
   function toHM(ts) {
@@ -310,7 +322,7 @@
         return `
           <div class="student-row" style="display:block;">
             <div style="display:flex;justify-content:space-between;align-items:center;gap:8px;">
-              <b>${esc(t.name)}</b>${badge}
+              <span><b>${esc(t.name)}</b>${t.designation ? '<div class="muted" style="font-size:12px;">' + esc(t.designation) + '</div>' : ''}</span>${badge}
             </div>
             ${detail ? '<div class="muted">' + detail + manual + '</div>' : (manual ? '<div class="muted">' + manual + '</div>' : '')}
             <div style="margin-top:6px;display:flex;flex-wrap:wrap;gap:6px;">
@@ -391,6 +403,61 @@
     db.collection(COL).doc(uid + '_' + listDate()).delete().then(loadList).catch(taFail);
   };
 
+  // ================= অ্যাডমিন: শিক্ষকদের নাম, পদবী ও ক্রম =================
+  // teachers/{uid} ডকে name, designation (পদবী), serial (ক্রম) লেখা হয়; অ্যাডমিন নিজের মাদ্রাসার শিক্ষকের ডক বদলাতে পারেন (আগের rules-এই অনুমতি আছে)
+  function loadProfiles() {
+    const box = el('taProfList');
+    if (!box || !myTeacherIsAdmin) return;
+    teacherList().then(list => {
+      if (!el('taProfList')) return;
+      if (!list.length) { box.innerHTML = '<p class="muted">কোনো সক্রিয় শিক্ষক পাওয়া যায়নি</p>'; return; }
+      box.innerHTML = list.map((t, i) => `
+        <div class="student-row" style="display:block;">
+          <div class="muted" style="font-size:12px;">${esc(t.email)}</div>
+          <input id="taPN_${i}" placeholder="নাম" value="${esc(t.rawName)}">
+          <div style="display:flex;gap:8px;">
+            <input id="taPD_${i}" placeholder="পদবী" value="${esc(t.designation)}" style="flex:2;">
+            <input id="taPS_${i}" type="number" inputmode="numeric" placeholder="ক্রম" value="${t.serial == null ? '' : esc(t.serial)}" style="flex:1;">
+          </div>
+        </div>`).join('')
+        + '<p id="taProfMsg" class="muted"></p><button onclick="taSaveProfiles()">সংরক্ষণ করুন</button>';
+    }).catch(e => {
+      if (el('taProfList')) box.innerHTML = '<p class="muted" style="color:#dc2626;">লোড করা যায়নি: ' + esc(errText(e)) + '</p>';
+    });
+  }
+
+  window.taSaveProfiles = function () {
+    if (!myTeacherIsAdmin || !taTeachers) return;
+    const msg = el('taProfMsg');
+    const say = (t, isErr) => { if (msg) { msg.textContent = t; msg.style.color = isErr ? '#dc2626' : ''; } };
+    const changes = [];
+    for (let i = 0; i < taTeachers.length; i++) {
+      const t = taTeachers[i];
+      const name = el('taPN_' + i).value.trim().slice(0, 80);
+      const des = el('taPD_' + i).value.trim().slice(0, 60);
+      const sv = toEnglishDigits(el('taPS_' + i).value.trim());
+      const serial = sv === '' ? null : Number(sv);
+      if (serial !== null && (isNaN(serial) || serial < 0 || serial > 9999)) return say('ক্রম নম্বর ০ থেকে ৯৯৯৯ এর মধ্যে একটি সংখ্যা দিন', true);
+      if (name === t.rawName && des === t.designation && serial === t.serial) continue;
+      changes.push({ uid: t.uid, name, des, serial });
+    }
+    if (!changes.length) return say('কোনো পরিবর্তন নেই');
+    say('সংরক্ষণ হচ্ছে...');
+    const batch = db.batch();
+    changes.forEach(c => batch.update(db.collection('teachers').doc(c.uid), {
+      name: c.name,
+      designation: c.des,
+      serial: c.serial === null ? firebase.firestore.FieldValue.delete() : c.serial
+    }));
+    batch.commit().then(() => {
+      taTeachers = null; taTeachersP = null;
+      loadProfiles();
+      loadList();
+      const m2 = el('taProfMsg');
+      if (m2) m2.textContent = bn(changes.length) + ' জনের তথ্য সংরক্ষিত হয়েছে';
+    }).catch(taFail);
+  };
+
   // ================= অ্যাডমিন: মাসিক রিপোর্ট =================
   // কার্যদিবস = আজ পর্যন্ত মাসের বন্ধের দিন বাদে সব দিন।
   // অনুপস্থিত = কার্যদিবস − উপস্থিত − ছুটি (হাজিরা না দিলেও অনুপস্থিত ধরা হয়; ভুল হলে অ্যাডমিন সংশোধন করবেন)।
@@ -400,7 +467,7 @@
   if (!el('taPrintStyle')) {
     const st = document.createElement('style');
     st.id = 'taPrintStyle';
-    st.textContent = '@media print { body * { visibility: hidden !important; } #taReport, #taReport * { visibility: visible !important; } #taReport { position: absolute; left: 0; top: 0; width: 100%; box-shadow: none !important; } .no-print { display: none !important; } }';
+    st.textContent = '@media print { body > *:not(#app) { display: none !important; } #taScreen > *:not(#taMonthWrap) { display: none !important; } .no-print { display: none !important; } #taReport { box-shadow: none !important; margin: 0 !important; } }';
     document.head.appendChild(st);
   }
 
@@ -474,7 +541,7 @@
         const cell = 'padding:6px;border:1px solid #ddd;text-align:center;';
         return `
           <tr>
-            <td style="padding:6px;border:1px solid #ddd;">${esc(t.name)}</td>
+            <td style="padding:6px;border:1px solid #ddd;">${esc(t.name)}${t.designation ? '<div style="font-size:11px;color:#64748b;">' + esc(t.designation) + '</div>' : ''}</td>
             <td style="${cell}">${bn(r.p)}</td>
             <td style="${cell}">${c && c.late ? bn(r.late) : '-'}</td>
             <td style="${cell}${absent ? 'color:#b91c1c;font-weight:bold;' : ''}">${bn(absent)}</td>
