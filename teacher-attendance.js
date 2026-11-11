@@ -10,6 +10,7 @@
  *   - সেটিংস পাতায় (শুধু অ্যাডমিন) মাদ্রাসার অবস্থান, দূরত্বের সীমা ও দেরির সময় ঠিক করার কার্ড যোগ করে
  *   - অ্যাডমিন "আমার হাজিরা" পাতার নিচে যেকোনো তারিখের সব শিক্ষকের হাজিরা দেখেন এবং হাতে সংশোধন করেন
  *     (উপস্থিত / অনুপস্থিত / ছুটি চিহ্নিত, আগমন-প্রস্থানের সময় সম্পাদনা, রেকর্ড মোছা)
+ *   - অ্যাডমিন মাসিক রিপোর্ট দেখেন ও প্রিন্ট করেন (উপস্থিত, দেরি, অনুপস্থিত, ছুটি, গড় আগমনের সময়)
  *
  * ডেটা: teacher_attendance/{uid}_{YYYY-MM-DD}
  * মাদ্রাসার ডকে নতুন ফিল্ড: attGeoLat, attGeoLng, attGeoRadius, attLateTime
@@ -106,7 +107,7 @@
           <div id="taBody">লোড হচ্ছে...</div>
           <p id="taMsg" class="muted" style="margin-top:10px;"></p>
         </div>
-        ${myTeacherIsAdmin ? '<div class="card"><h2>সব শিক্ষকের হাজিরা</h2><input type="date" id="taListDate" value="' + todayLocal() + '" onchange="taLoadList()"><div id="taList" style="margin-top:8px;">লোড হচ্ছে...</div></div>' : ''}
+        ${myTeacherIsAdmin ? '<div class="card"><h2>সব শিক্ষকের হাজিরা</h2><input type="date" id="taListDate" value="' + todayLocal() + '" onchange="taLoadList()"><div id="taList" style="margin-top:8px;">লোড হচ্ছে...</div></div><div class="card no-print"><h2>মাসিক রিপোর্ট</h2><input type="month" id="taMonth" value="' + todayLocal().slice(0, 7) + '" onchange="taClearMonth()"><button onclick="taLoadMonth()" style="margin-top:8px;">রিপোর্ট দেখুন</button></div><div id="taMonthWrap"></div>' : ''}
       </div>`);
     const d = el('taDate');
     if (d) d.textContent = new Date().toLocaleDateString('bn-BD', { weekday: 'long', day: 'numeric', month: 'long', year: 'numeric' });
@@ -347,6 +348,131 @@
     if (!myTeacherIsAdmin) return;
     if (!confirm('এই শিক্ষকের এই তারিখের হাজিরার রেকর্ড মুছে ফেলবেন?')) return;
     db.collection(COL).doc(uid + '_' + listDate()).delete().then(loadList).catch(taFail);
+  };
+
+  // ================= অ্যাডমিন: মাসিক রিপোর্ট =================
+  // কার্যদিবস = আজ পর্যন্ত মাসের বন্ধের দিন বাদে সব দিন।
+  // অনুপস্থিত = কার্যদিবস − উপস্থিত − ছুটি (হাজিরা না দিলেও অনুপস্থিত ধরা হয়; ভুল হলে অ্যাডমিন সংশোধন করবেন)।
+  // প্রতিটি কার্যদিবসের জন্য একটি করে কোয়েরি, তাই নতুন কোনো Firestore ইনডেক্স লাগে না।
+  let taMonthTok = 0;
+
+  if (!el('taPrintStyle')) {
+    const st = document.createElement('style');
+    st.id = 'taPrintStyle';
+    st.textContent = '@media print { body * { visibility: hidden !important; } #taReport, #taReport * { visibility: visible !important; } #taReport { position: absolute; left: 0; top: 0; width: 100%; box-shadow: none !important; } .no-print { display: none !important; } }';
+    document.head.appendChild(st);
+  }
+
+  window.taClearMonth = function () {
+    taMonthTok++;
+    const w = el('taMonthWrap');
+    if (w) w.innerHTML = '';
+  };
+
+  function fmtAvg(min) {
+    return new Date(2000, 0, 1, Math.floor(min / 60), Math.round(min % 60)).toLocaleTimeString('bn-BD', { hour: 'numeric', minute: '2-digit', hour12: true });
+  }
+
+  window.taLoadMonth = function () {
+    const wrap = el('taMonthWrap');
+    if (!wrap || !myTeacherIsAdmin) return;
+    const month = (el('taMonth') || {}).value;
+    if (!/^\d{4}-\d{2}$/.test(month)) { wrap.innerHTML = '<div class="card"><p class="muted">মাস বাছাই করুন</p></div>'; return; }
+
+    const tok = ++taMonthTok;
+    wrap.innerHTML = '<div class="card"><p class="muted">লোড হচ্ছে...</p></div>';
+
+    const y = Number(month.slice(0, 4)), m = Number(month.slice(5, 7));
+    const daysInMonth = new Date(y, m, 0).getDate();
+    const today = todayLocal();
+    const dates = [];
+    let holCount = 0;
+    for (let d = 1; d <= daysInMonth; d++) {
+      const ds = month + '-' + String(d).padStart(2, '0');
+      if (ds > today) break;
+      if (typeof holidayInfo === 'function' && holidayInfo(ds)) holCount++;
+      else dates.push(ds);
+    }
+    const monthLabel = new Date(y, m - 1, 1).toLocaleDateString('bn-BD', { month: 'long', year: 'numeric' });
+    if (!dates.length) {
+      wrap.innerHTML = '<div class="card"><p class="muted">' + (holCount ? 'এই মাসে এখন পর্যন্ত সব দিনই বন্ধ ছিল' : 'এই মাস এখনো শুরু হয়নি') + '</p></div>';
+      return;
+    }
+
+    const c = cfg();
+    Promise.all([
+      teacherList(),
+      Promise.all(dates.map(ds => db.collection(COL).where('madrasaId', '==', madrasaId).where('date', '==', ds).get()))
+    ]).then(res => {
+      if (tok !== taMonthTok || !el('taMonthWrap')) return;
+      const list = res[0];
+      if (!list.length) { wrap.innerHTML = '<div class="card"><p class="muted">কোনো সক্রিয় শিক্ষক পাওয়া যায়নি</p></div>'; return; }
+
+      const st = {};
+      list.forEach(t => { st[t.uid] = { p: 0, late: 0, leave: 0, sumMin: 0 }; });
+      res[1].forEach(snap => snap.docs.forEach(doc => {
+        const x = doc.data();
+        const r = st[x.teacherUid];
+        if (!r) return;
+        if (x.checkInAt) {
+          r.p++;
+          const d = x.checkInAt.toDate();
+          r.sumMin += d.getHours() * 60 + d.getMinutes();
+          if (c && c.late && isLate(x.checkInAt, c.late)) r.late++;
+        } else if (x.status === 'leave') {
+          r.leave++;
+        }
+      }));
+
+      const inst = (appSettings && appSettings.madrasaName) ? appSettings.madrasaName : '';
+      let totP = 0, totA = 0;
+      const rows = list.map(t => {
+        const r = st[t.uid];
+        const absent = Math.max(0, dates.length - r.p - r.leave);
+        totP += r.p; totA += absent;
+        const cell = 'padding:6px;border:1px solid #ddd;text-align:center;';
+        return `
+          <tr>
+            <td style="padding:6px;border:1px solid #ddd;">${esc(t.name)}</td>
+            <td style="${cell}">${bn(r.p)}</td>
+            <td style="${cell}">${c && c.late ? bn(r.late) : '-'}</td>
+            <td style="${cell}${absent ? 'color:#b91c1c;font-weight:bold;' : ''}">${bn(absent)}</td>
+            <td style="${cell}">${bn(r.leave)}</td>
+            <td style="${cell}">${r.p ? esc(fmtAvg(r.sumMin / r.p)) : '-'}</td>
+          </tr>`;
+      }).join('');
+
+      wrap.innerHTML = `
+        <div class="card" id="taReport">
+          <h2 style="text-align:center;margin-bottom:2px;">শিক্ষকদের মাসিক হাজিরা রিপোর্ট</h2>
+          <p class="muted" style="text-align:center;margin:0;">${inst ? esc(inst) + ' | ' : ''}${esc(monthLabel)}</p>
+          <p style="text-align:center;margin:6px 0;">কার্যদিবস: <b>${bn(dates.length)}</b>${holCount ? ' &nbsp; বন্ধের দিন: <b>' + bn(holCount) + '</b>' : ''} &nbsp; শিক্ষক: <b>${bn(list.length)}</b> জন</p>
+          ${c && c.late ? '<p class="muted" style="text-align:center;font-size:12px;margin:0 0 6px;">দেরির সময়: ' + esc(bn(c.late)) + ' এর পরে আগমন</p>' : ''}
+          <div style="overflow-x:auto;">
+            <table style="width:100%;border-collapse:collapse;margin-top:8px;">
+              <thead>
+                <tr>
+                  <th style="padding:6px;border:1px solid #ddd;">শিক্ষক</th>
+                  <th style="padding:6px;border:1px solid #ddd;">উপস্থিত</th>
+                  <th style="padding:6px;border:1px solid #ddd;">দেরি</th>
+                  <th style="padding:6px;border:1px solid #ddd;">অনুপস্থিত</th>
+                  <th style="padding:6px;border:1px solid #ddd;">ছুটি</th>
+                  <th style="padding:6px;border:1px solid #ddd;">গড় আগমন</th>
+                </tr>
+              </thead>
+              <tbody>${rows}</tbody>
+            </table>
+          </div>
+          <p class="muted" style="font-size:12px;margin-top:8px;">অনুপস্থিত = কার্যদিবস − উপস্থিত − ছুটি। হাজিরা না দিলে অনুপস্থিত ধরা হয়। বন্ধের দিন কার্যদিবসে ধরা হয়নি।</p>
+          <div class="no-print" style="margin-top:12px;text-align:center;">
+            <button onclick="window.print()">🖨️ প্রিন্ট করুন</button>
+          </div>
+        </div>`;
+    }).catch(e => {
+      if (tok !== taMonthTok || !el('taMonthWrap')) return;
+      wrap.innerHTML = '<div class="card"><p class="muted" style="color:#dc2626;">লোড করা যায়নি: ' + esc(errText(e)) + '</p><button class="small secondary" onclick="taLoadMonth()">আবার চেষ্টা করুন</button></div>';
+      showDiagBanner('শিক্ষক মাসিক রিপোর্ট এরর: ' + (e.code || '') + ' ' + e.message);
+    });
   };
 
   // ================= সেটিংস পাতায় অ্যাডমিনের কার্ড =================
