@@ -49,10 +49,50 @@
     return 2 * R * Math.asin(Math.sqrt(a));
   }
 
-  function getPos() {
+  // ----- আগে থেকে GPS "গরম" রাখা -----
+  // "আমার হাজিরা" পাতা খুললেই ব্যাকগ্রাউন্ডে GPS চলতে শুরু করে (সর্বোচ্চ ২ মিনিট, পাতা ছাড়লে বন্ধ)।
+  // তাই বাটন চাপার সময় সদ্য পাওয়া নির্ভুল অবস্থান তৈরি থাকে এবং হাজিরা প্রায় সাথে সাথে হয়।
+  let warmFix = null, warmWatch = null, warmTimer = null;
+  function stopWarm() {
+    if (warmWatch !== null && navigator.geolocation) navigator.geolocation.clearWatch(warmWatch);
+    warmWatch = null;
+    clearTimeout(warmTimer);
+  }
+  function warm() {
+    if (!navigator.geolocation || warmWatch !== null) return;
+    warmWatch = navigator.geolocation.watchPosition(pos => {
+      warmFix = { pos, ts: Date.now() };
+    }, () => { /* এখানে কিছু দেখানোর দরকার নেই; বাটন চাপলে আসল ত্রুটি দেখানো হবে */ },
+    { enableHighAccuracy: true, maximumAge: 0, timeout: 30000 });
+    warmTimer = setTimeout(stopWarm, 120000);
+  }
+
+  // maxAcc: এর চেয়ে বেশি নির্ভুল (কম মিটার) অবস্থান পেলে সাথে সাথে থামে
+  function getPos(maxAcc) {
+    maxAcc = maxAcc || 50;
+    if (warmFix && Date.now() - warmFix.ts < 20000 && warmFix.pos.coords.accuracy <= maxAcc) {
+      return Promise.resolve(warmFix.pos);
+    }
     return new Promise((res, rej) => {
       if (!navigator.geolocation) return rej({ taMsg: 'এই ফোনে লোকেশন সুবিধা নেই' });
-      navigator.geolocation.getCurrentPosition(res, rej, { enableHighAccuracy: true, timeout: 20000, maximumAge: 0 });
+      let best = null, lastErr = null, done = false, wid = null, soft = null, hard = null;
+      const finish = () => {
+        if (done) return;
+        done = true;
+        if (wid !== null) navigator.geolocation.clearWatch(wid);
+        clearTimeout(soft); clearTimeout(hard);
+        if (best) res(best); else rej(lastErr || { code: 3 });
+      };
+      // ভালো অবস্থান পেলে সাথে সাথে থামে; না পেলে ৮ সেকেন্ড পর পাওয়া সেরাটি নেয়
+      soft = setTimeout(() => { if (best) finish(); }, 8000);
+      hard = setTimeout(finish, 20000);
+      wid = navigator.geolocation.watchPosition(pos => {
+        if (!best || pos.coords.accuracy < best.coords.accuracy) best = pos;
+        if (pos.coords.accuracy <= Math.min(maxAcc, 40)) finish();
+      }, err => {
+        lastErr = err;
+        if (err && err.code === 1) finish(); // অনুমতি দেওয়া হয়নি
+      }, { enableHighAccuracy: true, timeout: 20000, maximumAge: 0 });
     });
   }
 
@@ -99,6 +139,7 @@
   // ================= শিক্ষকের পাতা =================
   function renderScreen() {
     taTeachers = null;
+    warm();
     setScreen(`
       <div id="taScreen">
         <div class="card">
@@ -171,7 +212,7 @@
     const say = t => { if (msg) { msg.style.color = ''; msg.textContent = t; } };
     const fail = t => { if (msg) { msg.style.color = '#dc2626'; msg.textContent = t; } if (btn) btn.disabled = false; };
     if (btn) btn.disabled = true;
-    say('অবস্থান যাচাই করা হচ্ছে... (১০–২০ সেকেন্ড লাগতে পারে)');
+    say('অবস্থান যাচাই করা হচ্ছে... (৫–২০ সেকেন্ড লাগতে পারে, ফোন স্থির রাখুন)');
 
     getPos().then(pos => {
       const cc = pos.coords, acc = cc.accuracy || 0;
@@ -520,7 +561,7 @@
     if (r === null) { if (err) err.textContent = 'এরিয়ার সীমা ৩০ থেকে ১০০০ মিটারের মধ্যে দিন'; return; }
     if (!confirm('আপনি কি এখন মাদ্রাসার ভেতরে (মাঝামাঝি জায়গায়) আছেন? এই অবস্থানকেই মাদ্রাসার কেন্দ্র ধরা হবে।')) return;
     if (err) { err.style.color = ''; err.textContent = 'অবস্থান নেওয়া হচ্ছে...'; }
-    getPos().then(pos => {
+    getPos(30).then(pos => {
       const acc = Math.round(pos.coords.accuracy || 0);
       if (acc > 60 && !confirm('GPS নির্ভুলতা ±' + acc + ' মিটার, খুব ভালো নয়। খোলা জায়গায় গিয়ে আবার চেষ্টা করা ভালো। তবুও এটি সংরক্ষণ করবেন?')) {
         if (err) err.textContent = '';
@@ -569,6 +610,7 @@
       renderScreen();
       return;
     }
+    stopWarm();
     return origTeacherTab.apply(this, arguments);
   };
 })();
