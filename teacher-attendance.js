@@ -10,7 +10,9 @@
  *   - সেটিংস পাতায় (শুধু অ্যাডমিন) মাদ্রাসার অবস্থান, দূরত্বের সীমা ও দেরির সময় ঠিক করার কার্ড যোগ করে
  *   - অ্যাডমিন "আমার হাজিরা" পাতার নিচে যেকোনো তারিখের সব শিক্ষকের হাজিরা দেখেন এবং হাতে সংশোধন করেন
  *     (উপস্থিত / অনুপস্থিত / ছুটি চিহ্নিত, আগমন-প্রস্থানের সময় সম্পাদনা, রেকর্ড মোছা)
- *   - অ্যাডমিন মাসিক রিপোর্ট দেখেন ও প্রিন্ট করেন (উপস্থিত, দেরি, অনুপস্থিত, ছুটি, গড় আগমনের সময়)
+ *   - অ্যাডমিন দৈনিক রিপোর্ট দেখেন ও প্রিন্ট করেন (যেকোনো তারিখের আগমন, প্রস্থান ও অবস্থা)
+ *   - অ্যাডমিন মাসিক রিপোর্ট দেখেন ও প্রিন্ট করেন (উপস্থিত, দেরি, অনুপস্থিত, ছুটি)
+ *     এবং শিক্ষকের নামে ট্যাপ করলে ওই মাসের দিন অনুযায়ী আগমন ও প্রস্থানের সময় দেখেন
  *
  * ডেটা: teacher_attendance/{uid}_{YYYY-MM-DD}
  * মাদ্রাসার ডকে নতুন ফিল্ড: attGeoLat, attGeoLng, attGeoRadius, attLateTime
@@ -149,7 +151,7 @@
           <div id="taBody">লোড হচ্ছে...</div>
           <p id="taMsg" class="muted" style="margin-top:10px;"></p>
         </div>
-        ${myTeacherIsAdmin ? '<div class="card"><h2>সব শিক্ষকের হাজিরা</h2><input type="date" id="taListDate" value="' + todayLocal() + '" onchange="taLoadList()"><div id="taList" style="margin-top:8px;">লোড হচ্ছে...</div></div><div class="card no-print"><h2>মাসিক রিপোর্ট</h2><input type="month" id="taMonth" value="' + todayLocal().slice(0, 7) + '" onchange="taClearMonth()"><button onclick="taLoadMonth()" style="margin-top:8px;">রিপোর্ট দেখুন</button></div><div id="taMonthWrap"></div><div class="card no-print"><h2>শিক্ষকদের নাম, পদবী ও ক্রম</h2><p class="muted" style="margin-top:0;">ক্রম নম্বর যত ছোট, তালিকা ও রিপোর্টে তিনি তত আগে আসবেন (যেমন মুহতামিম ১, নায়েবে মুহতামিম ২)। ক্রম না দিলে শেষে নামের ক্রমে আসবেন।</p><div id="taProfList">লোড হচ্ছে...</div></div>' : ''}
+        ${myTeacherIsAdmin ? '<div class="card"><h2>সব শিক্ষকের হাজিরা</h2><input type="date" id="taListDate" value="' + todayLocal() + '" onchange="taLoadList()"><div id="taList" style="margin-top:8px;">লোড হচ্ছে...</div></div><div class="card no-print"><h2>দৈনিক রিপোর্ট</h2><input type="date" id="taRepDate" value="' + todayLocal() + '" onchange="taClearMonth()"><button onclick="taLoadDay()" style="margin-top:8px;">রিপোর্ট দেখুন</button></div><div class="card no-print"><h2>মাসিক রিপোর্ট</h2><input type="month" id="taMonth" value="' + todayLocal().slice(0, 7) + '" onchange="taClearMonth()"><button onclick="taLoadMonth()" style="margin-top:8px;">রিপোর্ট দেখুন</button></div><div id="taMonthWrap"></div><div class="card no-print"><h2>শিক্ষকদের নাম, পদবী ও ক্রম</h2><p class="muted" style="margin-top:0;">ক্রম নম্বর যত ছোট, তালিকা ও রিপোর্টে তিনি তত আগে আসবেন (যেমন মুহতামিম ১, নায়েবে মুহতামিম ২)। ক্রম না দিলে শেষে নামের ক্রমে আসবেন।</p><div id="taProfList">লোড হচ্ছে...</div></div>' : ''}
       </div>`);
     const d = el('taDate');
     if (d) d.textContent = new Date().toLocaleDateString('bn-BD', { weekday: 'long', day: 'numeric', month: 'long', year: 'numeric' });
@@ -458,10 +460,14 @@
     }).catch(taFail);
   };
 
-  // ================= অ্যাডমিন: মাসিক রিপোর্ট =================
-  // কার্যদিবস = আজ পর্যন্ত মাসের বন্ধের দিন বাদে সব দিন।
-  // অনুপস্থিত = কার্যদিবস − উপস্থিত − ছুটি (হাজিরা না দিলেও অনুপস্থিত ধরা হয়; ভুল হলে অ্যাডমিন সংশোধন করবেন)।
-  // প্রতিটি কার্যদিবসের জন্য একটি করে কোয়েরি, তাই নতুন কোনো Firestore ইনডেক্স লাগে না।
+  // ================= অ্যাডমিন: দৈনিক ও মাসিক রিপোর্ট =================
+  // দুটি রিপোর্টই একই জায়গায় (#taMonthWrap) দেখায়, তাই প্রিন্টে একবারে একটিই আসে।
+  //
+  // মাসিক: কার্যদিবস = আজ পর্যন্ত মাসের বন্ধের দিন বাদে সব দিন।
+  //   অনুপস্থিত = কার্যদিবস − উপস্থিত − ছুটি (হাজিরা না দিলেও অনুপস্থিত ধরা হয়; ভুল হলে অ্যাডমিন সংশোধন করবেন)।
+  //   প্রতিটি কার্যদিবসের জন্য একটি করে কোয়েরি, তাই নতুন কোনো Firestore ইনডেক্স লাগে না।
+  //   শিক্ষকের নামে ট্যাপ করলে দিন অনুযায়ী আগমন-প্রস্থান খোলে (একই ডেটা, বাড়তি read নেই)।
+  // দৈনিক: নির্বাচিত তারিখের একটি কোয়েরি (শিক্ষক সংখ্যার সমান read)।
   let taMonthTok = 0;
 
   if (!el('taPrintStyle')) {
@@ -477,9 +483,132 @@
     if (w) w.innerHTML = '';
   };
 
-  function fmtAvg(min) {
-    return new Date(2000, 0, 1, Math.floor(min / 60), Math.round(min % 60)).toLocaleTimeString('bn-BD', { hour: 'numeric', minute: '2-digit', hour12: true });
+  const CELL = 'padding:5px;border:1px solid #ddd;text-align:center;';
+  const HEAD = 'padding:5px;border:1px solid #ddd;';
+
+  function statusColor(s) {
+    if (s === 'অনুপস্থিত') return 'color:#b91c1c;font-weight:bold;';
+    if (s === 'দেরি') return 'color:#b45309;font-weight:bold;';
+    if (s === 'ছুটি') return 'color:#4f46e5;';
+    return '';
   }
+
+  // আগমনের সময়, দেরির সময় ও রেকর্ড থেকে অবস্থার লেখা
+  function statusText(x, c, hol) {
+    if (x && x.checkInAt) return c && c.late ? (isLate(x.checkInAt, c.late) ? 'দেরি' : 'সময়মতো') : 'উপস্থিত';
+    if (x && x.status === 'leave') return 'ছুটি';
+    if (x && x.status === 'absent') return 'অনুপস্থিত';
+    return hol ? '—' : 'অনুপস্থিত';
+  }
+
+  // ----- দৈনিক রিপোর্ট -----
+  window.taLoadDay = function () {
+    const wrap = el('taMonthWrap');
+    if (!wrap || !myTeacherIsAdmin) return;
+    const date = (el('taRepDate') || {}).value;
+    if (!/^\d{4}-\d{2}-\d{2}$/.test(date)) { wrap.innerHTML = '<div class="card"><p class="muted">তারিখ বাছাই করুন</p></div>'; return; }
+    if (date > todayLocal()) { wrap.innerHTML = '<div class="card"><p class="muted">ভবিষ্যতের তারিখের রিপোর্ট হয় না</p></div>'; return; }
+
+    const tok = ++taMonthTok;
+    wrap.innerHTML = '<div class="card"><p class="muted">লোড হচ্ছে...</p></div>';
+    const c = cfg();
+    const hol = (typeof holidayInfo === 'function') ? holidayInfo(date) : null;
+
+    Promise.all([
+      teacherList(),
+      db.collection(COL).where('madrasaId', '==', madrasaId).where('date', '==', date).get()
+    ]).then(res => {
+      if (tok !== taMonthTok || !el('taMonthWrap')) return;
+      const list = res[0];
+      if (!list.length) { wrap.innerHTML = '<div class="card"><p class="muted">কোনো সক্রিয় শিক্ষক পাওয়া যায়নি</p></div>'; return; }
+      const byUid = {};
+      res[1].docs.forEach(d => { const x = d.data(); byUid[x.teacherUid] = x; });
+
+      let nP = 0, nLate = 0, nA = 0, nL = 0;
+      const rows = list.map(t => {
+        const x = byUid[t.uid];
+        const stt = statusText(x, c, hol);
+        if (x && x.checkInAt) { nP++; if (stt === 'দেরি') nLate++; }
+        else if (stt === 'ছুটি') nL++;
+        else if (stt === 'অনুপস্থিত') nA++;
+        return `
+          <tr>
+            <td style="${HEAD}">${esc(t.name)}${t.designation ? '<div style="font-size:11px;color:#64748b;">' + esc(t.designation) + '</div>' : ''}</td>
+            <td style="${CELL}">${x && x.checkInAt ? esc(fmtTime(x.checkInAt)) : '—'}</td>
+            <td style="${CELL}">${x && x.checkOutAt ? esc(fmtTime(x.checkOutAt)) : '—'}</td>
+            <td style="${CELL}${statusColor(stt)}">${stt}</td>
+          </tr>`;
+      }).join('');
+
+      const p = date.split('-').map(Number);
+      const dateLabel = new Date(p[0], p[1] - 1, p[2]).toLocaleDateString('bn-BD', { weekday: 'long', day: 'numeric', month: 'long', year: 'numeric' });
+      const inst = (appSettings && appSettings.madrasaName) ? appSettings.madrasaName : '';
+
+      wrap.innerHTML = `
+        <div class="card" id="taReport">
+          <h2 style="text-align:center;margin-bottom:2px;">শিক্ষকদের দৈনিক হাজিরা রিপোর্ট</h2>
+          <p class="muted" style="text-align:center;margin:0;">${inst ? esc(inst) + ' | ' : ''}${esc(dateLabel)}</p>
+          ${hol ? '<p style="text-align:center;color:#4f46e5;margin:6px 0 0;">🚫 এই দিন বন্ধের দিন (' + esc(hol.reason) + ')</p>' : ''}
+          <p style="text-align:center;margin:6px 0;">উপস্থিত <b>${bn(nP)}</b>${c && c.late ? ' (দেরি <b>' + bn(nLate) + '</b>)' : ''} &nbsp; অনুপস্থিত <b>${bn(nA)}</b> &nbsp; ছুটি <b>${bn(nL)}</b> &nbsp; শিক্ষক <b>${bn(list.length)}</b> জন</p>
+          ${c && c.late ? '<p class="muted" style="text-align:center;font-size:12px;margin:0 0 6px;">দেরির সময়: ' + esc(bn(c.late)) + ' এর পরে আগমন</p>' : ''}
+          <div id="taRepScroll" style="overflow-x:auto;">
+            <table id="taRepTable" style="width:100%;border-collapse:collapse;margin-top:8px;font-size:13px;">
+              <thead>
+                <tr>
+                  <th style="${HEAD}">শিক্ষক</th>
+                  <th style="${HEAD}">আগমন</th>
+                  <th style="${HEAD}">প্রস্থান</th>
+                  <th style="${HEAD}">অবস্থা</th>
+                </tr>
+              </thead>
+              <tbody>${rows}</tbody>
+            </table>
+          </div>
+          <p class="muted" style="font-size:12px;margin-top:8px;">প্রস্থানের ঘরে "—" মানে প্রস্থানের সময় নথিভুক্ত হয়নি। হাজিরা না দিলে অনুপস্থিত ধরা হয়।</p>
+          <div class="no-print" style="margin-top:12px;text-align:center;">
+            <button onclick="window.print()">🖨️ প্রিন্ট করুন</button>
+          </div>
+        </div>`;
+    }).catch(e => {
+      if (tok !== taMonthTok || !el('taMonthWrap')) return;
+      wrap.innerHTML = '<div class="card"><p class="muted" style="color:#dc2626;">লোড করা যায়নি: ' + esc(errText(e)) + '</p><button class="small secondary" onclick="taLoadDay()">আবার চেষ্টা করুন</button></div>';
+      showDiagBanner('শিক্ষক দৈনিক রিপোর্ট এরর: ' + (e.code || '') + ' ' + e.message);
+    });
+  };
+
+  // ----- মাসিক রিপোর্ট -----
+  // একজন শিক্ষকের দিন অনুযায়ী বিবরণের ছোট টেবিল
+  function dayDetailTable(uid, dates, days, c) {
+    const rows = dates.map(ds => {
+      const x = days[uid][ds];
+      const p = ds.split('-').map(Number);
+      const dl = new Date(p[0], p[1] - 1, p[2]).toLocaleDateString('bn-BD', { day: 'numeric', month: 'short', weekday: 'short' });
+      const stt = statusText(x, c, false);
+      return '<tr>'
+        + '<td style="' + HEAD + 'text-align:left;">' + esc(dl) + '</td>'
+        + '<td style="' + CELL + '">' + (x && x.checkInAt ? esc(fmtTime(x.checkInAt)) : '—') + '</td>'
+        + '<td style="' + CELL + '">' + (x && x.checkOutAt ? esc(fmtTime(x.checkOutAt)) : '—') + '</td>'
+        + '<td style="' + CELL + statusColor(stt) + '">' + stt + '</td>'
+        + '</tr>';
+    }).join('');
+    return '<table style="width:100%;border-collapse:collapse;font-size:12px;background:#f8fafc;">'
+      + '<thead><tr><th style="' + HEAD + '">তারিখ</th><th style="' + HEAD + '">আগমন</th><th style="' + HEAD + '">প্রস্থান</th><th style="' + HEAD + '">অবস্থা</th></tr></thead>'
+      + '<tbody>' + rows + '</tbody></table>';
+  }
+
+  window.taToggleDet = function (i) {
+    const r = el('taDet_' + i);
+    if (r) r.style.display = (r.style.display === 'none') ? '' : 'none';
+  };
+
+  window.taToggleAll = function () {
+    const rows = Array.prototype.slice.call(document.querySelectorAll('#taRepTable .taDet'));
+    if (!rows.length) return;
+    const anyHidden = rows.some(r => r.style.display === 'none');
+    rows.forEach(r => { r.style.display = anyHidden ? '' : 'none'; });
+    const b = el('taToggleAllBtn');
+    if (b) b.textContent = anyHidden ? '▲ সবার দিনভিত্তিক বিবরণ বন্ধ করুন' : '▼ সবার দিনভিত্তিক বিবরণ খুলুন';
+  };
 
   window.taLoadMonth = function () {
     const wrap = el('taMonthWrap');
@@ -516,16 +645,15 @@
       const list = res[0];
       if (!list.length) { wrap.innerHTML = '<div class="card"><p class="muted">কোনো সক্রিয় শিক্ষক পাওয়া যায়নি</p></div>'; return; }
 
-      const st = {};
-      list.forEach(t => { st[t.uid] = { p: 0, late: 0, leave: 0, sumMin: 0 }; });
+      const st = {}, days = {};
+      list.forEach(t => { st[t.uid] = { p: 0, late: 0, leave: 0 }; days[t.uid] = {}; });
       res[1].forEach(snap => snap.docs.forEach(doc => {
         const x = doc.data();
         const r = st[x.teacherUid];
         if (!r) return;
+        days[x.teacherUid][x.date] = x;
         if (x.checkInAt) {
           r.p++;
-          const d = x.checkInAt.toDate();
-          r.sumMin += d.getHours() * 60 + d.getMinutes();
           if (c && c.late && isLate(x.checkInAt, c.late)) r.late++;
         } else if (x.status === 'leave') {
           r.leave++;
@@ -533,20 +661,19 @@
       }));
 
       const inst = (appSettings && appSettings.madrasaName) ? appSettings.madrasaName : '';
-      let totP = 0, totA = 0;
-      const rows = list.map(t => {
+      const rows = list.map((t, i) => {
         const r = st[t.uid];
         const absent = Math.max(0, dates.length - r.p - r.leave);
-        totP += r.p; totA += absent;
-        const cell = 'padding:6px;border:1px solid #ddd;text-align:center;';
         return `
           <tr>
-            <td style="padding:6px;border:1px solid #ddd;">${esc(t.name)}${t.designation ? '<div style="font-size:11px;color:#64748b;">' + esc(t.designation) + '</div>' : ''}</td>
-            <td style="${cell}">${bn(r.p)}</td>
-            <td style="${cell}">${c && c.late ? bn(r.late) : '-'}</td>
-            <td style="${cell}${absent ? 'color:#b91c1c;font-weight:bold;' : ''}">${bn(absent)}</td>
-            <td style="${cell}">${bn(r.leave)}</td>
-            <td style="${cell}">${r.p ? esc(fmtAvg(r.sumMin / r.p)) : '-'}</td>
+            <td style="${HEAD}cursor:pointer;" onclick="taToggleDet(${i})">${esc(t.name)} <span class="no-print" style="color:#94a3b8;font-size:11px;">▾</span>${t.designation ? '<div style="font-size:11px;color:#64748b;">' + esc(t.designation) + '</div>' : ''}</td>
+            <td style="${CELL}">${bn(r.p)}</td>
+            <td style="${CELL}">${c && c.late ? bn(r.late) : '-'}</td>
+            <td style="${CELL}${absent ? 'color:#b91c1c;font-weight:bold;' : ''}">${bn(absent)}</td>
+            <td style="${CELL}">${bn(r.leave)}</td>
+          </tr>
+          <tr id="taDet_${i}" class="taDet" style="display:none;">
+            <td colspan="5" style="padding:4px;border:1px solid #ddd;">${dayDetailTable(t.uid, dates, days, c)}</td>
           </tr>`;
       }).join('');
 
@@ -556,16 +683,16 @@
           <p class="muted" style="text-align:center;margin:0;">${inst ? esc(inst) + ' | ' : ''}${esc(monthLabel)}</p>
           <p style="text-align:center;margin:6px 0;">কার্যদিবস: <b>${bn(dates.length)}</b>${holCount ? ' &nbsp; বন্ধের দিন: <b>' + bn(holCount) + '</b>' : ''} &nbsp; শিক্ষক: <b>${bn(list.length)}</b> জন</p>
           ${c && c.late ? '<p class="muted" style="text-align:center;font-size:12px;margin:0 0 6px;">দেরির সময়: ' + esc(bn(c.late)) + ' এর পরে আগমন</p>' : ''}
+          <p class="no-print muted" style="text-align:center;font-size:12px;margin:0 0 6px;">শিক্ষকের নামে ট্যাপ করলে দিন অনুযায়ী আগমন ও প্রস্থানের সময় দেখা যাবে।</p>
           <div id="taRepScroll" style="overflow-x:auto;">
-            <table id="taRepTable" style="width:100%;border-collapse:collapse;margin-top:8px;">
+            <table id="taRepTable" style="width:100%;border-collapse:collapse;margin-top:8px;font-size:13px;">
               <thead>
                 <tr>
-                  <th style="padding:6px;border:1px solid #ddd;">শিক্ষক</th>
-                  <th style="padding:6px;border:1px solid #ddd;">উপস্থিত</th>
-                  <th style="padding:6px;border:1px solid #ddd;">দেরি</th>
-                  <th style="padding:6px;border:1px solid #ddd;">অনুপস্থিত</th>
-                  <th style="padding:6px;border:1px solid #ddd;">ছুটি</th>
-                  <th style="padding:6px;border:1px solid #ddd;">গড় আগমন</th>
+                  <th style="${HEAD}">শিক্ষক</th>
+                  <th style="${HEAD}">উপস্থিত</th>
+                  <th style="${HEAD}">দেরি</th>
+                  <th style="${HEAD}">অনুপস্থিত</th>
+                  <th style="${HEAD}">ছুটি</th>
                 </tr>
               </thead>
               <tbody>${rows}</tbody>
@@ -573,7 +700,9 @@
           </div>
           <p class="muted" style="font-size:12px;margin-top:8px;">অনুপস্থিত = কার্যদিবস − উপস্থিত − ছুটি। হাজিরা না দিলে অনুপস্থিত ধরা হয়। বন্ধের দিন কার্যদিবসে ধরা হয়নি।</p>
           <div class="no-print" style="margin-top:12px;text-align:center;">
+            <button class="secondary" id="taToggleAllBtn" onclick="taToggleAll()" style="margin-bottom:8px;">▼ সবার দিনভিত্তিক বিবরণ খুলুন</button>
             <button onclick="window.print()">🖨️ প্রিন্ট করুন</button>
+            <p class="muted" style="font-size:12px;margin:6px 0 0;">যে বিবরণ খোলা থাকবে, প্রিন্টেও তা আসবে।</p>
           </div>
         </div>`;
     }).catch(e => {
