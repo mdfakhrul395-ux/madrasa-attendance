@@ -10,6 +10,9 @@
  * এই ফাইল সেই দুটি পথ বন্ধ করে: ডক না থাকলে বা নিষ্ক্রিয় হলে সাথে সাথে সাইন-আউট করে
  * কারণসহ লগইন পাতায় ফেরত পাঠায়। সাথে "কোড দিয়ে যোগদান" অপশনটাও বন্ধ করে।
  *
+ * সাথে যোগ হয়েছে: লগইন পাতায় "পাসওয়ার্ড ভুলে গেছেন?" (ইমেইলে রিসেট লিংক) আর "আরও" মেনুর "পাসওয়ার্ড" ট্যাব
+ * (লগইন করা শিক্ষক নিজে বর্তমান পাসওয়ার্ড দিয়ে যাচাই করে নতুন পাসওয়ার্ড বসান)।
+ *
  * index.html এ সবার শেষে (teacher-attendance.js এর পরে) লোড করুন:
  *   <script defer src="teacher-gate.js"></script>
  * app.js বা অন্য কোনো ফাইল বদলাতে হয় না।
@@ -97,7 +100,103 @@
     const r = prevShowTeacherLogin.apply(this, arguments);
     const e = document.getElementById('loginError');
     if (e && gateMsg) e.textContent = gateMsg;
+    addForgotLink();
     return r;
+  };
+
+  // ================= পাসওয়ার্ড: ভুলে গেলে রিসেট + লগইনের পর পরিবর্তন =================
+  function addForgotLink() {
+    const pw = document.getElementById('loginPassword');
+    if (!pw || document.getElementById('tgForgot')) return;
+    pw.insertAdjacentHTML('afterend',
+      '<p style="text-align:right;margin:4px 0 0;"><a href="#" id="tgForgot" onclick="tgForgotPassword();return false;">পাসওয়ার্ড ভুলে গেছেন?</a></p>');
+  }
+
+  window.tgForgotPassword = function () {
+    const emailEl = document.getElementById('loginEmail');
+    const errEl = document.getElementById('loginError');
+    const email = emailEl ? emailEl.value.trim() : '';
+    const say = (m, ok) => { if (errEl) { errEl.textContent = m; errEl.style.color = ok ? '#15803d' : '#dc2626'; } };
+    if (!email) { say('আগে উপরের ঘরে আপনার ইমেইল লিখুন, তারপর "পাসওয়ার্ড ভুলে গেছেন?" চাপুন'); return; }
+    auth.sendPasswordResetEmail(email)
+      .then(() => say('এই ইমেইলে অ্যাকাউন্ট থাকলে পাসওয়ার্ড রিসেটের লিংক পাঠানো হয়েছে। ইমেইলের Inbox ও Spam ফোল্ডার দেখুন, লিংকে চাপ দিয়ে নতুন পাসওয়ার্ড দিন।', true))
+      .catch(err => {
+        say(err.code === 'auth/invalid-email' ? 'ইমেইলটি সঠিক নয়'
+          : err.code === 'auth/too-many-requests' ? 'অনেকবার চেষ্টা হয়েছে, কিছুক্ষণ পর আবার চেষ্টা করুন'
+          : 'লিংক পাঠানো যায়নি: ' + err.message);
+      });
+  };
+
+  // লগইনের ভুল বার্তা সবসময় লাল (রিসেটের সবুজ বার্তার পর রং আটকে না থাকে)
+  const prevTeacherLogin = window.teacherLogin;
+  if (typeof prevTeacherLogin === 'function') {
+    window.teacherLogin = function () {
+      const e = document.getElementById('loginError');
+      if (e) e.style.color = '#dc2626';
+      return prevTeacherLogin.apply(this, arguments);
+    };
+  }
+
+  // "আরও" মেনুতে "পাসওয়ার্ড" ট্যাব (সব শিক্ষকের জন্য)
+  if (!teacherMoreTabs.some(t => t.key === 'password')) {
+    teacherMoreTabs.push({ key: 'password', label: 'পাসওয়ার্ড', icon: '\u{1F511}' });
+  }
+
+  function renderPasswordScreen() {
+    const u = auth.currentUser;
+    setScreen(`
+      <div class="card">
+        <h2>পাসওয়ার্ড পরিবর্তন</h2>
+        <p class="muted">${u && u.email ? 'অ্যাকাউন্ট: ' + String(u.email).replace(/[&<>"']/g, c => ({ '&': '&amp;', '<': '&lt;', '>': '&gt;', '"': '&quot;', "'": '&#39;' }[c])) : ''}</p>
+        <label>বর্তমান পাসওয়ার্ড</label><input id="tgOldPw" type="password" autocomplete="current-password">
+        <label>নতুন পাসওয়ার্ড</label><input id="tgNewPw" type="password" placeholder="কমপক্ষে ৬ অক্ষর" autocomplete="new-password">
+        <label>নতুন পাসওয়ার্ড আবার লিখুন</label><input id="tgNewPw2" type="password" autocomplete="new-password">
+        <p id="tgPwMsg" class="muted" style="color:#dc2626;"></p>
+        <button onclick="tgChangePassword()">পাসওয়ার্ড বদলান</button>
+      </div>
+    `);
+  }
+
+  window.tgChangePassword = function () {
+    const u = auth.currentUser;
+    const msg = document.getElementById('tgPwMsg');
+    const say = (m, ok) => { if (msg) { msg.textContent = m; msg.style.color = ok ? '#15803d' : '#dc2626'; } };
+    const oldPw = document.getElementById('tgOldPw').value;
+    const newPw = document.getElementById('tgNewPw').value;
+    const newPw2 = document.getElementById('tgNewPw2').value;
+    if (!u || !u.email) { say('আবার লগইন করুন'); return; }
+    if (!oldPw || !newPw) { say('বর্তমান ও নতুন পাসওয়ার্ড দিন'); return; }
+    if (newPw.length < 6) { say('নতুন পাসওয়ার্ড কমপক্ষে ৬ অক্ষরের হতে হবে'); return; }
+    if (newPw !== newPw2) { say('নতুন পাসওয়ার্ড দুই ঘরে এক হয়নি'); return; }
+    if (newPw === oldPw) { say('নতুন পাসওয়ার্ড বর্তমানটির থেকে আলাদা হতে হবে'); return; }
+    const btn = event && event.target;
+    if (btn) { btn.disabled = true; btn.textContent = 'বদলানো হচ্ছে...'; }
+    const cred = firebase.auth.EmailAuthProvider.credential(u.email, oldPw);
+    u.reauthenticateWithCredential(cred)
+      .then(() => u.updatePassword(newPw))
+      .then(() => {
+        say('পাসওয়ার্ড বদলানো হয়েছে। এখন থেকে নতুন পাসওয়ার্ড দিয়ে লগইন করবেন।', true);
+        ['tgOldPw', 'tgNewPw', 'tgNewPw2'].forEach(id => { const x = document.getElementById(id); if (x) x.value = ''; });
+      })
+      .catch(err => {
+        say(err.code === 'auth/invalid-credential' || err.code === 'auth/wrong-password' ? 'বর্তমান পাসওয়ার্ড সঠিক নয়'
+          : err.code === 'auth/weak-password' ? 'নতুন পাসওয়ার্ড দুর্বল, আরেকটু শক্তিশালী দিন'
+          : err.code === 'auth/too-many-requests' ? 'অনেকবার চেষ্টা হয়েছে, কিছুক্ষণ পর আবার চেষ্টা করুন'
+          : err.code === 'auth/requires-recent-login' ? 'নিরাপত্তার জন্য লগ-আউট করে আবার লগইন করে চেষ্টা করুন'
+          : 'বদলানো যায়নি: ' + err.message);
+      })
+      .then(() => { if (btn) { btn.disabled = false; btn.textContent = 'পাসওয়ার্ড বদলান'; } });
+  };
+
+  const prevTeacherTab = window.teacherTab;
+  window.teacherTab = function (tab) {
+    if (tab === 'password') {
+      if (typeof window.stopTeacherDashboard === 'function') window.stopTeacherDashboard();
+      renderTeacherNav('password');
+      renderPasswordScreen();
+      return;
+    }
+    return prevTeacherTab.apply(this, arguments);
   };
 
   // ================= কোড দিয়ে যোগদান বন্ধ =================
