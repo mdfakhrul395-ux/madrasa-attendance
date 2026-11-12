@@ -467,7 +467,7 @@
   if (!el('taPrintStyle')) {
     const st = document.createElement('style');
     st.id = 'taPrintStyle';
-    st.textContent = '@media print { body > *:not(#app) { display: none !important; } #taScreen > *:not(#taMonthWrap) { display: none !important; } .no-print { display: none !important; } #taReport { box-shadow: none !important; margin: 0 !important; } }';
+    st.textContent = '@page { size: A4; margin: 8mm; } @media print { body > *:not(#app) { display: none !important; } #taScreen > *:not(#taMonthWrap) { display: none !important; } .no-print { display: none !important; } #taReport { box-shadow: none !important; margin: 0 !important; padding: 0 !important; border: 0 !important; } #taRepScroll { overflow: visible !important; } #taRepTable { width: 100% !important; table-layout: auto; font-size: 12px; } #taRepTable th, #taRepTable td { padding: 4px !important; word-break: break-all; white-space: normal !important; } }';
     document.head.appendChild(st);
   }
 
@@ -556,8 +556,8 @@
           <p class="muted" style="text-align:center;margin:0;">${inst ? esc(inst) + ' | ' : ''}${esc(monthLabel)}</p>
           <p style="text-align:center;margin:6px 0;">কার্যদিবস: <b>${bn(dates.length)}</b>${holCount ? ' &nbsp; বন্ধের দিন: <b>' + bn(holCount) + '</b>' : ''} &nbsp; শিক্ষক: <b>${bn(list.length)}</b> জন</p>
           ${c && c.late ? '<p class="muted" style="text-align:center;font-size:12px;margin:0 0 6px;">দেরির সময়: ' + esc(bn(c.late)) + ' এর পরে আগমন</p>' : ''}
-          <div style="overflow-x:auto;">
-            <table style="width:100%;border-collapse:collapse;margin-top:8px;">
+          <div id="taRepScroll" style="overflow-x:auto;">
+            <table id="taRepTable" style="width:100%;border-collapse:collapse;margin-top:8px;">
               <thead>
                 <tr>
                   <th style="padding:6px;border:1px solid #ddd;">শিক্ষক</th>
