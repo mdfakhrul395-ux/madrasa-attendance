@@ -13,6 +13,8 @@ service cloud.firestore {
     // ৭) কোড দিয়ে যোগদান (pending) নিয়মে তৈরির অনুমতি ছিল না, আর pending শিক্ষক সার্ভারে আটকানো ছিল না — ঠিক করা
     // হালনাগাদ (Nov 9): একজন শ্রেণি শিক্ষক এখন একাধিক শ্রেণির হতে পারেন (classTeacherClasses তালিকা;
     // তালিকা না থাকলে পুরোনো classTeacherOf ধরা হয়)
+    // হালনাগাদ (Nov 13): কোড দিয়ে যোগদান (pending) সার্ভারে বন্ধ — শিক্ষক অ্যাকাউন্ট এখন শুধু মাদ্রাসার অ্যাডমিন যুক্ত করতে পারেন
+    // (নতুন মাদ্রাসা নিবন্ধনের পথ আগের মতোই আছে)
     // ======================================================================
 
     // ================= SUPER ADMIN =================
@@ -146,17 +148,8 @@ service cloud.firestore {
          !('classTeacherClasses' in request.resource.data) &&
          request.resource.data.madrasaId is string &&
          request.resource.data.madrasaId.matches('^m_[a-z0-9]+_[a-z0-9]+$') &&
-         !exists(/databases/$(database)/documents/madrasas/$(request.resource.data.madrasaId))) ||
-        // (৩) কোড দিয়ে যোগদান: সাধারণ শিক্ষক, অনুমোদনের অপেক্ষায় (pending) — pending থাকা পর্যন্ত কোনো ডেটায় ঢুকতে পারবে না
-        (isPasswordUser() && request.auth.uid == uid &&
-         request.resource.data.get('isAdmin', false) == false &&
-         request.resource.data.get('active', true) == true &&
-         request.resource.data.get('pending', false) == true &&
-         !('classTeacherOf' in request.resource.data) &&
-         !('classTeacherClasses' in request.resource.data) &&
-         request.resource.data.madrasaId is string &&
-         exists(/databases/$(database)/documents/madrasas/$(request.resource.data.madrasaId)) &&
-         isMadrasaActive(request.resource.data.madrasaId));
+         !exists(/databases/$(database)/documents/madrasas/$(request.resource.data.madrasaId)));
+      // (কোড দিয়ে যোগদান, অর্থাৎ pending শিক্ষক নিজে নিজের ডক বানানোর পথ, Nov 13 থেকে বন্ধ)
 
       allow update: if isTeacherAuth() && (
         // অ্যাডমিন নিজের মাদ্রাসার শিক্ষক বদলাতে পারে, কিন্তু madrasaId কখনো বদলাতে পারবে না
