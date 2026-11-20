@@ -130,7 +130,7 @@
       .erp-note b{color:#7a4f00;}
       .erp-img{margin-top:14px;text-align:center;break-inside:avoid;page-break-inside:avoid;}
       .erp-img img{max-width:100%;max-height:230mm;border:1px solid #cfe0db;border-radius:8px;}
-      .erp-foot{display:flex;justify-content:space-between;gap:40px;margin-top:32px;break-inside:avoid;page-break-inside:avoid;}
+      .erp-foot{display:flex;justify-content:space-between;gap:40px;margin-top:24px;break-inside:avoid;page-break-inside:avoid;}
       .erp-foot > div{flex:1;text-align:center;border-top:1.5px solid #16302c;padding-top:6px;font-size:12pt;font-weight:600;}
       .erp-posted{margin-top:10px;text-align:right;font-size:10.5pt;color:#4b635e;}
       @media print{
@@ -354,7 +354,7 @@
       </div>
       ${info}
       ${table}
-      ${r.note ? `<div class="erp-note"><b>নির্দেশনা:</b> ${esc(r.note)}</div>` : ''}
+      ${r.note ? `<div class="erp-note"><b>নির্দেশনা:</b> ${esc(String(r.note).replace(/\n\s*\n+/g, '\n'))}</div>` : ''}
       ${o.imgUrl ? `<div class="erp-img"><img src="${esc(o.imgUrl)}" alt=""></div>` : ''}
       <div class="erp-foot"><div>শ্রেণি শিক্ষক</div><div>অধ্যক্ষ / মুহতামিম</div></div>
       ${o.posted ? `<div class="erp-posted">${esc(o.posted)}</div>` : ''}
@@ -422,9 +422,29 @@
   }
 
   // শুধু এই কার্ডটি প্রিন্ট হয় (ফোনে "Save as PDF" বেছে নিলে PDF হয়)
+  // A4-তে (উপরে ১০, নিচে ৭ মিমি মার্জিন) এক পাতায় না আঁটলে সামান্য ছোট করে আঁটানো; ০.৭২ এর নিচে নামে না
+  function erFitZoom(pr) {
+    try {
+      const probe = document.createElement('div');
+      probe.style.cssText = 'position:absolute;left:-10000px;top:0;width:186mm;visibility:hidden;';
+      const clone = pr.cloneNode(true);
+      clone.style.display = 'block';
+      clone.style.zoom = '';
+      probe.appendChild(clone);
+      document.body.appendChild(probe);
+      const h = probe.getBoundingClientRect().height;
+      document.body.removeChild(probe);
+      const avail = (297 - 17) * 96 / 25.4 - 6;
+      return h > avail ? Math.max(0.72, avail / h) : 1;
+    } catch (e) { return 1; }
+  }
+
   window.erPrint = function (id) {
     const el = document.getElementById('erc_' + id);
     if (!el) return;
+    const pr = el.querySelector('.er-print');
+    const zoom = pr ? erFitZoom(pr) : 1;
+    if (pr && zoom < 1) pr.style.zoom = String(zoom);
     // কার্ডের পথের বাইরের সব অংশ প্রিন্টে লুকানো হয় (শুধু প্রিন্টের সময়, পর্দায় কিছু বদলায় না)
     const hidden = [];
     let node = el;
@@ -435,10 +455,11 @@
     el.classList.add('er-printing');
     document.body.classList.add('er-print-mode');
     const pg = document.createElement('style');
-    pg.textContent = '@page{size:A4;margin:12mm}';
+    pg.textContent = '@page{size:A4;margin:10mm 12mm 7mm}';
     document.head.appendChild(pg);
     const done = () => {
       el.classList.remove('er-printing');
+      if (pr) pr.style.zoom = '';
       document.body.classList.remove('er-print-mode');
       hidden.forEach(h => h.classList.remove('er-hide'));
       if (pg.parentNode) pg.parentNode.removeChild(pg);
