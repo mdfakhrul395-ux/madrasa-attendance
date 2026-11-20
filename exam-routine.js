@@ -34,6 +34,7 @@
   let examClassFilter = 'all';
   let examUnsub = null;
   let erEditId = null;                    // সম্পাদনার সময় কোন রুটিন বদলানো হচ্ছে
+  let erLast = null;                      // সর্বশেষ আঁকা রুটিনের তালিকা (সেটিংস দেরিতে এলে আবার আঁকার জন্য)
   const erCache = {};                     // শেয়ার বোতামের জন্য সর্বশেষ রুটিনগুলো
 
   // ================= ডিজাইন (একবারই যুক্ত হয়) =================
@@ -250,14 +251,13 @@
     return `<div class="er-glyph${cls}" aria-hidden="true">${g}</div>`;
   }
 
-  // মাদ্রাসার নাম ও লোগো: অ্যাপের ভেতরের চলতি তথ্য, না পেলে উপরের বার (header) থেকে
+  // মাদ্রাসার নাম ও লোগো: অ্যাপের সেটিংস (appSettings.madrasaName) থেকে; লোগো না পেলে উপরের বার (header) থেকে
   function madrasaBrand() {
     let name = '', logo = '';
-    try { if (typeof madrasaName === 'string' && madrasaName) name = madrasaName; } catch (e) {}
     try {
-      if (typeof madrasaSettings === 'object' && madrasaSettings) {
-        if (!name) name = madrasaSettings.name || madrasaSettings.madrasaName || '';
-        logo = madrasaSettings.logo || madrasaSettings.logoDataUrl || '';
+      if (typeof appSettings === 'object' && appSettings) {
+        name = appSettings.madrasaName || '';
+        logo = appSettings.logo || appSettings.logoUrl || appSettings.logoDataUrl || appSettings.madrasaLogo || '';
       }
     } catch (e) {}
     try {
@@ -374,7 +374,14 @@
   };
 
   // ================= স্ক্রিন (শিক্ষক ও শিক্ষার্থী) =================
+  function paintExamCards() {
+    const wrap = document.getElementById('erWrap');
+    if (!wrap || !erLast) return;
+    wrap.innerHTML = erLast.items.map(x => { erCache[x.id] = x.r; return examCardHtml(x.id, x.r, erLast.isTeacher); }).join('');
+  }
+
   function renderExamScreen(isTeacher) {
+    erLast = null;
     let html = '';
     if (isTeacher) {
       const classes = getClassList();
@@ -438,11 +445,8 @@
         docs = docs.filter(d => d.data().className === examClassFilter);
       }
       if (docs.length === 0) { wrap.innerHTML = '<p class="muted">কোনো পরীক্ষার রুটিন নেই</p>'; return; }
-      wrap.innerHTML = docs.map(d => {
-        const r = d.data();
-        erCache[d.id] = r;
-        return examCardHtml(d.id, r, isTeacher);
-      }).join('');
+      erLast = { items: docs.map(d => ({ id: d.id, r: d.data() })), isTeacher };
+      paintExamCards();
     }, err => {
       const wrap = document.getElementById('erWrap');
       if (wrap) wrap.innerHTML = '<p class="muted">লোড করতে সমস্যা হয়েছে: ' + esc(err.message) + '</p>';
@@ -619,6 +623,14 @@
       return r;
     };
   }
+
+  // মাদ্রাসার সেটিংস (নাম/লোগো) দেরিতে লোড হলে হেডার আবার আঁকা
+  const origDashOnSettings = window.dashOnSettings;
+  window.dashOnSettings = function () {
+    const r = typeof origDashOnSettings === 'function' ? origDashOnSettings.apply(this, arguments) : undefined;
+    try { paintExamCards(); } catch (e) { /* ignore */ }
+    return r;
+  };
 
   // ================= ট্যাব-ডিসপ্যাচে জোড়া লাগানো =================
   const origTeacherTab = window.teacherTab;
