@@ -234,6 +234,11 @@
     }).join('');
   }
 
+  // বিষয়ের সংখ্যা: একটি সারিতে কমা দিয়ে একাধিক বিষয় থাকলে প্রতিটি আলাদা গোনা হয়
+  function countSubjects(rows) {
+    return rows.reduce((n, x) => n + Math.max(1, String(x.subject == null ? '' : x.subject).split(/\s*[,،]\s*/).filter(Boolean).length), 0);
+  }
+
   // ================= নতুন ডিজাইনের সহায়ক ফাংশন =================
   const isIso = s => /^\d{4}-\d{2}-\d{2}$/.test(String(s || ''));
 
@@ -334,7 +339,7 @@
     const dailyTime = !!(o.commonTime && !o.hasException);
     const cells = [];
     if (first && last) { cells.push(['পরীক্ষা শুরু', full(first)]); cells.push(['পরীক্ষা শেষ', full(last)]); }
-    if (rows.length) cells.push(['মোট বিষয়', bn(rows.length) + 'টি']);
+    if (rows.length) cells.push(['মোট বিষয়', bn(countSubjects(rows)) + 'টি']);
     if (dailyTime) cells.push(['প্রতিদিনের সময়', o.commonTime]);
     const info = cells.length ? `<div class="erp-info">${cells.map(c => `<div><b>${esc(c[1])}</b><span>${esc(c[0])}</span></div>`).join('')}</div>` : '';
     const table = rows.length ? `<table class="erp-table">
@@ -379,7 +384,7 @@
 
     const stats = rows.length ? `<div class="er-stats">
         ${stt.stat ? `<div class="er-stat"><b>${esc(stt.stat.value)}</b><span>${esc(stt.stat.label)}</span></div>` : ''}
-        <div class="er-stat"><b>${bn(rows.length)}টি</b><span>বিষয়</span></div>
+        <div class="er-stat"><b>${bn(countSubjects(rows))}টি</b><span>বিষয়</span></div>
         ${commonTime ? `<div class="er-stat er-wide"><b>${esc(commonTime)}</b><span>${hasException ? 'অধিকাংশ দিনের সময়' : 'প্রতিদিনের সময়'}</span></div>` : ''}
       </div>` : '';
 
