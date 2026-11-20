@@ -7,12 +7,13 @@
  *
  * app.js / dashboard.js / homework.js এর কিছুই বদলাতে হয় না।
  *
- * নতুন কালেকশন 'examRoutines':
+ * কালেকশন 'examRoutines' (অপরিবর্তিত):
  *   { madrasaId, className, examName, rows:[{date,subject,time}], note,
  *     imageDataUrl, imageType, createdAt }
  * কোয়েরিতে orderBy নেই (সাজানো হয় ব্রাউজারে), তাই নতুন Firestore index লাগবে না।
  *
- * এই সংস্করণে: তারিখ উপরে, বার নিচে + আকর্ষণীয় নতুন ডিজাইন (স্টাইল নিজে থেকেই যুক্ত হয়)।
+ * এই সংস্করণে: সম্পূর্ণ নতুন ডিজাইন — হেডার, "কত দিন বাকি" কাউন্টডাউন, টাইমলাইন কার্ড,
+ * বিষয়ের আইকন, পরবর্তী পরীক্ষার হাইলাইট, প্রিন্ট/PDF ও শেয়ার বোতাম (স্টাইল নিজে থেকেই যুক্ত হয়)।
  */
 (function () {
   'use strict';
@@ -25,48 +26,76 @@
   const esc = s => String(s == null ? '' : s).replace(/[&<>"']/g, c => ({ '&': '&amp;', '<': '&lt;', '>': '&gt;', '"': '&quot;', "'": '&#39;' }[c]));
   const jsq = s => esc(String(s == null ? '' : s).replace(/\\/g, '\\\\').replace(/'/g, "\\'").replace(/[\r\n\u2028\u2029]/g, ' '));
   const safeDataUrl = u => (/^data:/i.test(String(u || '')) ? String(u) : '');
+  const bn = n => String(n).replace(/\d/g, c => '০১২৩৪৫৬৭৮৯'[c]);
 
   const ER_MAX_IMG_DIM = 1400;            // হাতের লেখা পড়া যাওয়ার জন্য একটু বড়
   const ER_MAX_IMG_BYTES = 380 * 1024;    // Firestore ১MB সীমার অনেক নিচে
 
   let examClassFilter = 'all';
   let examUnsub = null;
+  const erCache = {};                     // শেয়ার বোতামের জন্য সর্বশেষ রুটিনগুলো
 
   // ================= ডিজাইন (একবারই যুক্ত হয়) =================
   (function injectStyle() {
-    if (document.getElementById('erStyle')) return;
+    if (document.getElementById('erStyle2')) return;
     const st = document.createElement('style');
-    st.id = 'erStyle';
+    st.id = 'erStyle2';
     st.textContent = `
-      .er-card{--er-teal:#0f766e;--er-teal-dark:#0b5e57;--er-tint:#e8f4f1;--er-line:#dbe7e4;--er-ink:#16302c;
-        background:#fff;border:1px solid var(--er-line);border-radius:16px;overflow:hidden;margin-bottom:16px;
-        box-shadow:0 2px 10px rgba(15,118,110,.08);}
-      .er-head{background:var(--er-teal);color:#fff;padding:14px 16px;display:flex;justify-content:space-between;align-items:flex-start;gap:10px;}
-      .er-class{font-size:13px;opacity:.85;margin-bottom:2px;}
-      .er-title{font-size:18px;font-weight:700;line-height:1.35;}
-      .er-posted{font-size:12px;opacity:.85;white-space:nowrap;padding-top:2px;}
-      .er-body{padding:12px 8px 14px;}
-      .er-scroll{overflow-x:auto;border:1px solid var(--er-line);border-radius:12px;}
-      .er-table{width:100%;table-layout:fixed;border-collapse:collapse;font-size:15px;color:var(--er-ink);}
-      .er-table th:nth-child(1),.er-table td:nth-child(1){width:32%;}
-      .er-table th:nth-child(2),.er-table td:nth-child(2){width:36%;text-align:center;}
-      .er-table th:nth-child(3),.er-table td:nth-child(3){width:32%;text-align:center;}
-      .er-table th{background:var(--er-tint);color:var(--er-teal-dark);text-align:left;font-weight:700;padding:10px 8px;border-bottom:2px solid var(--er-teal);}
-      .er-table td{padding:10px 8px;border-bottom:1px solid var(--er-line);vertical-align:middle;}
-      .er-table tr:last-child td{border-bottom:none;}
-      .er-table tbody tr:nth-child(even) td{background:#f8fbfa;}
-      .er-date{font-weight:700;font-size:14px;line-height:1.35;}
-      .er-day{display:inline-block;margin-top:4px;padding:2px 10px;border-radius:999px;background:var(--er-tint);color:var(--er-teal-dark);font-size:13px;font-weight:600;}
-      .er-sub{font-weight:600;line-height:1.5;}
-      .er-subitem{margin:2px 0;}
-      .er-subitem + .er-subitem{padding-top:4px;border-top:1px dashed var(--er-line);}
-      .er-time{display:inline-block;max-width:100%;box-sizing:border-box;text-align:center;padding:3px 6px;border-radius:8px;background:#fff7e6;color:#8a5a00;border:1px solid #f3dcaa;font-weight:600;font-size:13.5px;line-height:1.4;}
-      .er-note{margin-top:14px;padding:12px 14px;background:#f4faf8;border-left:4px solid var(--er-teal);border-radius:8px;color:var(--er-ink);line-height:1.7;font-size:14.5px;}
-      .er-note b{color:var(--er-teal-dark);}
+      .er-card{--er-teal:#0f766e;--er-dark:#0b5e57;--er-tint:#e8f4f1;--er-line:#dbe7e4;--er-ink:#16302c;--er-gold:#e3b04b;
+        background:#fff;border:1px solid var(--er-line);border-radius:20px;overflow:hidden;margin-bottom:18px;
+        box-shadow:0 2px 12px rgba(15,118,110,.10);-webkit-print-color-adjust:exact;print-color-adjust:exact;}
+      .er-hero{position:relative;color:#fff;padding:16px 16px 58px;
+        background:url("data:image/svg+xml,%3Csvg xmlns='http://www.w3.org/2000/svg' width='48' height='48' viewBox='0 0 48 48'%3E%3Cg fill='none' stroke='%23ffffff' stroke-opacity='.13' stroke-width='1'%3E%3Crect x='10' y='10' width='28' height='28'/%3E%3Crect x='10' y='10' width='28' height='28' transform='rotate(45 24 24)'/%3E%3C/g%3E%3C/svg%3E"),#0b5e57;}
+      .er-hero.er-flat{padding-bottom:18px;}
+      .er-hero-top{display:flex;justify-content:space-between;align-items:center;gap:10px;font-size:12px;color:#bfe0d8;}
+      .er-class{display:inline-block;background:rgba(255,255,255,.16);border-radius:999px;padding:3px 12px;font-size:12.5px;font-weight:700;color:#fff;}
+      .er-title{font-size:22px;font-weight:700;line-height:1.4;margin-top:10px;}
+      .er-stats{position:relative;display:flex;margin:-40px 14px 0;background:#fff;border-radius:16px;padding:12px 4px;box-shadow:0 8px 22px rgba(11,94,87,.16);}
+      .er-stat{flex:1;min-width:0;text-align:center;padding:0 4px;display:flex;flex-direction:column;gap:2px;justify-content:center;}
+      .er-stat + .er-stat{border-left:1px solid var(--er-line);}
+      .er-stat b{font-size:18px;color:var(--er-teal);line-height:1.4;}
+      .er-stat span{font-size:12px;color:#4b635e;}
+      .er-stat.er-wide{flex:1.5;}
+      .er-stat.er-wide b{font-size:14.5px;}
+      .er-body{padding:16px 14px 14px;}
+      .er-tl{position:relative;display:flex;flex-direction:column;gap:10px;}
+      .er-tl:before{content:"";position:absolute;left:9px;top:34px;bottom:34px;width:2px;background:#cfe0db;}
+      .er-item{display:flex;gap:10px;align-items:stretch;}
+      .er-dotcol{width:20px;display:flex;align-items:center;justify-content:center;flex:none;position:relative;}
+      .er-dot{width:12px;height:12px;border-radius:50%;box-sizing:border-box;background:#fff;border:3px solid var(--er-teal);}
+      .er-item.er-next .er-dot{background:var(--er-gold);border-color:var(--er-dark);box-shadow:0 0 0 4px #f7e9c6;}
+      .er-item.er-past .er-dot{background:var(--er-teal);}
+      .er-row{flex:1;min-width:0;display:flex;align-items:center;gap:12px;background:#fff;border:1px solid var(--er-line);border-radius:16px;padding:10px 12px 10px 10px;
+        box-shadow:0 1px 2px rgba(11,94,87,.06),0 4px 12px rgba(11,94,87,.06);}
+      .er-item.er-next .er-row{border:2px solid var(--er-teal);}
+      .er-item.er-past .er-row{opacity:.62;}
+      .er-dateblk{width:54px;min-height:60px;border-radius:13px;background:var(--er-tint);color:var(--er-teal);display:flex;flex-direction:column;align-items:center;justify-content:center;flex:none;padding:6px 0;}
+      .er-dateblk b{font-size:23px;line-height:1;}
+      .er-dateblk small{font-size:11px;margin-top:4px;color:#4b635e;}
+      .er-item.er-next .er-dateblk{background:var(--er-dark);color:#fff;}
+      .er-item.er-next .er-dateblk small{color:var(--er-gold);}
+      .er-info{flex:1;min-width:0;display:flex;flex-direction:column;gap:3px;}
+      .er-sub{font-weight:700;font-size:15.5px;color:var(--er-ink);line-height:1.45;}
+      .er-subitem + .er-subitem{margin-top:2px;padding-top:2px;border-top:1px dashed var(--er-line);}
+      .er-meta{display:flex;flex-wrap:wrap;align-items:center;gap:6px;font-size:13px;color:#4b635e;}
+      .er-tag{font-size:11px;font-weight:700;background:#fbebc4;color:#7a4f00;border-radius:999px;padding:2px 8px;}
+      .er-time{display:inline-block;padding:2px 8px;border-radius:8px;background:#fff7e6;color:#8a5a00;border:1px solid #f3dcaa;font-weight:600;font-size:12.5px;line-height:1.4;}
+      .er-glyph{width:38px;height:38px;border-radius:50%;background:var(--er-tint);color:var(--er-teal);display:flex;align-items:center;justify-content:center;font-size:15px;font-weight:700;flex:none;}
+      .er-glyph.er-g2{background:#fbebc4;color:#7a4f00;}
+      .er-note{margin-top:14px;padding:12px 14px;background:#fff7e6;border:1px solid #f3dcaa;border-radius:14px;color:#5b3f00;line-height:1.7;font-size:14.5px;}
+      .er-note b{color:#7a4f00;}
       .er-img{margin-top:14px;}
       .er-img img{max-width:100%;border-radius:12px;border:1px solid var(--er-line);display:block;}
-      .er-del{margin-top:14px;}
+      .er-actions{display:flex;gap:8px;margin-top:14px;}
+      .er-actions button{margin:0;width:auto;flex:1;min-height:44px;padding:8px 10px;font-size:14px;border-radius:12px;}
+      .er-actions .er-btn-line{background:#fff;color:var(--er-teal);border:1px solid var(--er-teal);}
       .erRow{background:#f8fbfa;border:1px solid #dbe7e4 !important;border-radius:12px !important;padding:10px !important;}
+      @media print{
+        body.er-print-mode *{visibility:hidden !important;}
+        body.er-print-mode .er-card.er-printing,body.er-print-mode .er-card.er-printing *{visibility:visible !important;}
+        body.er-print-mode .er-card.er-printing{position:absolute;left:0;top:0;width:100%;box-shadow:none;border:none;}
+        body.er-print-mode .er-actions{display:none !important;}
+      }
     `;
     document.head.appendChild(st);
   })();
@@ -157,18 +186,138 @@
     }).join('');
   }
 
-  // তারিখ উপরে, তার নিচে বার
-  function fmtDate(iso) {
-    if (!/^\d{4}-\d{2}-\d{2}$/.test(String(iso || ''))) return esc(iso || '');
+  // ================= নতুন ডিজাইনের সহায়ক ফাংশন =================
+  const isIso = s => /^\d{4}-\d{2}-\d{2}$/.test(String(s || ''));
+
+  // তারিখ থেকে: তারিখের সংখ্যা, মাস, বার
+  function dateParts(iso) {
+    if (!isIso(iso)) return null;
     try {
       const d = new Date(iso + 'T00:00:00');
-      const bn = n => String(n).replace(/\d/g, c => '০১২৩৪৫৬৭৮৯'[c]);
-      const p = iso.split('-');
-      const tarikh = bn(p[2]) + '/' + bn(p[1]) + '/' + bn(p[0].slice(2));   // ০৩/১১/২৬
-      const bar = d.toLocaleDateString('bn-BD', { weekday: 'long' });
-      return '<div class="er-date">' + esc(tarikh) + '</div><span class="er-day">' + esc(bar) + '</span>';
-    } catch (e) { return esc(iso); }
+      return {
+        day: bn(iso.slice(8, 10)),
+        month: d.toLocaleDateString('bn-BD', { month: 'long' }),
+        wd: d.toLocaleDateString('bn-BD', { weekday: 'long' }),
+        short: bn(iso.slice(8, 10)) + '/' + bn(iso.slice(5, 7)) + '/' + bn(iso.slice(2, 4))
+      };
+    } catch (e) { return null; }
   }
+
+  // আজকের তারিখের সাথে প্রতিটি সারির দিনের ব্যবধান + "পরবর্তী পরীক্ষা" কোনটি
+  function examStatus(rows) {
+    const now = new Date();
+    const t0 = new Date(now.getFullYear(), now.getMonth(), now.getDate()).getTime();
+    const df = rows.map(x => isIso(x.date) ? Math.round((new Date(x.date + 'T00:00:00').getTime() - t0) / 86400000) : NaN);
+    let nextI = -1;
+    df.forEach((v, i) => { if (!isNaN(v) && v >= 0 && (nextI === -1 || v < df[nextI])) nextI = i; });
+    const anyValid = df.some(v => !isNaN(v));
+    if (!anyValid) return { df, nextI, stat: null };
+    if (nextI === -1) return { df, nextI, stat: { value: 'শেষ', label: 'পরীক্ষা সমাপ্ত' } };
+    const d = df[nextI];
+    const isFirst = !df.some(v => !isNaN(v) && v < 0);
+    if (d === 0) return { df, nextI, stat: { value: 'আজ', label: 'পরীক্ষা আছে' } };
+    if (d === 1) return { df, nextI, stat: { value: 'আগামীকাল', label: 'পরবর্তী পরীক্ষা' } };
+    return { df, nextI, stat: { value: bn(d) + ' দিন', label: isFirst ? 'পরীক্ষা শুরু হতে বাকি' : 'পরবর্তী পরীক্ষা' } };
+  }
+
+  const SVG_ATTR = 'width="20" height="20" viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="1.8" stroke-linecap="round" stroke-linejoin="round"';
+
+  // বিষয়ের নাম দেখে আইকন (না মিললে নামের প্রথম অক্ষর)
+  function subjectGlyph(subject) {
+    const s = String(subject == null ? '' : subject).split(/[,،]/)[0].trim();
+    let g = '', cls = '';
+    if (/কুরআন|কোরআন|ক্বিরাত|কিরাত|কেরাত|তাজবীদ|তাজবিদ|হিফয|হিফজ/.test(s)) {
+      g = `<svg ${SVG_ATTR}><path d="M12 6c-2-1.5-5-2-8-1.5v13c3-.5 6 0 8 1.5 2-1.5 5-2 8-1.5v-13c-3-.5-6 0-8 1.5zM12 6v13"/></svg>`; cls = ' er-g2';
+    } else if (/আরবি|আরবী/.test(s)) { g = 'ع'; cls = ' er-g2'; }
+    else if (/ইংরেজি/.test(s)) g = 'Aa';
+    else if (/বাংলাদেশ|বিশ্ব|ভূগোল/.test(s)) {
+      g = `<svg ${SVG_ATTR}><circle cx="12" cy="12" r="9"/><path d="M3 12h18M12 3c3 3 3 15 0 18M12 3c-3 3-3 15 0 18"/></svg>`;
+    } else if (/বাংলা/.test(s)) g = 'অ';
+    else if (/গণিত|অংক|অঙ্ক/.test(s)) g = '∑';
+    else g = esc(Array.from(s)[0] || '•');
+    return `<div class="er-glyph${cls}" aria-hidden="true">${g}</div>`;
+  }
+
+  // একটি রুটিনের পুরো কার্ড
+  function examCardHtml(id, r, isTeacher) {
+    const rows = Array.isArray(r.rows) ? r.rows : [];
+    const imgUrl = safeDataUrl(r.imageDataUrl);
+    const stt = examStatus(rows);
+    const times = rows.map(x => String(x.time || '').trim());
+    const commonTime = (times.length && times.every(t => t && t === times[0])) ? times[0] : '';
+
+    const stats = rows.length ? `<div class="er-stats">
+        ${stt.stat ? `<div class="er-stat"><b>${esc(stt.stat.value)}</b><span>${esc(stt.stat.label)}</span></div>` : ''}
+        <div class="er-stat"><b>${bn(rows.length)}টি</b><span>বিষয়</span></div>
+        ${commonTime ? `<div class="er-stat er-wide"><b>${esc(commonTime)}</b><span>প্রতিদিনের সময়</span></div>` : ''}
+      </div>` : '';
+
+    const items = rows.map((x, i) => {
+      const p = dateParts(x.date);
+      const cls = 'er-item' + (i === stt.nextI ? ' er-next' : '') + (stt.df[i] < 0 ? ' er-past' : '');
+      const timeChip = (!commonTime && x.time) ? `<span class="er-time">${esc(x.time)}</span>` : '';
+      return `<div class="${cls}">
+        <div class="er-dotcol"><div class="er-dot"></div></div>
+        <div class="er-row">
+          <div class="er-dateblk">${p ? `<b>${esc(p.day)}</b><small>${esc(p.month)}</small>` : `<small>${esc(x.date || '')}</small>`}</div>
+          <div class="er-info">
+            <div class="er-sub">${fmtSubject(x.subject)}</div>
+            <div class="er-meta">${p ? `<span>${esc(p.wd)}</span>` : ''}${i === stt.nextI ? '<span class="er-tag">পরবর্তী</span>' : ''}${timeChip}</div>
+          </div>
+          ${subjectGlyph(x.subject)}
+        </div>
+      </div>`;
+    }).join('');
+
+    const posted = r.createdAt ? 'প্রকাশ: ' + new Date(r.createdAt).toLocaleDateString('bn-BD') : '';
+
+    return `<div class="er-card" id="erc_${esc(id)}">
+      <div class="er-hero${rows.length ? '' : ' er-flat'}">
+        <div class="er-hero-top"><span class="er-class">${esc(r.className || '-')}</span><span>${esc(posted)}</span></div>
+        <div class="er-title">${esc(r.examName || 'পরীক্ষার রুটিন')}</div>
+      </div>
+      ${stats}
+      <div class="er-body">
+        ${rows.length ? `<div class="er-tl">${items}</div>` : ''}
+        ${r.note ? `<div class="er-note"><b>নির্দেশনা:</b> ${esc(r.note).replace(/\n/g, '<br>')}</div>` : ''}
+        ${imgUrl ? `<div class="er-img"><img src="${esc(imgUrl)}" alt="পরীক্ষার রুটিনের ছবি"></div>` : ''}
+        <div class="er-actions">
+          <button type="button" class="er-btn-line" onclick="erPrint('${jsq(id)}')">প্রিন্ট / PDF</button>
+          <button type="button" onclick="erShare('${jsq(id)}')">শেয়ার</button>
+          ${isTeacher ? `<button type="button" class="danger" onclick="deleteExamRoutine('${jsq(id)}')">মুছুন</button>` : ''}
+        </div>
+      </div>
+    </div>`;
+  }
+
+  // শুধু এই কার্ডটি প্রিন্ট হয় (ফোনে "Save as PDF" বেছে নিলে PDF হয়)
+  window.erPrint = function (id) {
+    const el = document.getElementById('erc_' + id);
+    if (!el) return;
+    el.classList.add('er-printing');
+    document.body.classList.add('er-print-mode');
+    const done = () => { el.classList.remove('er-printing'); document.body.classList.remove('er-print-mode'); };
+    window.addEventListener('afterprint', done, { once: true });
+    setTimeout(() => { try { window.print(); } catch (e) { done(); } }, 60);
+  };
+
+  // টেক্সট আকারে শেয়ার (ফোনের শেয়ার মেনু; না থাকলে হোয়াটসঅ্যাপ)
+  window.erShare = function (id) {
+    const r = erCache[id];
+    if (!r) return;
+    const lines = [(r.className ? r.className + ' — ' : '') + (r.examName || 'পরীক্ষার রুটিন'), ''];
+    (Array.isArray(r.rows) ? r.rows : []).forEach(x => {
+      const p = dateParts(x.date);
+      lines.push((p ? p.short + ' ' + p.wd : (x.date || '')) + ': ' + (x.subject || '') + (x.time ? ' (' + x.time + ')' : ''));
+    });
+    if (r.note) { lines.push('', 'নির্দেশনা: ' + r.note); }
+    const text = lines.join('\n');
+    if (navigator.share) {
+      navigator.share({ title: r.examName || 'পরীক্ষার রুটিন', text }).catch(() => {});
+    } else {
+      window.open('https://wa.me/?text=' + encodeURIComponent(text), '_blank');
+    }
+  };
 
   // ================= স্ক্রিন (শিক্ষক ও শিক্ষার্থী) =================
   function renderExamScreen(isTeacher) {
@@ -234,38 +383,8 @@
       if (docs.length === 0) { wrap.innerHTML = '<p class="muted">কোনো পরীক্ষার রুটিন নেই</p>'; return; }
       wrap.innerHTML = docs.map(d => {
         const r = d.data();
-        const rows = Array.isArray(r.rows) ? r.rows : [];
-        const imgUrl = safeDataUrl(r.imageDataUrl);
-        const table = rows.length ? `
-          <div class="er-scroll">
-            <table class="er-table">
-              <thead><tr>
-                <th>তারিখ ও বার</th>
-                <th>বিষয়</th>
-                <th>সময়</th>
-              </tr></thead>
-              <tbody>${rows.map(x => `<tr>
-                <td>${fmtDate(x.date)}</td>
-                <td class="er-sub">${fmtSubject(x.subject)}</td>
-                <td>${x.time ? `<span class="er-time">${esc(x.time)}</span>` : ''}</td>
-              </tr>`).join('')}</tbody>
-            </table>
-          </div>` : '';
-        return `<div class="er-card">
-          <div class="er-head">
-            <div>
-              <div class="er-class">${esc(r.className || '-')}</div>
-              <div class="er-title">${esc(r.examName || 'পরীক্ষার রুটিন')}</div>
-            </div>
-            <span class="er-posted">${r.createdAt ? esc(new Date(r.createdAt).toLocaleDateString('bn-BD')) : ''}</span>
-          </div>
-          <div class="er-body">
-            ${table}
-            ${r.note ? `<div class="er-note"><b>নির্দেশনা:</b> ${esc(r.note).replace(/\n/g, '<br>')}</div>` : ''}
-            ${imgUrl ? `<div class="er-img"><img src="${esc(imgUrl)}" alt="পরীক্ষার রুটিনের ছবি"></div>` : ''}
-            ${isTeacher ? `<button class="small danger er-del" onclick="deleteExamRoutine('${jsq(d.id)}')">মুছুন</button>` : ''}
-          </div>
-        </div>`;
+        erCache[d.id] = r;
+        return examCardHtml(d.id, r, isTeacher);
       }).join('');
     }, err => {
       const wrap = document.getElementById('erWrap');
