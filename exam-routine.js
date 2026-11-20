@@ -45,14 +45,15 @@
       .er-card{--er-teal:#0f766e;--er-dark:#0b5e57;--er-tint:#e8f4f1;--er-line:#dbe7e4;--er-ink:#16302c;--er-gold:#e3b04b;
         background:#fff;border:1px solid var(--er-line);border-radius:20px;overflow:hidden;margin-bottom:18px;
         box-shadow:0 2px 12px rgba(15,118,110,.10);-webkit-print-color-adjust:exact;print-color-adjust:exact;}
-      .er-hero{position:relative;color:#fff;padding:16px 16px 58px;
+      .er-hero{position:relative;color:#fff;text-align:center;padding:18px 16px 60px;
         background:url("data:image/svg+xml,%3Csvg xmlns='http://www.w3.org/2000/svg' width='48' height='48' viewBox='0 0 48 48'%3E%3Cg fill='none' stroke='%23ffffff' stroke-opacity='.13' stroke-width='1'%3E%3Crect x='10' y='10' width='28' height='28'/%3E%3Crect x='10' y='10' width='28' height='28' transform='rotate(45 24 24)'/%3E%3C/g%3E%3C/svg%3E"),#0b5e57;}
       .er-hero.er-flat{padding-bottom:18px;}
-      .er-brand{display:flex;align-items:center;gap:10px;}
-      .er-logo{width:42px;height:42px;border-radius:50%;background:#fff;object-fit:contain;padding:2px;box-sizing:border-box;flex:none;}
-      .er-mname{font-size:15.5px;font-weight:700;line-height:1.35;}
-      .er-mclass{font-size:12.5px;color:#bfe0d8;}
-      .er-posted{font-size:12px;color:#bfe0d8;margin-top:6px;}
+      .er-brand{display:flex;flex-direction:column;align-items:center;gap:8px;}
+      .er-logo{width:54px;height:54px;border-radius:50%;background:#fff;object-fit:contain;padding:3px;box-sizing:border-box;}
+      .er-mname{font-size:17px;font-weight:700;line-height:1.4;}
+      .er-htitle{font-size:25px;font-weight:700;line-height:1.4;margin-top:10px;}
+      .er-pill{display:inline-block;max-width:100%;margin-top:10px;background:rgba(255,255,255,.16);border-radius:999px;padding:5px 16px;font-size:13.5px;font-weight:600;line-height:1.5;color:#fff;}
+      .er-posted{font-size:12px;color:#bfe0d8;margin-top:8px;}
       .er-hero-top{display:flex;justify-content:space-between;align-items:center;gap:10px;font-size:12px;color:#bfe0d8;}
       .er-class{display:inline-block;background:rgba(255,255,255,.16);border-radius:999px;padding:3px 12px;font-size:12.5px;font-weight:700;color:#fff;}
       .er-title{font-size:22px;font-weight:700;line-height:1.4;margin-top:10px;}
@@ -275,15 +276,13 @@
 
   function heroHtml(r, posted) {
     const b = madrasaBrand();
-    const cls = String(r.className || '-');
-    const clsText = /শ্রেণি/.test(cls) ? cls : cls + ' শ্রেণি';
-    const title = `<div class="er-title">${esc(r.examName || 'পরীক্ষার রুটিন')}</div>`;
-    if (!b.name) {
-      return `<div class="er-hero-top"><span class="er-class">${esc(cls)}</span><span>${esc(posted)}</span></div>${title}`;
-    }
-    return `<div class="er-brand">${b.logo ? `<img class="er-logo" src="${esc(b.logo)}" alt="">` : ''}
-        <div><div class="er-mname">${esc(b.name)}</div><div class="er-mclass">${esc(clsText)}</div></div></div>
-      ${title}${posted ? `<div class="er-posted">${esc(posted)}</div>` : ''}`;
+    const cls = String(r.className || '').trim();
+    const clsText = cls && !/শ্রেণি/.test(cls) ? cls + ' শ্রেণি' : cls;
+    const pill = [clsText, String(r.examName || '').trim()].filter(Boolean).join(' · ');
+    return (b.name ? `<div class="er-brand">${b.logo ? `<img class="er-logo" src="${esc(b.logo)}" alt="">` : ''}<div class="er-mname">${esc(b.name)}</div></div>` : '')
+      + '<div class="er-htitle">পরীক্ষার রুটিন</div>'
+      + (pill ? `<div class="er-pill">${esc(pill)}</div>` : '')
+      + (posted ? `<div class="er-posted">${esc(posted)}</div>` : '');
   }
 
   // একটি রুটিনের পুরো কার্ড
@@ -405,7 +404,7 @@
         </div>
         <div id="erWrap">লোড হচ্ছে...</div>`;
     } else {
-      html += `<h2 style="margin:4px 4px 12px;">পরীক্ষার রুটিন</h2><div id="erWrap">লোড হচ্ছে...</div>`;
+      html += `<div id="erWrap">লোড হচ্ছে...</div>`;
     }
     setScreen(html);
 
