@@ -48,6 +48,11 @@
       .er-hero{position:relative;color:#fff;padding:16px 16px 58px;
         background:url("data:image/svg+xml,%3Csvg xmlns='http://www.w3.org/2000/svg' width='48' height='48' viewBox='0 0 48 48'%3E%3Cg fill='none' stroke='%23ffffff' stroke-opacity='.13' stroke-width='1'%3E%3Crect x='10' y='10' width='28' height='28'/%3E%3Crect x='10' y='10' width='28' height='28' transform='rotate(45 24 24)'/%3E%3C/g%3E%3C/svg%3E"),#0b5e57;}
       .er-hero.er-flat{padding-bottom:18px;}
+      .er-brand{display:flex;align-items:center;gap:10px;}
+      .er-logo{width:42px;height:42px;border-radius:50%;background:#fff;object-fit:contain;padding:2px;box-sizing:border-box;flex:none;}
+      .er-mname{font-size:15.5px;font-weight:700;line-height:1.35;}
+      .er-mclass{font-size:12.5px;color:#bfe0d8;}
+      .er-posted{font-size:12px;color:#bfe0d8;margin-top:6px;}
       .er-hero-top{display:flex;justify-content:space-between;align-items:center;gap:10px;font-size:12px;color:#bfe0d8;}
       .er-class{display:inline-block;background:rgba(255,255,255,.16);border-radius:999px;padding:3px 12px;font-size:12.5px;font-weight:700;color:#fff;}
       .er-title{font-size:22px;font-weight:700;line-height:1.4;margin-top:10px;}
@@ -244,6 +249,43 @@
     return `<div class="er-glyph${cls}" aria-hidden="true">${g}</div>`;
   }
 
+  // মাদ্রাসার নাম ও লোগো: অ্যাপের ভেতরের চলতি তথ্য, না পেলে উপরের বার (header) থেকে
+  function madrasaBrand() {
+    let name = '', logo = '';
+    try { if (typeof madrasaName === 'string' && madrasaName) name = madrasaName; } catch (e) {}
+    try {
+      if (typeof madrasaSettings === 'object' && madrasaSettings) {
+        if (!name) name = madrasaSettings.name || madrasaSettings.madrasaName || '';
+        logo = madrasaSettings.logo || madrasaSettings.logoDataUrl || '';
+      }
+    } catch (e) {}
+    try {
+      const h = document.querySelector('header');
+      if (h) {
+        if (!logo) { const im = h.querySelector('img'); if (im) logo = im.getAttribute('src') || ''; }
+        if (!name) {
+          const t = String(h.textContent || '').replace(/[\u{1F300}-\u{1FAFF}\u2600-\u27BF\uFE0F]/gu, '').replace(/\s+/g, ' ').trim();
+          if (t && !/^ShikkhaOS$/i.test(t)) name = t;
+        }
+      }
+    } catch (e) {}
+    if (!/^(data:image\/|https?:\/\/|[\w.\-\/]+$)/i.test(String(logo))) logo = '';
+    return { name: String(name || '').slice(0, 60), logo: String(logo || '') };
+  }
+
+  function heroHtml(r, posted) {
+    const b = madrasaBrand();
+    const cls = String(r.className || '-');
+    const clsText = /শ্রেণি/.test(cls) ? cls : cls + ' শ্রেণি';
+    const title = `<div class="er-title">${esc(r.examName || 'পরীক্ষার রুটিন')}</div>`;
+    if (!b.name) {
+      return `<div class="er-hero-top"><span class="er-class">${esc(cls)}</span><span>${esc(posted)}</span></div>${title}`;
+    }
+    return `<div class="er-brand">${b.logo ? `<img class="er-logo" src="${esc(b.logo)}" alt="">` : ''}
+        <div><div class="er-mname">${esc(b.name)}</div><div class="er-mclass">${esc(clsText)}</div></div></div>
+      ${title}${posted ? `<div class="er-posted">${esc(posted)}</div>` : ''}`;
+  }
+
   // একটি রুটিনের পুরো কার্ড
   function examCardHtml(id, r, isTeacher) {
     const rows = Array.isArray(r.rows) ? r.rows : [];
@@ -287,8 +329,7 @@
 
     return `<div class="er-card" id="erc_${esc(id)}">
       <div class="er-hero${rows.length ? '' : ' er-flat'}">
-        <div class="er-hero-top"><span class="er-class">${esc(r.className || '-')}</span><span>${esc(posted)}</span></div>
-        <div class="er-title">${esc(r.examName || 'পরীক্ষার রুটিন')}</div>
+        ${heroHtml(r, posted)}
       </div>
       ${stats}
       <div class="er-body">
