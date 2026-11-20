@@ -102,11 +102,46 @@
       .erRow{background:#f8fbfa;border:1px solid #dbe7e4 !important;border-radius:12px !important;padding:10px !important;}
       .er-editbar{display:flex;align-items:center;justify-content:space-between;gap:8px;background:#fff7e6;border:1px solid #f3dcaa;color:#7a4f00;border-radius:12px;padding:8px 12px;margin-bottom:10px;font-size:14px;font-weight:600;}
       .er-editbar button{margin:0;width:auto;flex:none;}
+      /* ---- প্রিন্ট/PDF-এর আলাদা ফরমাল লেআউট (পর্দায় লুকানো থাকে) ---- */
+      .er-print{display:none;color:#16302c;font-size:13pt;line-height:1.5;-webkit-print-color-adjust:exact;print-color-adjust:exact;}
+      .erp-head{text-align:center;}
+      .erp-logo{width:62px;height:62px;border-radius:50%;object-fit:contain;display:block;margin:0 auto 4px;}
+      .erp-mname{font-size:20pt;font-weight:700;color:#0b5e57;line-height:1.35;}
+      .erp-orn{display:flex;align-items:center;gap:10px;margin:6px 36px 8px;}
+      .erp-orn:before,.erp-orn:after{content:"";flex:1;height:2px;background:#0f766e;}
+      .erp-orn i{width:10px;height:10px;background:#e3b04b;transform:rotate(45deg);flex:none;}
+      .erp-title{font-size:26pt;font-weight:700;color:#0f766e;line-height:1.35;}
+      .erp-sub{display:inline-block;margin-top:6px;padding:4px 24px;border:1.5px solid #0f766e;border-radius:999px;font-size:13.5pt;font-weight:600;color:#0b5e57;}
+      .erp-info{display:flex;margin:14px 0 10px;background:#e8f4f1;border-radius:12px;}
+      .erp-info > div{flex:1;text-align:center;padding:9px 6px;}
+      .erp-info > div + div{border-left:1px solid #bfdad4;}
+      .erp-info b{display:block;font-size:12.5pt;color:#0b5e57;line-height:1.5;}
+      .erp-info span{font-size:10.5pt;color:#4b635e;}
+      .erp-table{width:100%;border-collapse:separate;border-spacing:0;border:1px solid #cfe0db;border-radius:12px;overflow:hidden;font-size:13pt;}
+      .erp-table thead{display:table-header-group;}
+      .erp-table th{background:#0f766e;color:#fff;font-weight:700;padding:8px 8px;text-align:center;}
+      .erp-table td{padding:6px 8px;border-top:1px solid #dbe7e4;text-align:center;vertical-align:middle;}
+      .erp-table tbody tr:nth-child(even) td{background:#f4faf8;}
+      .erp-table tr{break-inside:avoid;page-break-inside:avoid;}
+      .erp-table td.erp-no{width:9%;color:#4b635e;}
+      .erp-table td.erp-date{font-weight:700;color:#0b5e57;}
+      .erp-table td.erp-subc{text-align:left;font-weight:700;}
+      .erp-note{margin-top:12px;padding:8px 14px;background:#fff7e6;border:1px solid #f3dcaa;border-radius:12px;color:#5b3f00;font-size:11.5pt;line-height:1.6;white-space:pre-line;break-inside:avoid;page-break-inside:avoid;}
+      .erp-note b{color:#7a4f00;}
+      .erp-img{margin-top:14px;text-align:center;break-inside:avoid;page-break-inside:avoid;}
+      .erp-img img{max-width:100%;max-height:230mm;border:1px solid #cfe0db;border-radius:8px;}
+      .erp-foot{display:flex;justify-content:space-between;gap:40px;margin-top:32px;break-inside:avoid;page-break-inside:avoid;}
+      .erp-foot > div{flex:1;text-align:center;border-top:1.5px solid #16302c;padding-top:6px;font-size:12pt;font-weight:600;}
+      .erp-posted{margin-top:10px;text-align:right;font-size:10.5pt;color:#4b635e;}
       @media print{
-        body.er-print-mode *{visibility:hidden !important;}
-        body.er-print-mode .er-card.er-printing,body.er-print-mode .er-card.er-printing *{visibility:visible !important;}
-        body.er-print-mode .er-card.er-printing{position:absolute;left:0;top:0;width:100%;box-shadow:none;border:none;}
-        body.er-print-mode .er-actions{display:none !important;}
+        body.er-print-mode .er-hide{display:none !important;}
+        body.er-print-mode{background:#fff !important;background-image:none !important;padding:0 !important;min-height:0 !important;}
+        body.er-print-mode .screen{padding:0 !important;max-width:none !important;}
+        body.er-print-mode .er-card.er-printing{margin:0;border:none;border-radius:0;box-shadow:none;overflow:visible;}
+        body.er-print-mode .er-card.er-printing .er-hero,
+        body.er-print-mode .er-card.er-printing .er-stats,
+        body.er-print-mode .er-card.er-printing .er-body{display:none !important;}
+        body.er-print-mode .er-card.er-printing .er-print{display:block !important;}
       }
     `;
     document.head.appendChild(st);
@@ -211,6 +246,7 @@
         day: bn(iso.slice(8, 10)),
         month: d.toLocaleDateString('bn-BD', { month: 'long' }),
         wd: d.toLocaleDateString('bn-BD', { weekday: 'long' }),
+        year: bn(iso.slice(0, 4)),
         short: bn(iso.slice(8, 10)) + '/' + bn(iso.slice(5, 7)) + '/' + bn(iso.slice(2, 4))
       };
     } catch (e) { return null; }
@@ -285,6 +321,46 @@
       + (posted ? `<div class="er-posted">${esc(posted)}</div>` : '');
   }
 
+  // প্রিন্ট/PDF-এর ফরমাল পাতা: কেন্দ্রে হেডার, তথ্যের স্ট্রিপ, জেব্রা-টেবিল, নির্দেশনা, স্বাক্ষরের ঘর
+  function printHtml(r, rows, o) {
+    const b = madrasaBrand();
+    const cls = String(r.className || '').trim();
+    const clsText = cls && !/শ্রেণি/.test(cls) ? cls + ' শ্রেণি' : cls;
+    const sub = [clsText, String(r.examName || '').trim()].filter(Boolean).join(' · ');
+    const full = p => p.day + ' ' + p.month + ' ' + p.year;
+    const isos = rows.map(x => x.date).filter(isIso).sort();
+    const first = isos.length ? dateParts(isos[0]) : null;
+    const last = isos.length ? dateParts(isos[isos.length - 1]) : null;
+    const dailyTime = !!(o.commonTime && !o.hasException);
+    const cells = [];
+    if (first && last) { cells.push(['পরীক্ষা শুরু', full(first)]); cells.push(['পরীক্ষা শেষ', full(last)]); }
+    if (rows.length) cells.push(['মোট বিষয়', bn(rows.length) + 'টি']);
+    if (dailyTime) cells.push(['প্রতিদিনের সময়', o.commonTime]);
+    const info = cells.length ? `<div class="erp-info">${cells.map(c => `<div><b>${esc(c[1])}</b><span>${esc(c[0])}</span></div>`).join('')}</div>` : '';
+    const table = rows.length ? `<table class="erp-table">
+        <thead><tr><th>ক্রম</th><th>তারিখ</th><th>বার</th><th>বিষয়</th>${dailyTime ? '' : '<th>সময়</th>'}</tr></thead>
+        <tbody>${rows.map((x, i) => {
+          const p = dateParts(x.date);
+          return `<tr><td class="erp-no">${bn(i + 1)}</td><td class="erp-date">${p ? esc(full(p)) : esc(x.date || '')}</td><td>${p ? esc(p.wd) : ''}</td><td class="erp-subc">${fmtSubject(x.subject)}</td>${dailyTime ? '' : `<td>${esc(o.normT(x.time))}</td>`}</tr>`;
+        }).join('')}</tbody>
+      </table>` : '';
+    return `<div class="er-print">
+      <div class="erp-head">
+        ${b.logo ? `<img class="erp-logo" src="${esc(b.logo)}" alt="">` : ''}
+        ${b.name ? `<div class="erp-mname">${esc(b.name)}</div>` : ''}
+        <div class="erp-orn"><i></i></div>
+        <div class="erp-title">পরীক্ষার রুটিন</div>
+        ${sub ? `<div class="erp-sub">${esc(sub)}</div>` : ''}
+      </div>
+      ${info}
+      ${table}
+      ${r.note ? `<div class="erp-note"><b>নির্দেশনা:</b> ${esc(r.note)}</div>` : ''}
+      ${o.imgUrl ? `<div class="erp-img"><img src="${esc(o.imgUrl)}" alt=""></div>` : ''}
+      <div class="erp-foot"><div>শ্রেণি শিক্ষক</div><div>অধ্যক্ষ / মুহতামিম</div></div>
+      ${o.posted ? `<div class="erp-posted">${esc(o.posted)}</div>` : ''}
+    </div>`;
+  }
+
   // একটি রুটিনের পুরো কার্ড
   function examCardHtml(id, r, isTeacher) {
     const rows = Array.isArray(r.rows) ? r.rows : [];
@@ -341,6 +417,7 @@
           ${isTeacher ? `<button type="button" class="er-btn-line" onclick="editExamRoutine('${jsq(id)}')">সম্পাদনা</button><button type="button" class="danger" onclick="deleteExamRoutine('${jsq(id)}')">মুছুন</button>` : ''}
         </div>
       </div>
+      ${printHtml(r, rows, { commonTime, hasException, normT, imgUrl, posted })}
     </div>`;
   }
 
@@ -348,11 +425,26 @@
   window.erPrint = function (id) {
     const el = document.getElementById('erc_' + id);
     if (!el) return;
+    // কার্ডের পথের বাইরের সব অংশ প্রিন্টে লুকানো হয় (শুধু প্রিন্টের সময়, পর্দায় কিছু বদলায় না)
+    const hidden = [];
+    let node = el;
+    while (node && node !== document.body && node.parentElement) {
+      Array.from(node.parentElement.children).forEach(ch => { if (ch !== node) { ch.classList.add('er-hide'); hidden.push(ch); } });
+      node = node.parentElement;
+    }
     el.classList.add('er-printing');
     document.body.classList.add('er-print-mode');
-    const done = () => { el.classList.remove('er-printing'); document.body.classList.remove('er-print-mode'); };
+    const pg = document.createElement('style');
+    pg.textContent = '@page{size:A4;margin:12mm}';
+    document.head.appendChild(pg);
+    const done = () => {
+      el.classList.remove('er-printing');
+      document.body.classList.remove('er-print-mode');
+      hidden.forEach(h => h.classList.remove('er-hide'));
+      if (pg.parentNode) pg.parentNode.removeChild(pg);
+    };
     window.addEventListener('afterprint', done, { once: true });
-    setTimeout(() => { try { window.print(); } catch (e) { done(); } }, 60);
+    setTimeout(() => { try { window.print(); } catch (e) { done(); } }, 120);
   };
 
   // টেক্সট আকারে শেয়ার (ফোনের শেয়ার মেনু; না থাকলে হোয়াটসঅ্যাপ)
