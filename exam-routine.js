@@ -125,7 +125,7 @@
       .erp-table tr{break-inside:avoid;page-break-inside:avoid;}
       .erp-table td.erp-no{width:9%;color:#4b635e;}
       .erp-table td.erp-date{font-weight:700;color:#0b5e57;}
-      .erp-table td.erp-subc{text-align:left;font-weight:700;}
+      .erp-table td.erp-subc{text-align:center;font-weight:700;}
       .erp-note{margin-top:12px;padding:8px 14px;background:#fff7e6;border:1px solid #f3dcaa;border-radius:12px;color:#5b3f00;font-size:11.5pt;line-height:1.6;white-space:pre-line;break-inside:avoid;page-break-inside:avoid;}
       .erp-note b{color:#7a4f00;}
       .erp-img{margin-top:14px;text-align:center;break-inside:avoid;page-break-inside:avoid;}
