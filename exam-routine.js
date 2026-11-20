@@ -33,6 +33,7 @@
 
   let examClassFilter = 'all';
   let examUnsub = null;
+  let erEditId = null;                    // সম্পাদনার সময় কোন রুটিন বদলানো হচ্ছে
   const erCache = {};                     // শেয়ার বোতামের জন্য সর্বশেষ রুটিনগুলো
 
   // ================= ডিজাইন (একবারই যুক্ত হয়) =================
@@ -57,20 +58,22 @@
       .er-stat span{font-size:12px;color:#4b635e;}
       .er-stat.er-wide{flex:1.5;}
       .er-stat.er-wide b{font-size:14.5px;}
-      .er-body{padding:16px 14px 14px;}
+      .er-body{padding:16px 10px 14px;}
       .er-tl{position:relative;display:flex;flex-direction:column;gap:10px;}
-      .er-tl:before{content:"";position:absolute;left:9px;top:34px;bottom:34px;width:2px;background:#cfe0db;}
-      .er-item{display:flex;gap:10px;align-items:stretch;}
-      .er-dotcol{width:20px;display:flex;align-items:center;justify-content:center;flex:none;position:relative;}
-      .er-dot{width:12px;height:12px;border-radius:50%;box-sizing:border-box;background:#fff;border:3px solid var(--er-teal);}
+      .er-item{display:flex;gap:8px;align-items:stretch;}
+      .er-dotcol{width:16px;display:flex;align-items:center;justify-content:center;flex:none;position:relative;}
+      .er-dotcol:before{content:"";position:absolute;left:50%;margin-left:-1px;top:0;bottom:-10px;width:2px;background:#cfe0db;}
+      .er-item:first-child .er-dotcol:before{top:50%;}
+      .er-item:last-child .er-dotcol:before{bottom:50%;}
+      .er-dot{position:relative;z-index:1;width:12px;height:12px;border-radius:50%;box-sizing:border-box;background:#fff;border:3px solid var(--er-teal);}
       .er-item.er-next .er-dot{background:var(--er-gold);border-color:var(--er-dark);box-shadow:0 0 0 4px #f7e9c6;}
       .er-item.er-past .er-dot{background:var(--er-teal);}
-      .er-row{flex:1;min-width:0;display:flex;align-items:center;gap:12px;background:#fff;border:1px solid var(--er-line);border-radius:16px;padding:10px 12px 10px 10px;
+      .er-row{flex:1;min-width:0;display:flex;align-items:center;gap:10px;background:#fff;border:1px solid var(--er-line);border-radius:16px;padding:10px 10px 10px 8px;
         box-shadow:0 1px 2px rgba(11,94,87,.06),0 4px 12px rgba(11,94,87,.06);}
       .er-item.er-next .er-row{border:2px solid var(--er-teal);}
       .er-item.er-past .er-row{opacity:.62;}
-      .er-dateblk{width:54px;min-height:60px;border-radius:13px;background:var(--er-tint);color:var(--er-teal);display:flex;flex-direction:column;align-items:center;justify-content:center;flex:none;padding:6px 0;}
-      .er-dateblk b{font-size:23px;line-height:1;}
+      .er-dateblk{width:50px;min-height:58px;border-radius:13px;background:var(--er-tint);color:var(--er-teal);display:flex;flex-direction:column;align-items:center;justify-content:center;flex:none;padding:6px 0;}
+      .er-dateblk b{font-size:22px;line-height:1;}
       .er-dateblk small{font-size:11px;margin-top:4px;color:#4b635e;}
       .er-item.er-next .er-dateblk{background:var(--er-dark);color:#fff;}
       .er-item.er-next .er-dateblk small{color:var(--er-gold);}
@@ -80,16 +83,18 @@
       .er-meta{display:flex;flex-wrap:wrap;align-items:center;gap:6px;font-size:13px;color:#4b635e;}
       .er-tag{font-size:11px;font-weight:700;background:#fbebc4;color:#7a4f00;border-radius:999px;padding:2px 8px;}
       .er-time{display:inline-block;padding:2px 8px;border-radius:8px;background:#fff7e6;color:#8a5a00;border:1px solid #f3dcaa;font-weight:600;font-size:12.5px;line-height:1.4;}
-      .er-glyph{width:38px;height:38px;border-radius:50%;background:var(--er-tint);color:var(--er-teal);display:flex;align-items:center;justify-content:center;font-size:15px;font-weight:700;flex:none;}
+      .er-glyph{width:34px;height:34px;border-radius:50%;background:var(--er-tint);color:var(--er-teal);display:flex;align-items:center;justify-content:center;font-size:15px;font-weight:700;flex:none;}
       .er-glyph.er-g2{background:#fbebc4;color:#7a4f00;}
       .er-note{margin-top:14px;padding:12px 14px;background:#fff7e6;border:1px solid #f3dcaa;border-radius:14px;color:#5b3f00;line-height:1.7;font-size:14.5px;}
       .er-note b{color:#7a4f00;}
       .er-img{margin-top:14px;}
       .er-img img{max-width:100%;border-radius:12px;border:1px solid var(--er-line);display:block;}
-      .er-actions{display:flex;gap:8px;margin-top:14px;}
-      .er-actions button{margin:0;width:auto;flex:1;min-height:44px;padding:8px 10px;font-size:14px;border-radius:12px;}
+      .er-actions{display:flex;flex-wrap:wrap;gap:8px;margin-top:14px;}
+      .er-actions button{margin:0;width:auto;flex:1 1 40%;min-height:44px;padding:8px 10px;font-size:14px;border-radius:12px;}
       .er-actions .er-btn-line{background:#fff;color:var(--er-teal);border:1px solid var(--er-teal);}
       .erRow{background:#f8fbfa;border:1px solid #dbe7e4 !important;border-radius:12px !important;padding:10px !important;}
+      .er-editbar{display:flex;align-items:center;justify-content:space-between;gap:8px;background:#fff7e6;border:1px solid #f3dcaa;color:#7a4f00;border-radius:12px;padding:8px 12px;margin-bottom:10px;font-size:14px;font-weight:600;}
+      .er-editbar button{margin:0;width:auto;flex:none;}
       @media print{
         body.er-print-mode *{visibility:hidden !important;}
         body.er-print-mode .er-card.er-printing,body.er-print-mode .er-card.er-printing *{visibility:visible !important;}
@@ -145,14 +150,15 @@
   }
 
   // ================= টেবিলের সারি (শিক্ষকের ফর্ম) =================
-  function rowHtml() {
+  function rowHtml(x) {
+    x = x || {};
     return `<div class="erRow" style="margin-bottom:8px;">
       <label>তারিখ</label>
-      <input type="date" class="erDate">
+      <input type="date" class="erDate" value="${esc(x.date || '')}">
       <label>বিষয়</label>
-      <input class="erSubject" placeholder="যেমন: আরবি প্রথম পত্র">
+      <input class="erSubject" placeholder="যেমন: আরবি প্রথম পত্র" value="${esc(x.subject || '')}">
       <label>সময়</label>
-      <input class="erTime" placeholder="যেমন: সকাল ১০:০০ - ১:০০">
+      <input class="erTime" placeholder="যেমন: সকাল ১০:০০ - ১:০০" value="${esc(x.time || '')}">
       <button type="button" class="small danger" onclick="erRemoveRow(this)" style="margin-top:6px;">সারি মুছুন</button>
     </div>`;
   }
@@ -243,19 +249,27 @@
     const rows = Array.isArray(r.rows) ? r.rows : [];
     const imgUrl = safeDataUrl(r.imageDataUrl);
     const stt = examStatus(rows);
-    const times = rows.map(x => String(x.time || '').trim());
-    const commonTime = (times.length && times.every(t => t && t === times[0])) ? times[0] : '';
+    const normT = t => String(t || '').replace(/\s*পর্যন্ত/g, ' পর্যন্ত').replace(/\s+/g, ' ').trim();
+    const keyT = t => String(t || '').replace(/\s+/g, '').replace(/পর্যন্ত/g, '');
+    const counts = {};
+    let commonKey = '', commonTime = '';
+    rows.forEach(x => { const k = keyT(x.time); if (k) counts[k] = (counts[k] || 0) + 1; });
+    Object.keys(counts).forEach(k => { if (!commonKey || counts[k] > counts[commonKey]) commonKey = k; });
+    if (commonKey && counts[commonKey] * 2 > rows.length) {
+      commonTime = normT((rows.find(x => keyT(x.time) === commonKey) || {}).time);
+    } else { commonKey = ''; }
+    const hasException = !!commonTime && rows.some(x => keyT(x.time) && keyT(x.time) !== commonKey);
 
     const stats = rows.length ? `<div class="er-stats">
         ${stt.stat ? `<div class="er-stat"><b>${esc(stt.stat.value)}</b><span>${esc(stt.stat.label)}</span></div>` : ''}
         <div class="er-stat"><b>${bn(rows.length)}টি</b><span>বিষয়</span></div>
-        ${commonTime ? `<div class="er-stat er-wide"><b>${esc(commonTime)}</b><span>প্রতিদিনের সময়</span></div>` : ''}
+        ${commonTime ? `<div class="er-stat er-wide"><b>${esc(commonTime)}</b><span>${hasException ? 'অধিকাংশ দিনের সময়' : 'প্রতিদিনের সময়'}</span></div>` : ''}
       </div>` : '';
 
     const items = rows.map((x, i) => {
       const p = dateParts(x.date);
       const cls = 'er-item' + (i === stt.nextI ? ' er-next' : '') + (stt.df[i] < 0 ? ' er-past' : '');
-      const timeChip = (!commonTime && x.time) ? `<span class="er-time">${esc(x.time)}</span>` : '';
+      const timeChip = (keyT(x.time) && keyT(x.time) !== commonKey) ? `<span class="er-time">${esc(normT(x.time))}</span>` : '';
       return `<div class="${cls}">
         <div class="er-dotcol"><div class="er-dot"></div></div>
         <div class="er-row">
@@ -284,7 +298,7 @@
         <div class="er-actions">
           <button type="button" class="er-btn-line" onclick="erPrint('${jsq(id)}')">প্রিন্ট / PDF</button>
           <button type="button" onclick="erShare('${jsq(id)}')">শেয়ার</button>
-          ${isTeacher ? `<button type="button" class="danger" onclick="deleteExamRoutine('${jsq(id)}')">মুছুন</button>` : ''}
+          ${isTeacher ? `<button type="button" class="er-btn-line" onclick="editExamRoutine('${jsq(id)}')">সম্পাদনা</button><button type="button" class="danger" onclick="deleteExamRoutine('${jsq(id)}')">মুছুন</button>` : ''}
         </div>
       </div>
     </div>`;
@@ -327,7 +341,8 @@
       const classOpts = classes.map(c => `<option value="${esc(c)}">${esc(c)}</option>`).join('');
       html += `
         <div class="card">
-          <h2>নতুন পরীক্ষার রুটিন দিন</h2>
+          <h2 id="erFormTitle">নতুন পরীক্ষার রুটিন দিন</h2>
+          <div id="erEditBar"></div>
           <label>শ্রেণি</label>
           <select id="erClass">${classOpts || '<option value="">কোনো শ্রেণি পাওয়া যায়নি, আগে শিক্ষার্থী যোগ করুন</option>'}</select>
           <label>পরীক্ষার নাম</label>
@@ -337,6 +352,7 @@
           <button type="button" class="secondary small" onclick="erAddRow()">+ আরেকটি বিষয় যোগ করুন</button>
           <label style="margin-top:12px;">রুটিনের ছবি (ঐচ্ছিক, হাতে লেখা রুটিন)</label>
           <input type="file" id="erImage" accept="image/*">
+          <div id="erImgInfo"></div>
           <label>বিশেষ নির্দেশনা (ঐচ্ছিক)</label>
           <textarea id="erNote" rows="2" placeholder="যেমন: প্রবেশপত্র সাথে আনতে হবে"></textarea>
           <p id="erError" class="muted" style="color:#dc2626;"></p>
@@ -345,10 +361,10 @@
         <div class="card">
           <h2>দেওয়া রুটিনের তালিকা</h2>
           <div id="erFilterWrap"></div>
-          <div id="erWrap">লোড হচ্ছে...</div>
-        </div>`;
+        </div>
+        <div id="erWrap">লোড হচ্ছে...</div>`;
     } else {
-      html += `<div class="card"><h2>পরীক্ষার রুটিন</h2><div id="erWrap">লোড হচ্ছে...</div></div>`;
+      html += `<h2 style="margin:4px 4px 12px;">পরীক্ষার রুটিন</h2><div id="erWrap">লোড হচ্ছে...</div>`;
     }
     setScreen(html);
 
@@ -356,6 +372,7 @@
       const fw = document.getElementById('erFilterWrap');
       if (fw) fw.innerHTML = classFilterDropdownHtml(examClassFilter, 'onExamClassFilterChange');
     }
+    if (isTeacher && erEditId && erCache[erEditId]) fillEditForm(erCache[erEditId]);
 
     if (examUnsub) { examUnsub(); examUnsub = null; }
 
@@ -393,6 +410,43 @@
     });
   }
 
+  // ================= সম্পাদনা =================
+  function fillEditForm(r) {
+    const sel = document.getElementById('erClass');
+    if (sel) {
+      if (!Array.from(sel.options).some(o => o.value === r.className)) {
+        sel.insertAdjacentHTML('beforeend', `<option value="${esc(r.className)}">${esc(r.className)}</option>`);
+      }
+      sel.value = r.className;
+    }
+    const nm = document.getElementById('erExamName'); if (nm) nm.value = r.examName || '';
+    const nt = document.getElementById('erNote'); if (nt) nt.value = r.note || '';
+    const box = document.getElementById('erRows');
+    const rows = Array.isArray(r.rows) ? r.rows : [];
+    if (box) box.innerHTML = rows.length ? rows.map(x => rowHtml(x)).join('') : rowHtml();
+    const title = document.getElementById('erFormTitle'); if (title) title.textContent = 'রুটিন সম্পাদনা করুন';
+    const bar = document.getElementById('erEditBar');
+    if (bar) bar.innerHTML = `<div class="er-editbar"><span>সম্পাদনা চলছে: ${esc(r.examName || '')}</span><button type="button" class="small secondary" onclick="cancelExamEdit()">বাতিল</button></div>`;
+    const info = document.getElementById('erImgInfo');
+    if (info && safeDataUrl(r.imageDataUrl)) {
+      info.innerHTML = `<p class="muted">বর্তমানে একটি ছবি আছে। নতুন ছবি বাছলে সেটি বদলে যাবে।</p>
+        <label style="display:flex;align-items:center;gap:8px;font-weight:400;"><input type="checkbox" id="erRemoveImg" style="width:auto;"> বর্তমান ছবিটি মুছে ফেলুন</label>`;
+    }
+    const btn = document.getElementById('erSubmitBtn'); if (btn) btn.textContent = 'পরিবর্তন সংরক্ষণ করুন';
+  }
+
+  window.editExamRoutine = function (id) {
+    if (!erCache[id]) return;
+    erEditId = id;
+    renderExamScreen(true);
+    window.scrollTo({ top: 0, behavior: 'smooth' });
+  };
+
+  window.cancelExamEdit = function () {
+    erEditId = null;
+    renderExamScreen(true);
+  };
+
   window.onExamClassFilterChange = function (value) {
     examClassFilter = value;
     renderExamScreen(true);
@@ -425,7 +479,12 @@
     rows.sort((a, b) => a.date.localeCompare(b.date));
 
     const file = fileInput && fileInput.files && fileInput.files[0];
-    if (rows.length === 0 && !file) {
+    const editId = erEditId;
+    const old = editId ? erCache[editId] : null;
+    const removeChk = document.getElementById('erRemoveImg');
+    const keepUrl = (old && !(removeChk && removeChk.checked)) ? (old.imageDataUrl || '') : '';
+    const keepType = keepUrl ? (old.imageType || '') : '';
+    if (rows.length === 0 && !file && !keepUrl) {
       if (errEl) errEl.textContent = 'টেবিলে অন্তত একটি বিষয় দিন অথবা রুটিনের ছবি দিন';
       return;
     }
@@ -437,20 +496,24 @@
         imageDataUrl: imageDataUrl || '', imageType: imageType || '',
         createdAt: Date.now()
       }).then(() => {
-        renderExamScreen(true);
+        // সম্পাদনা: নতুনটি সংরক্ষিত হওয়ার পর পুরনোটি মোছা হয় (শিক্ষার্থীরাও নতুন রুটিনের ব্যাজ পায়)
+        if (!old) { erEditId = null; renderExamScreen(true); return; }
+        return db.collection('examRoutines').doc(editId).delete()
+          .catch(e => { alert('নতুন রুটিন সংরক্ষিত হয়েছে, কিন্তু পুরনোটি মুছতে পারিনি। তালিকা থেকে পুরনোটি মুছে দিন: ' + e.message); })
+          .then(() => { erEditId = null; renderExamScreen(true); });
       }).catch(e => {
         if (errEl) errEl.textContent = 'সংরক্ষণ ব্যর্থ: ' + e.message;
         if (typeof showDiagBanner === 'function') showDiagBanner('পরীক্ষার রুটিন সংরক্ষণ ব্যর্থ: ' + e.message);
-        if (btn) { btn.disabled = false; btn.textContent = 'রুটিন প্রকাশ করুন'; }
+        if (btn) { btn.disabled = false; btn.textContent = erEditId ? 'পরিবর্তন সংরক্ষণ করুন' : 'রুটিন প্রকাশ করুন'; }
       });
     };
 
-    if (!file) { save(); return; }
+    if (!file) { save(keepUrl, keepType); return; }
 
     if (btn) { btn.disabled = true; btn.textContent = 'ছবি প্রস্তুত করা হচ্ছে...'; }
     compressImage(file, (dataUrl) => save(dataUrl, 'image/jpeg'), (e) => {
       if (errEl) errEl.textContent = e.message;
-      if (btn) { btn.disabled = false; btn.textContent = 'রুটিন প্রকাশ করুন'; }
+      if (btn) { btn.disabled = false; btn.textContent = erEditId ? 'পরিবর্তন সংরক্ষণ করুন' : 'রুটিন প্রকাশ করুন'; }
     });
   };
 
@@ -521,6 +584,7 @@
   const origTeacherTab = window.teacherTab;
   window.teacherTab = function (tab) {
     if (examUnsub) { examUnsub(); examUnsub = null; }
+    if (tab !== 'examroutine') erEditId = null;
     if (tab === 'examroutine') {
       if (typeof renderTeacherNav === 'function') renderTeacherNav('examroutine');
       renderExamScreen(true);
