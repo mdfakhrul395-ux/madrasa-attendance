@@ -26,6 +26,16 @@
   const canManage = () => !!(myTeacherIsAdmin || isSuperAdminUser);
   const skips = c => Array.isArray(c.skipMonths) ? c.skipMonths : [];
 
+  // ওপরের ট্যাব-বাটনগুলো যেন ফোনের পর্দায় ডানে কেটে না যায়, বরং পরের লাইনে নেমে আসে
+  function ensureStyle() {
+    if ($('scStyles')) return;
+    const st = document.createElement('style');
+    st.id = 'scStyles';
+    st.textContent = '.sc-tabs{display:flex!important;flex-wrap:wrap!important;gap:8px!important;}' +
+      '.sc-tabs button{flex:1 1 auto!important;width:auto!important;margin:0!important;white-space:nowrap!important;}';
+    document.head.appendChild(st);
+  }
+
   function msg(text, bad) {
     const el = $('scMsg');
     if (!el) return;
@@ -92,6 +102,7 @@
   }
 
   function renderScreen() {
+    ensureStyle();
     currentFeesIsTeacher = true;
     if (!MONTH_RE.test(C.month)) C.month = MONTH_RE.test(feesMonth) ? feesMonth : todayLocal().slice(0, 7);
     const students = studentsByClass(feesClassFilter);
@@ -102,7 +113,7 @@
     setScreen(`
       <div class="card">
         <h2>বেতন / ফি</h2>
-        <div class="row" style="margin-bottom:10px;">${tabsHtml()}</div>
+        <div class="row sc-tabs" style="margin-bottom:10px;">${tabsHtml()}</div>
         <label>মাস</label>
         <input type="month" id="scMonth" value="${esc(C.month)}" onchange="scSetMonth(this.value)">
         <div id="feesClassFilterWrap"></div>
@@ -324,7 +335,10 @@
   // ---------- বেতন পাতায় যুক্ত করা ----------
   function addTab() {
     const row = document.querySelector('#app .card .row');
-    if (!row || row.querySelector('[data-chg-tab]')) return;
+    if (!row) return;
+    ensureStyle();
+    row.classList.add('sc-tabs');
+    if (row.querySelector('[data-chg-tab]')) return;
     const b = document.createElement('button');
     b.className = 'small secondary';
     b.setAttribute('data-chg-tab', '1');
