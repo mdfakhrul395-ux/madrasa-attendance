@@ -5,8 +5,7 @@
  *
  * app.js ও অন্য কোনো ফাইল বদলাতে হয় না। প্রিন্ট: A4 আড়াআড়ি (Landscape) কাগজে এক পাতায় ৪টি কার্ড (২×২),
  * প্রতিটি ১৪০×৯৬ মিমি। হালকা জমিন ও পাতলা রঙিন হেডার, তাই কালি কম লাগে, সাধারণ প্রিন্টারেও স্পষ্ট আসে।
- * পিতার নাম আসে student_contacts থেকে; শিক্ষার্থীর ছবি আসে student_photos থেকে
- * (শুধু অ্যাডমিন শিক্ষকের লগইনে, কারণ ছবির নিয়মই তাই)।
+ * পিতার নাম আসে student_contacts থেকে। কার্ডে শিক্ষার্থীর ছবি নেই (আপাতত), তাই student_photos পড়া হয় না।
  * কার্ডের সাজসজ্জার লেখা এই ফোনের localStorage-এ মনে থাকে (Firestore-এ কিছু লেখা হয় না)।
  */
 (function () {
@@ -31,9 +30,6 @@
     const c = (typeof studentContactsCache !== 'undefined' && studentContactsCache[id]) || {};
     return String(c.fatherName || '').trim();
   };
-  const isAdmin = () => typeof myTeacherIsAdmin !== 'undefined' && myTeacherIsAdmin === true;
-  const JPEG_RE = /^data:image\/jpeg;base64,[A-Za-z0-9+\/=]+$/;
-  const okPhoto = p => typeof p === 'string' && p.length < 80000 && JPEG_RE.test(p);
 
   const DEFAULT_NOTE = [
     'পরীক্ষা শুরুর ৩০ মিনিট পূর্বে হলে প্রবেশ করতে হবে।',
@@ -42,12 +38,10 @@
     'পরীক্ষা চলাকালীন মোবাইল ফোন ব্যবহার সম্পূর্ণ নিষিদ্ধ।'
   ].join('\n');
 
-  const OLD_SIGS = 'শ্রেণি শিক্ষক, পরীক্ষা নিয়ন্ত্রক, অধ্যক্ষ';
-  const NEW_SIGS = 'শ্রেণি শিক্ষক, পরীক্ষা নিয়ন্ত্রক, সুপার/অধ্যক্ষ';
+  const OLD_SIGS = ['শ্রেণি শিক্ষক, পরীক্ষা নিয়ন্ত্রক, অধ্যক্ষ', 'শ্রেণি শিক্ষক, পরীক্ষা নিয়ন্ত্রক, সুপার/অধ্যক্ষ'];
+  const NEW_SIGS = 'শ্রেণি শিক্ষক, সুপার/অধ্যক্ষ';
   let acClass = '', acOpen = false, acOpen2 = false;
   let acOff = new Set();
-  const acPhotos = {};
-  const acAsked = new Set();
   let typeTimer = null;
   let cfg = null;
 
@@ -69,20 +63,20 @@
   function baseCfg() {
     const aman = /দারুল\s*আমান/.test(madrasaBrand().name);
     return {
-      exam: '', date: '', time: '',
+      exam: '', year: bn(new Date().getFullYear()), date: '', time: '',
       name: aman ? 'দারুল আমান মাদ্রাসা, মুছাপুর' : '',
       addr: aman ? 'মুছাপুর, কোম্পানীগঞ্জ, নোয়াখালী-৩৮০০' : '',
       cl: 'শ্রেণি',
       sigs: NEW_SIGS,
       tag: aman ? 'শিক্ষাই মানুষের শ্রেষ্ঠ সম্পদ' : '',
-      note: DEFAULT_NOTE, photo: true
+      note: DEFAULT_NOTE
     };
   }
   function loadCfg() {
     let saved = {};
     try { saved = JSON.parse(ls.get('ac3_cfg', '{}')) || {}; } catch (e) { saved = {}; }
     cfg = Object.assign(baseCfg(), saved);
-    if (cfg.sigs === OLD_SIGS) cfg.sigs = NEW_SIGS;   // আগের ডিফল্ট থাকলে নতুন পদে বদলে দেওয়া
+    if (OLD_SIGS.indexOf(cfg.sigs) > -1) cfg.sigs = NEW_SIGS;   // আগের ডিফল্ট থাকলে নতুন পদে বদলে দেওয়া
   }
   function saveCfg() { ls.set('ac3_cfg', JSON.stringify(cfg)); }
 
@@ -123,30 +117,27 @@
 .ac-ban{left:176px;top:53px;width:200px;height:34px}
 .ac-bt{left:176px;top:53px;width:200px;height:30px;text-align:center;color:#fff;font-size:21px;font-weight:800;line-height:30px;text-shadow:0 1px 3px rgba(0,0,0,.3)}
 .ac-or{width:36px;height:30px;top:55px}
-.ac-ex{left:16px;top:93px;width:520px;height:22px;display:flex;align-items:center;gap:8px}
+.ac-ex{left:16px;top:91px;width:520px;height:22px;display:flex;align-items:center;gap:8px}
 .ac-ex i{flex:1;height:1.5px;background:linear-gradient(90deg,transparent,var(--gd))}
 .ac-ex i:last-child{background:linear-gradient(270deg,transparent,var(--gd))}
 .ac-ex .ac-fit{width:auto;max-width:430px;text-align:center;font-size:15px;font-weight:800;color:var(--nv)}
-.ac-fs{left:20px;top:122px;width:392px;height:108px;display:flex;flex-direction:column;justify-content:space-between}
+.ac-fs{left:20px;top:118px;width:512px;height:100px;display:flex;flex-direction:column;justify-content:space-between}
 .ac-fs.full{width:512px}
-.ac-fl{display:flex;gap:18px;height:24px}
-.ac-fl.nar{margin-right:104px}
+.ac-fl{display:flex;gap:18px;height:23px}
 .ac-f{flex:1;min-width:0;display:flex;align-items:flex-end;gap:5px}
 .ac-f.w2{flex:1.5}
 .ac-f b{flex:none;font-size:13px;font-weight:800;color:var(--nv);white-space:nowrap;line-height:1.5}
 .ac-f span.v{flex:1;min-width:0;border-bottom:1.4px dotted #6f84b0;padding:0 4px 1px;height:21px;display:flex;align-items:flex-end}
 .ac-f .ac-fit{font-size:15px;font-weight:800;color:var(--ink);line-height:1.35}
-.ac-ph{left:436px;top:40px;width:96px;height:120px;box-sizing:border-box;border:3px solid var(--bl);border-radius:12px;background:linear-gradient(180deg,#e6f0ff,#cfe0fb);overflow:hidden;display:grid;place-items:center;box-shadow:0 0 0 2px #fff,0 0 0 4px var(--gd)}
-.ac-ph img{width:100%;height:100%;object-fit:cover;display:block}
-.ac-sg{left:20px;right:20px;top:240px;display:flex;gap:26px}
+.ac-sg{left:20px;right:20px;top:254px;display:flex;gap:26px}
 .ac-sg div{flex:1;border-top:1.3px solid var(--nv);text-align:center;font-size:11.5px;font-weight:800;color:var(--nv);padding-top:1px;white-space:nowrap;overflow:hidden}
-.ac-in{left:14px;top:274px;width:524px;height:80px;box-sizing:border-box;background:linear-gradient(180deg,#eef9ef,#e6f4ff);border:1.5px solid #8fcf9d;border-radius:12px;padding:17px 12px 2px}
+.ac-in{left:14px;top:280px;width:524px;height:74px;box-sizing:border-box;background:linear-gradient(180deg,#eef9ef,#e6f4ff);border:1.5px solid #8fcf9d;border-radius:12px;padding:16px 12px 2px}
 .ac-in h4{position:absolute;left:14px;top:-10px;margin:0;background:linear-gradient(90deg,#15803d,#22a55a);color:#fff;border-radius:99px;padding:1px 14px 2px;font-size:12.5px;font-weight:800;line-height:1.5;box-shadow:0 0 0 2px #fffdf6,0 0 0 3.5px var(--gd)}
 .ac-in ul{list-style:none;margin:0;padding:0}
 .ac-in li{display:flex;align-items:center;gap:6px;font-size:11px;font-weight:600;line-height:1.3;height:14px;overflow:hidden;white-space:nowrap}
 .ac-in li svg{flex:none}
-.ac-in.s5{padding-top:15px}
-.ac-in.s5 li{font-size:10.4px;height:12.6px}
+.ac-in.s5{padding-top:14px}
+.ac-in.s5 li{font-size:10.2px;height:12px}
 .ac-bd{left:0;top:358px;width:552px;height:18px;background:${PAT_W},linear-gradient(90deg,#1e3a8a,#1d63d6 55%,#15803d);color:#fff;text-align:center;font-size:11px;font-weight:700;line-height:18px}
 .ac-bd .ac-fit{text-align:center}
 
@@ -184,37 +175,33 @@
   const bannerSvg = '<svg class="ac-ban" viewBox="0 0 200 34"><defs><linearGradient id="acgb" x1="0" y1="0" x2="0" y2="1"><stop offset="0" stop-color="#22a55a"/><stop offset="1" stop-color="#0f6e34"/></linearGradient></defs><path d="M14 1.5 H186 Q186 9 198.5 11 V23 Q186 25 186 32.5 H14 Q14 25 1.5 23 V11 Q14 9 14 1.5Z" fill="url(#acgb)" stroke="#d4a73a" stroke-width="2.4" stroke-linejoin="round"/></svg>';
   const ornSvg = '<svg viewBox="0 0 36 30"><path d="M18 1 L35 15 L18 29 L1 15Z" fill="#16a34a" stroke="#d4a73a" stroke-width="1.6"/><path d="M18 7 L28 15 L18 23 L8 15Z" fill="none" stroke="#fff" stroke-width="1.4"/><circle cx="18" cy="15" r="2.6" fill="#fff"/></svg>';
   const chkSvg = '<svg width="12" height="12" viewBox="0 0 17 17"><circle cx="8.5" cy="8.5" r="8.5" fill="#15803d"/><path d="M4.6 8.8l2.7 2.7 5-5.4" fill="none" stroke="#fff" stroke-width="2.2" stroke-linecap="round" stroke-linejoin="round"/></svg>';
-  const silSvg = '<svg viewBox="0 0 90 106" width="70%" height="70%"><circle cx="45" cy="34" r="19" fill="#9fb3d6"/><path d="M8 106 Q10 66 45 62 Q80 66 82 106Z" fill="#9fb3d6"/></svg>';
   const logoDefault = '<svg viewBox="0 0 50 50" width="34" height="34"><path d="M10 38 Q25 6 40 38Z" fill="#15803d"/><rect x="9" y="38" width="32" height="4" rx="1.5" fill="#1e3a8a"/></svg>';
 
   // ================= কার্ড =================
   function cardHtml(s, b) {
     const father = fatherOf(s.id);
-    const photo = okPhoto(acPhotos[s.id]) ? acPhotos[s.id] : '';
     const cls = String(s.className || '').trim();
     const clsText = cls && !/শ্রেণি/.test(cls) && /^শ্রেণি$/.test(cfg.cl) ? cls + ' শ্রেণি' : cls;
     const nameBn = (cfg.name || b.name || '').trim();
     const f = (label, val, w2) => `<div class="ac-f${w2 ? ' w2' : ''}"><b>${esc(label)} :</b><span class="v"><span class="ac-fit" data-fit="9" style="font-size:15px">${esc(val)}</span></span></div>`;
-    const P = !!cfg.photo;
-    const cx = P ? 250 : 276;            // শিরোনাম ব্লকের মাঝ-রেখা
-    const hw = P ? 356 : 468;            // নাম ও ঠিকানার চওড়া
-    const nar = i => (P && (i === 0 || (i === 1 && father))) ? ' nar' : '';
-    const rows = [`<div class="ac-fl${nar(0)}">${f('শিক্ষার্থীর নাম', s.name)}</div>`];
-    if (father) rows.push(`<div class="ac-fl${nar(1)}">${f('পিতার নাম', father)}</div>`);
-    rows.push(`<div class="ac-fl">${f(cfg.cl || 'শ্রেণি', clsText, true)}${f('রোল', s.roll ? bn(s.roll) : '')}</div>`);
+    const yr = String(cfg.year || '').trim();
+    let exam = String(cfg.exam || '').trim();
+    if (exam && yr && en(exam).indexOf(en(yr)) < 0) exam += ' ' + yr;   // "৩য় সেমিস্টার পরীক্ষা ২০২৬"
+    const rows = [`<div class="ac-fl">${f('শিক্ষার্থীর নাম', s.name)}</div>`];
+    if (father) rows.push(`<div class="ac-fl">${f('পিতার নাম', father)}</div>`);
+    rows.push(`<div class="ac-fl">${f(cfg.cl || 'শ্রেণি', clsText, true)}${f('রোল', s.roll ? bn(s.roll) : '')}${yr ? f('শিক্ষাবর্ষ', yr) : ''}</div>`);
     rows.push(`<div class="ac-fl">${f('পরীক্ষার তারিখ', cfg.date, true)}${cfg.time ? f('সময়', cfg.time) : ''}</div>`);
     const lines = noteLines();
     const sg = sigList();
     return `<div class="ac-card">
   <div class="ac-hd"></div>
   <div class="ac-logo">${b.logo ? `<img src="${esc(b.logo)}" alt="">` : logoDefault}</div>
-  ${nameBn ? `<div class="ac-nm" style="width:${hw}px"><span class="ac-fit" data-fit="14" style="font-size:27px;text-align:center">${esc(nameBn)}</span></div>` : ''}
-  ${cfg.addr ? `<div class="ac-ad" style="width:${hw}px"><span class="ac-fit" data-fit="8" style="font-size:12px;text-align:center">${esc(cfg.addr)}</span></div>` : ''}
-  <div class="ac-or" style="left:${cx - 142}px">${ornSvg}</div><div class="ac-or" style="left:${cx + 106}px">${ornSvg}</div>
-  ${bannerSvg.replace('class="ac-ban"', `class="ac-ban" style="left:${cx - 100}px"`)}<div class="ac-bt" style="left:${cx - 100}px">প্রবেশপত্র</div>
-  <div class="ac-ex" style="left:${P ? 70 : 16}px;width:${P ? 360 : 520}px"><i></i><span class="ac-fit" data-fit="9" style="font-size:15px">${esc(cfg.exam)}</span><i></i></div>
-  <div class="ac-fs full">${rows.join('')}</div>
-  ${P ? `<div class="ac-ph">${photo ? `<img src="${esc(photo)}" alt="">` : silSvg}</div>` : ''}
+  ${nameBn ? `<div class="ac-nm"><span class="ac-fit" data-fit="14" style="font-size:27px;text-align:center">${esc(nameBn)}</span></div>` : ''}
+  ${cfg.addr ? `<div class="ac-ad"><span class="ac-fit" data-fit="8" style="font-size:12px;text-align:center">${esc(cfg.addr)}</span></div>` : ''}
+  <div class="ac-or" style="left:134px">${ornSvg}</div><div class="ac-or" style="left:382px">${ornSvg}</div>
+  ${bannerSvg}<div class="ac-bt">প্রবেশপত্র</div>
+  <div class="ac-ex"><i></i><span class="ac-fit" data-fit="9" style="font-size:15px">${esc(exam)}</span><i></i></div>
+  <div class="ac-fs">${rows.join('')}</div>
   ${sg.length ? `<div class="ac-sg">${sg.map(t => `<div>${esc(t)}</div>`).join('')}</div>` : ''}
   ${lines.length ? `<div class="ac-in${lines.length > 4 ? ' s5' : ''}"><h4>নির্দেশনা</h4><ul>${lines.map(t => `<li>${chkSvg}<span>${esc(t)}</span></li>`).join('')}</ul></div>` : ''}
   <div class="ac-bd">${cfg.tag ? `<span class="ac-fit" data-fit="8" style="font-size:11px">${esc(cfg.tag)}</span>` : ''}</div>
@@ -261,18 +248,6 @@
     sh.style.setProperty('--wm', b.logo ? 'url("' + b.logo.replace(/"/g, '%22') + '")' : 'none');
     fit();
     fitText();
-    loadPhotos(c.picked);
-  }
-
-  function loadPhotos(list) {
-    if (!isAdmin() || !cfg.photo) return;
-    const need = list.filter(s => !acAsked.has(s.id));
-    if (!need.length) return;
-    need.forEach(s => acAsked.add(s.id));
-    Promise.all(need.map(s => db.collection('student_photos').doc(s.id).get()
-      .then(d => { acPhotos[s.id] = d.exists ? (d.data().photo || '') : ''; })
-      .catch(() => { acPhotos[s.id] = ''; })
-    )).then(() => { if (el('acSheet')) paintSheet(ctx()); });
   }
 
   function paintUi(c) {
@@ -283,7 +258,8 @@
     ui.innerHTML = `<h2>এডমিট কার্ড</h2>
       <label>শ্রেণি</label>
       <select onchange="acPickClass(this.value)">${c.classes.length ? c.classes.map(x => opt(x, x, x === acClass)).join('') : '<option value="">কোনো শ্রেণি নেই</option>'}</select>
-      ${inp('exam', 'পরীক্ষার নাম', 'যেমন: বার্ষিক পরীক্ষা ২০২৬ ইং')}
+      ${inp('exam', 'পরীক্ষার নাম', 'যেমন: ৩য় সেমিস্টার পরীক্ষা')}
+      ${inp('year', 'শিক্ষাবর্ষ (পরীক্ষার নামের পাশেও বসবে)', 'যেমন: ২০২৬')}
       ${inp('date', 'পরীক্ষার তারিখ (ঐচ্ছিক)', 'যেমন: ১৫ ডিসেম্বর ২০২৬ থেকে')}
       ${inp('time', 'পরীক্ষার সময় (ঐচ্ছিক)', 'যেমন: সকাল ১০:০০ টা')}
       <label>নির্দেশনা (প্রতি লাইনে একটি, সর্বোচ্চ ৫টি)</label>
@@ -293,9 +269,9 @@
         ${inp('name', 'মাদ্রাসার নাম (কার্ডের জন্য)', 'ফাঁকা রাখলে সেটিংসের নাম আসবে')}
         ${inp('addr', 'ঠিকানা ও মোবাইল (হেডারের নিচের লাইন)', 'যেমন: মুছাপুর, নোয়াখালী, মোবাইল: ০১৭…')}
         ${inp('cl', 'শ্রেণির লেবেল', 'শ্রেণি অথবা জামায়াত')}
-        ${inp('sigs', 'স্বাক্ষরের পদ (কমা দিয়ে, সর্বোচ্চ ৩টি)', 'শ্রেণি শিক্ষক, হিসাবরক্ষক, সুপার/অধ্যক্ষ')}
+        ${inp('sigs', 'স্বাক্ষরের পদ (কমা দিয়ে, সর্বোচ্চ ৩টি)', 'শ্রেণি শিক্ষক, সুপার/অধ্যক্ষ')}
         ${inp('tag', 'নিচের লাইনের লেখা (ঐচ্ছিক)', '')}
-        <label class="ac-row" style="margin-top:10px;"><input type="checkbox" ${cfg.photo ? 'checked' : ''} onchange="acCfg('photo',this.checked);acRepaint()"><span>শিক্ষার্থীর ছবির ঘর দেখান</span></label>
+        
       </details>
       <details${acOpen ? ' open' : ''} ontoggle="acSetOpen(this.open)">
         <summary>শিক্ষার্থী বাছাই (${bn(c.picked.length)}/${bn(c.students.length)})</summary>
@@ -303,7 +279,7 @@
         <div class="ac-stulist">${c.students.map(s => `<label class="ac-row"><input type="checkbox" ${acOff.has(s.id) ? '' : 'checked'} onchange="acTog('${jsq(s.id)}')"><span>${esc(s.name)}</span><small>${s.roll ? 'রোল ' + esc(bn(s.roll)) : ''}</small></label>`).join('') || '<p class="muted">এই শ্রেণিতে কোনো শিক্ষার্থী নেই</p>'}</div>
       </details>
       <p id="acSum" class="ac-sum"></p>
-      <p class="ac-hint" style="margin:0 2px 10px;">প্রিন্টের সময় কাগজ A4 আড়াআড়ি (Landscape), স্কেল ১০০% রাখবেন।${isAdmin() ? '' : ' শিক্ষার্থীর ছবি শুধু অ্যাডমিন শিক্ষকের লগইনে আসে।'}</p>
+      <p class="ac-hint" style="margin:0 2px 10px;">প্রিন্টের সময় কাগজ A4 আড়াআড়ি (Landscape), স্কেল ১০০% রাখবেন।</p>
       <button id="acPrintBtn" onclick="acPrint()">প্রিন্ট / PDF করুন</button>`;
   }
 
