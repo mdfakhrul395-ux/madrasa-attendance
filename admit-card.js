@@ -65,7 +65,7 @@
     return {
       exam: '', year: bn(new Date().getFullYear()), date: '', time: '',
       name: aman ? 'দারুল আমান মাদ্রাসা, মুছাপুর' : '',
-      addr: aman ? 'মুছাপুর, কোম্পানীগঞ্জ, নোয়াখালী-৩৮০০' : '',
+      addr: aman ? 'মুছাপুর, কোম্পানীগঞ্জ, নোয়াখালী' : '',
       cl: 'শ্রেণি',
       sigs: NEW_SIGS,
       tag: aman ? 'শিক্ষাই মানুষের শ্রেষ্ঠ সম্পদ' : '',
@@ -76,7 +76,8 @@
     let saved = {};
     try { saved = JSON.parse(ls.get('ac3_cfg', '{}')) || {}; } catch (e) { saved = {}; }
     cfg = Object.assign(baseCfg(), saved);
-    if (OLD_SIGS.indexOf(cfg.sigs) > -1) cfg.sigs = NEW_SIGS;   // আগের ডিফল্ট থাকলে নতুন পদে বদলে দেওয়া
+    if (OLD_SIGS.indexOf(cfg.sigs) > -1) cfg.sigs = NEW_SIGS;
+    if (cfg.addr === 'মুছাপুর, কোম্পানীগঞ্জ, নোয়াখালী-৩৮০০') cfg.addr = 'মুছাপুর, কোম্পানীগঞ্জ, নোয়াখালী';   // আগের ডিফল্টের পোস্টকোড বাদ   // আগের ডিফল্ট থাকলে নতুন পদে বদলে দেওয়া
   }
   function saveCfg() { ls.set('ac3_cfg', JSON.stringify(cfg)); }
 

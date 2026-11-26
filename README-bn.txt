@@ -5,7 +5,7 @@
 
   1) admit-card.js      — নতুন ফাইল
   2) index.html         — শুধু একটি লাইন যোগ হয়েছে (admit-card.js এর script ট্যাগ)
-  3) service-worker.js  — admit-card.js তালিকায় যোগ, CACHE_NAME v76 থেকে v78
+  3) service-worker.js  — admit-card.js তালিকায় যোগ, CACHE_NAME v76 থেকে v79
 
 ব্যবহার:
 "আরও" মেনু > এডমিট কার্ড > শ্রেণি বেছে পরীক্ষার নাম লিখুন > "প্রিন্ট / PDF করুন"।
