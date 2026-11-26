@@ -113,8 +113,8 @@
 .ac-hd{left:0;top:0;width:552px;height:66px;background:${PAT_W},linear-gradient(100deg,#1e3a8a 0%,#1d63d6 58%,#0f8f86 100%)}
 .ac-logo{left:12px;top:8px;width:50px;height:50px;border-radius:50%;background:#fff;box-shadow:0 0 0 2.5px var(--gd);overflow:hidden;display:grid;place-items:center}
 .ac-logo img{width:100%;height:100%;object-fit:contain;padding:3px;box-sizing:border-box}
-.ac-nm{left:72px;top:6px;width:468px;height:32px;text-align:center;color:#fff;font-size:27px;font-weight:800;line-height:1.2;text-shadow:0 2px 5px rgba(0,0,0,.3)}
-.ac-ad{left:72px;top:39px;width:468px;height:18px;text-align:center;color:#e3efff;font-size:12px;font-weight:600;line-height:1.4}
+.ac-nm{left:66px;top:6px;width:420px;height:32px;text-align:center;color:#fff;font-size:27px;font-weight:800;line-height:1.2;text-shadow:0 2px 5px rgba(0,0,0,.3)}
+.ac-ad{left:66px;top:39px;width:420px;height:18px;text-align:center;color:#e3efff;font-size:12px;font-weight:600;line-height:1.4}
 .ac-ban{left:176px;top:53px;width:200px;height:34px}
 .ac-bt{left:176px;top:53px;width:200px;height:30px;text-align:center;color:#fff;font-size:21px;font-weight:800;line-height:30px;text-shadow:0 1px 3px rgba(0,0,0,.3)}
 .ac-or{width:36px;height:30px;top:55px}
