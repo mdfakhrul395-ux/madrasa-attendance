@@ -42,6 +42,8 @@
     'পরীক্ষা চলাকালীন মোবাইল ফোন ব্যবহার সম্পূর্ণ নিষিদ্ধ।'
   ].join('\n');
 
+  const OLD_SIGS = 'শ্রেণি শিক্ষক, পরীক্ষা নিয়ন্ত্রক, অধ্যক্ষ';
+  const NEW_SIGS = 'শ্রেণি শিক্ষক, পরীক্ষা নিয়ন্ত্রক, সুপার/অধ্যক্ষ';
   let acClass = '', acOpen = false, acOpen2 = false;
   let acOff = new Set();
   const acPhotos = {};
@@ -71,7 +73,7 @@
       name: aman ? 'দারুল আমান মাদ্রাসা, মুছাপুর' : '',
       addr: aman ? 'মুছাপুর, কোম্পানীগঞ্জ, নোয়াখালী-৩৮০০' : '',
       cl: 'শ্রেণি',
-      sigs: 'শ্রেণি শিক্ষক, পরীক্ষা নিয়ন্ত্রক, অধ্যক্ষ',
+      sigs: NEW_SIGS,
       tag: aman ? 'শিক্ষাই মানুষের শ্রেষ্ঠ সম্পদ' : '',
       note: DEFAULT_NOTE, photo: true
     };
@@ -80,6 +82,7 @@
     let saved = {};
     try { saved = JSON.parse(ls.get('ac3_cfg', '{}')) || {}; } catch (e) { saved = {}; }
     cfg = Object.assign(baseCfg(), saved);
+    if (cfg.sigs === OLD_SIGS) cfg.sigs = NEW_SIGS;   // আগের ডিফল্ট থাকলে নতুন পদে বদলে দেওয়া
   }
   function saveCfg() { ls.set('ac3_cfg', JSON.stringify(cfg)); }
 
@@ -127,12 +130,13 @@
 .ac-fs{left:20px;top:122px;width:392px;height:108px;display:flex;flex-direction:column;justify-content:space-between}
 .ac-fs.full{width:512px}
 .ac-fl{display:flex;gap:18px;height:24px}
+.ac-fl.nar{margin-right:104px}
 .ac-f{flex:1;min-width:0;display:flex;align-items:flex-end;gap:5px}
 .ac-f.w2{flex:1.5}
 .ac-f b{flex:none;font-size:13px;font-weight:800;color:var(--nv);white-space:nowrap;line-height:1.5}
 .ac-f span.v{flex:1;min-width:0;border-bottom:1.4px dotted #6f84b0;padding:0 4px 1px;height:21px;display:flex;align-items:flex-end}
 .ac-f .ac-fit{font-size:15px;font-weight:800;color:var(--ink);line-height:1.35}
-.ac-ph{left:432px;top:120px;width:96px;height:112px;box-sizing:border-box;border:3px solid var(--bl);border-radius:12px;background:linear-gradient(180deg,#e6f0ff,#cfe0fb);overflow:hidden;display:grid;place-items:center;box-shadow:0 0 0 2px #fff,0 0 0 4px var(--gd)}
+.ac-ph{left:436px;top:40px;width:96px;height:120px;box-sizing:border-box;border:3px solid var(--bl);border-radius:12px;background:linear-gradient(180deg,#e6f0ff,#cfe0fb);overflow:hidden;display:grid;place-items:center;box-shadow:0 0 0 2px #fff,0 0 0 4px var(--gd)}
 .ac-ph img{width:100%;height:100%;object-fit:cover;display:block}
 .ac-sg{left:20px;right:20px;top:240px;display:flex;gap:26px}
 .ac-sg div{flex:1;border-top:1.3px solid var(--nv);text-align:center;font-size:11.5px;font-weight:800;color:var(--nv);padding-top:1px;white-space:nowrap;overflow:hidden}
@@ -191,8 +195,12 @@
     const clsText = cls && !/শ্রেণি/.test(cls) && /^শ্রেণি$/.test(cfg.cl) ? cls + ' শ্রেণি' : cls;
     const nameBn = (cfg.name || b.name || '').trim();
     const f = (label, val, w2) => `<div class="ac-f${w2 ? ' w2' : ''}"><b>${esc(label)} :</b><span class="v"><span class="ac-fit" data-fit="9" style="font-size:15px">${esc(val)}</span></span></div>`;
-    const rows = [`<div class="ac-fl">${f('শিক্ষার্থীর নাম', s.name)}</div>`];
-    if (father) rows.push(`<div class="ac-fl">${f('পিতার নাম', father)}</div>`);
+    const P = !!cfg.photo;
+    const cx = P ? 250 : 276;            // শিরোনাম ব্লকের মাঝ-রেখা
+    const hw = P ? 356 : 468;            // নাম ও ঠিকানার চওড়া
+    const nar = i => (P && (i === 0 || (i === 1 && father))) ? ' nar' : '';
+    const rows = [`<div class="ac-fl${nar(0)}">${f('শিক্ষার্থীর নাম', s.name)}</div>`];
+    if (father) rows.push(`<div class="ac-fl${nar(1)}">${f('পিতার নাম', father)}</div>`);
     rows.push(`<div class="ac-fl">${f(cfg.cl || 'শ্রেণি', clsText, true)}${f('রোল', s.roll ? bn(s.roll) : '')}</div>`);
     rows.push(`<div class="ac-fl">${f('পরীক্ষার তারিখ', cfg.date, true)}${cfg.time ? f('সময়', cfg.time) : ''}</div>`);
     const lines = noteLines();
@@ -200,13 +208,13 @@
     return `<div class="ac-card">
   <div class="ac-hd"></div>
   <div class="ac-logo">${b.logo ? `<img src="${esc(b.logo)}" alt="">` : logoDefault}</div>
-  ${nameBn ? `<div class="ac-nm"><span class="ac-fit" data-fit="14" style="font-size:27px;text-align:center">${esc(nameBn)}</span></div>` : ''}
-  ${cfg.addr ? `<div class="ac-ad"><span class="ac-fit" data-fit="8" style="font-size:12px;text-align:center">${esc(cfg.addr)}</span></div>` : ''}
-  <div class="ac-or" style="left:134px">${ornSvg}</div><div class="ac-or" style="left:382px">${ornSvg}</div>
-  ${bannerSvg}<div class="ac-bt">প্রবেশপত্র</div>
-  <div class="ac-ex"><i></i><span class="ac-fit" data-fit="9" style="font-size:15px">${esc(cfg.exam)}</span><i></i></div>
-  <div class="ac-fs${cfg.photo ? '' : ' full'}">${rows.join('')}</div>
-  ${cfg.photo ? `<div class="ac-ph">${photo ? `<img src="${esc(photo)}" alt="">` : silSvg}</div>` : ''}
+  ${nameBn ? `<div class="ac-nm" style="width:${hw}px"><span class="ac-fit" data-fit="14" style="font-size:27px;text-align:center">${esc(nameBn)}</span></div>` : ''}
+  ${cfg.addr ? `<div class="ac-ad" style="width:${hw}px"><span class="ac-fit" data-fit="8" style="font-size:12px;text-align:center">${esc(cfg.addr)}</span></div>` : ''}
+  <div class="ac-or" style="left:${cx - 142}px">${ornSvg}</div><div class="ac-or" style="left:${cx + 106}px">${ornSvg}</div>
+  ${bannerSvg.replace('class="ac-ban"', `class="ac-ban" style="left:${cx - 100}px"`)}<div class="ac-bt" style="left:${cx - 100}px">প্রবেশপত্র</div>
+  <div class="ac-ex" style="left:${P ? 70 : 16}px;width:${P ? 360 : 520}px"><i></i><span class="ac-fit" data-fit="9" style="font-size:15px">${esc(cfg.exam)}</span><i></i></div>
+  <div class="ac-fs full">${rows.join('')}</div>
+  ${P ? `<div class="ac-ph">${photo ? `<img src="${esc(photo)}" alt="">` : silSvg}</div>` : ''}
   ${sg.length ? `<div class="ac-sg">${sg.map(t => `<div>${esc(t)}</div>`).join('')}</div>` : ''}
   ${lines.length ? `<div class="ac-in${lines.length > 4 ? ' s5' : ''}"><h4>নির্দেশনা</h4><ul>${lines.map(t => `<li>${chkSvg}<span>${esc(t)}</span></li>`).join('')}</ul></div>` : ''}
   <div class="ac-bd">${cfg.tag ? `<span class="ac-fit" data-fit="8" style="font-size:11px">${esc(cfg.tag)}</span>` : ''}</div>
@@ -285,7 +293,7 @@
         ${inp('name', 'মাদ্রাসার নাম (কার্ডের জন্য)', 'ফাঁকা রাখলে সেটিংসের নাম আসবে')}
         ${inp('addr', 'ঠিকানা ও মোবাইল (হেডারের নিচের লাইন)', 'যেমন: মুছাপুর, নোয়াখালী, মোবাইল: ০১৭…')}
         ${inp('cl', 'শ্রেণির লেবেল', 'শ্রেণি অথবা জামায়াত')}
-        ${inp('sigs', 'স্বাক্ষরের পদ (কমা দিয়ে, সর্বোচ্চ ৩টি)', 'শ্রেণি শিক্ষক, হিসাবরক্ষক, মুহতামিম')}
+        ${inp('sigs', 'স্বাক্ষরের পদ (কমা দিয়ে, সর্বোচ্চ ৩টি)', 'শ্রেণি শিক্ষক, হিসাবরক্ষক, সুপার/অধ্যক্ষ')}
         ${inp('tag', 'নিচের লাইনের লেখা (ঐচ্ছিক)', '')}
         <label class="ac-row" style="margin-top:10px;"><input type="checkbox" ${cfg.photo ? 'checked' : ''} onchange="acCfg('photo',this.checked);acRepaint()"><span>শিক্ষার্থীর ছবির ঘর দেখান</span></label>
       </details>
