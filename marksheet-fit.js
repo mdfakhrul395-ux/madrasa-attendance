@@ -3,6 +3,8 @@
 //  ১) গ্রেড "A+" / "A-" এখন এক লাইনে সুন্দর পিল-ব্যাজ হয়ে দেখায়
 //  ২) সবগুলো কলাম স্ক্রিনের প্রস্থে ঢোকে — ডানে/বামে স্ক্রল লাগে না
 //  ৩) হিসাব, গ্রেড, GPA, প্রিন্ট — কোনো ডেটা বা লজিক বদলায় না (শুধু দেখানোর ধরন)
+//  ৪) প্রিন্টে "চূড়ান্ত ফলাফল" থাকলে পাতার উপর-নিচের মার্জিন কমিয়ে পুরো মার্কশিট এক পাতায় আঁটানো হয়
+//     (সামান্য ছোট করে; খুব বেশি ছোট করতে হলে আগের মতো চূড়ান্ত ফলাফল পুরোটা ২য় পাতায় যায়)
 // লোড ক্রম: index.html-এ সবার শেষে (marks-split.js এর পরে):
 //   <script src="marksheet-fit.js"></script>
 (function () {
@@ -64,14 +66,15 @@
       /* চূড়ান্ত ফলাফল: জোর করে ২য় পেজ নয়। ১ম পেজে পুরোটা আঁটলে সেখানেই, না আঁটলে পুরো অংশ একসাথে ২য় পেজে */
       '#finalResultBox, #finalResultBox[data-split-break] { break-before: auto !important; page-break-before: auto !important; break-inside: avoid !important; page-break-inside: avoid !important; }' +
       '@media print {' +
-      '  @page { margin-bottom: 6mm; }' +
-      '  #marksheetPrintArea table[data-split] tbody td { padding-top: 4px !important; padding-bottom: 4px !important; line-height: 1.25; }' +
+      '  #marksheetPrintArea table[data-split] tbody td { padding-top: 3px !important; padding-bottom: 3px !important; line-height: 1.2; }' +
       '  #marksheetPrintArea table tr { break-inside: avoid; page-break-inside: avoid; }' +
-      '  #finalResultBox { margin-top: 10px !important; padding-top: 8px !important; }' +
-      '  #finalResultBox h3 { margin: 0 0 6px !important; }' +
-      '  #finalResultBox th, #finalResultBox td { padding: 4px 8px !important; }' +
-      '  #finalResultBox div[style*="flex-wrap"] { margin-top: 8px !important; gap: 6px !important; }' +
-      '  #finalResultBox div[style*="flex-wrap"] > div { padding: 6px !important; }' +
+      '  #finalResultBox { margin-top: 8px !important; padding-top: 6px !important; }' +
+      '  #finalResultBox h3 { margin: 0 0 5px !important; font-size: 15px !important; }' +
+      '  #finalResultBox th, #finalResultBox td { padding: 3px 8px !important; }' +
+      '  #finalResultBox td .muted { font-size: 10.5px !important; line-height: 1.2; }' +
+      '  #finalResultBox div[style*="flex-wrap"] { margin-top: 6px !important; gap: 6px !important; }' +
+      '  #finalResultBox div[style*="flex-wrap"] > div { padding: 5px !important; }' +
+      '  #finalResultBox div[style*="flex-wrap"] > div > div:last-child { font-size: 16px !important; }' +
       '  .ms-grade { box-shadow: none; }' +
       '}';
     document.head.appendChild(st);
@@ -168,4 +171,50 @@
     new MutationObserver(schedule).observe(app, { childList: true, subtree: true });
     schedule();
   })();
+
+  // ---------- প্রিন্টে চূড়ান্ত ফলাফলসহ এক পাতায় আঁটানো ----------
+  // শুধু তখনই কাজ করে যখন মার্কশিটে #finalResultBox আছে। অন্য প্রিন্টে কিছু বদলায় না।
+  var PG_TOP = 6, PG_BOTTOM = 6, PG_SIDE = 8;   // মিমি (উপর-নিচের মার্জিন কমানো হয়েছে)
+  var MIN_ZOOM = 0.72;                          // এর চেয়ে ছোট করা হবে না (লেখা পড়ার অযোগ্য হয়ে যাবে)
+  var MM = 96 / 25.4;
+  var printUndo = null;
+
+  function beforePrint() {
+    try {
+      afterPrint();
+      var area = document.getElementById('marksheetPrintArea');
+      if (!area || !document.getElementById('finalResultBox')) return;
+
+      var pg = document.createElement('style');
+      pg.id = 'msPageStyle';
+      pg.textContent = '@page { size: A4 portrait; margin: ' + PG_TOP + 'mm ' + PG_SIDE + 'mm ' + PG_BOTTOM + 'mm; }';
+      document.head.appendChild(pg);
+
+      // প্রিন্টের প্রস্থে মেপে দেখা (বোতাম ইত্যাদি .no-print অংশ বাদ দিয়ে)
+      var hidden = [];
+      area.querySelectorAll('.no-print').forEach(function (n) { hidden.push([n, n.style.display]); n.style.display = 'none'; });
+      var oldW = area.style.width, oldZ = area.style.zoom;
+      area.style.zoom = '';
+      area.style.width = ((210 - 2 * PG_SIDE) * MM) + 'px';
+      var h = area.offsetHeight;
+      var avail = (297 - PG_TOP - PG_BOTTOM - 4) * MM;   // ৪ মিমি নিরাপদ ফাঁক
+      area.style.width = oldW;
+      hidden.forEach(function (x) { x[0].style.display = x[1]; });
+
+      var applied = false;
+      if (h > avail) {
+        var z = Math.max(MIN_ZOOM, Math.floor((avail / h) * 97) / 100);
+        if (z < 1) { area.style.zoom = String(z); applied = true; }
+      }
+      printUndo = function () {
+        if (pg.parentNode) pg.parentNode.removeChild(pg);
+        if (applied) area.style.zoom = oldZ;
+      };
+    } catch (e) { console.error('[marksheet-fit] print', e); }
+  }
+  function afterPrint() {
+    if (printUndo) { try { printUndo(); } catch (e) { /* ignore */ } printUndo = null; }
+  }
+  window.addEventListener('beforeprint', beforePrint);
+  window.addEventListener('afterprint', afterPrint);
 })();
