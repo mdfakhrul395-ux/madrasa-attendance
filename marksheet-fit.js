@@ -3,8 +3,8 @@
 //  ১) গ্রেড "A+" / "A-" এখন এক লাইনে সুন্দর পিল-ব্যাজ হয়ে দেখায়
 //  ২) সবগুলো কলাম স্ক্রিনের প্রস্থে ঢোকে — ডানে/বামে স্ক্রল লাগে না
 //  ৩) হিসাব, গ্রেড, GPA, প্রিন্ট — কোনো ডেটা বা লজিক বদলায় না (শুধু দেখানোর ধরন)
-//  ৪) প্রিন্টে "চূড়ান্ত ফলাফল" থাকলে পাতার উপর-নিচের মার্জিন কমিয়ে পুরো মার্কশিট এক পাতায় আঁটানো হয়
-//     (সামান্য ছোট করে; খুব বেশি ছোট করতে হলে আগের মতো চূড়ান্ত ফলাফল পুরোটা ২য় পাতায় যায়)
+//  ৪) প্রিন্টে "চূড়ান্ত ফলাফল" থাকলে পাতার উপর-নিচের মার্জিন কমিয়ে পুরো মার্কশিট এক পাতায় আঁটানো হয়,
+//     আর পাতার প্রস্থ ও উচ্চতা অনুযায়ী বড় করে (লেখা বড় ও স্পষ্ট) পাতা ভরে ছাপা হয়
 // লোড ক্রম: index.html-এ সবার শেষে (marks-split.js এর পরে):
 //   <script src="marksheet-fit.js"></script>
 (function () {
@@ -66,15 +66,15 @@
       /* চূড়ান্ত ফলাফল: জোর করে ২য় পেজ নয়। ১ম পেজে পুরোটা আঁটলে সেখানেই, না আঁটলে পুরো অংশ একসাথে ২য় পেজে */
       '#finalResultBox, #finalResultBox[data-split-break] { break-before: auto !important; page-break-before: auto !important; break-inside: avoid !important; page-break-inside: avoid !important; }' +
       '@media print {' +
-      '  #marksheetPrintArea table[data-split] tbody td { padding-top: 3px !important; padding-bottom: 3px !important; line-height: 1.2; }' +
+      '  #marksheetPrintArea { box-shadow: none !important; }' +
+      '  #marksheetPrintArea table[data-split] tbody td { padding-top: 4px !important; padding-bottom: 4px !important; line-height: 1.25; }' +
       '  #marksheetPrintArea table tr { break-inside: avoid; page-break-inside: avoid; }' +
-      '  #finalResultBox { margin-top: 8px !important; padding-top: 6px !important; }' +
-      '  #finalResultBox h3 { margin: 0 0 5px !important; font-size: 15px !important; }' +
-      '  #finalResultBox th, #finalResultBox td { padding: 3px 8px !important; }' +
-      '  #finalResultBox td .muted { font-size: 10.5px !important; line-height: 1.2; }' +
-      '  #finalResultBox div[style*="flex-wrap"] { margin-top: 6px !important; gap: 6px !important; }' +
-      '  #finalResultBox div[style*="flex-wrap"] > div { padding: 5px !important; }' +
-      '  #finalResultBox div[style*="flex-wrap"] > div > div:last-child { font-size: 16px !important; }' +
+      '  #finalResultBox { margin-top: 10px !important; padding-top: 8px !important; }' +
+      '  #finalResultBox h3 { margin: 0 0 6px !important; font-size: 15px !important; }' +
+      '  #finalResultBox th, #finalResultBox td { padding: 4px 8px !important; }' +
+      '  #finalResultBox td .muted { font-size: 11px !important; line-height: 1.25; }' +
+      '  #finalResultBox div[style*="flex-wrap"] { margin-top: 8px !important; gap: 8px !important; }' +
+      '  #finalResultBox div[style*="flex-wrap"] > div { padding: 6px !important; }' +
       '  .ms-grade { box-shadow: none; }' +
       '}';
     document.head.appendChild(st);
@@ -172,10 +172,14 @@
     schedule();
   })();
 
-  // ---------- প্রিন্টে চূড়ান্ত ফলাফলসহ এক পাতায় আঁটানো ----------
+  // ---------- প্রিন্টে চূড়ান্ত ফলাফলসহ এক পাতায় আঁটানো (পাতা ভরে, বড় ও স্পষ্ট) ----------
   // শুধু তখনই কাজ করে যখন মার্কশিটে #finalResultBox আছে। অন্য প্রিন্টে কিছু বদলায় না।
+  // মার্কশিটকে একটি নির্দিষ্ট প্রস্থে (DESIGN_W) সাজিয়ে তারপর পাতার প্রস্থ-উচ্চতায় আঁটে এমন মাপে বড়/ছোট করা হয়,
+  // তাই লেখা ঝাপসা হয় না (প্রিন্ট/PDF-এ ভেক্টর) আর টেবিলের গড়ন একই থাকে।
   var PG_TOP = 6, PG_BOTTOM = 6, PG_SIDE = 8;   // মিমি (উপর-নিচের মার্জিন কমানো হয়েছে)
-  var MIN_ZOOM = 0.72;                          // এর চেয়ে ছোট করা হবে না (লেখা পড়ার অযোগ্য হয়ে যাবে)
+  var DESIGN_W = 520;                           // মার্কশিটের নকশা-প্রস্থ (px)
+  var MAX_ZOOM = 1.45;                          // সর্বোচ্চ কতটা বড় করা হবে
+  var MIN_ZOOM = 0.72;                          // এর চেয়ে ছোট করা হবে না
   var MM = 96 / 25.4;
   var printUndo = null;
 
@@ -185,31 +189,40 @@
       var area = document.getElementById('marksheetPrintArea');
       if (!area || !document.getElementById('finalResultBox')) return;
 
+      var undo = [];
+      function setStyle(node, props) {
+        var oldv = {};
+        Object.keys(props).forEach(function (k) { oldv[k] = node.style[k]; node.style[k] = props[k]; });
+        undo.push(function () { Object.keys(oldv).forEach(function (k) { node.style[k] = oldv[k]; }); });
+      }
+
       var pg = document.createElement('style');
       pg.id = 'msPageStyle';
       pg.textContent = '@page { size: A4 portrait; margin: ' + PG_TOP + 'mm ' + PG_SIDE + 'mm ' + PG_BOTTOM + 'mm; }';
       document.head.appendChild(pg);
+      undo.push(function () { if (pg.parentNode) pg.parentNode.removeChild(pg); });
 
-      // প্রিন্টের প্রস্থে মেপে দেখা (বোতাম ইত্যাদি .no-print অংশ বাদ দিয়ে)
+      // উপরের মোড়কগুলোর প্রস্থ-সীমা/প্যাডিং প্রিন্টের সময় সরানো, যাতে মার্কশিট পুরো পাতার প্রস্থ পায়
+      for (var par = area.parentElement; par && par !== document.body && par !== document.documentElement; par = par.parentElement) {
+        setStyle(par, { maxWidth: 'none', paddingLeft: '0', paddingRight: '0', marginLeft: '0', marginRight: '0' });
+      }
+
+      // নির্দিষ্ট প্রস্থে সাজিয়ে উচ্চতা মাপা (বোতাম ইত্যাদি .no-print অংশ বাদ দিয়ে)
       var hidden = [];
       area.querySelectorAll('.no-print').forEach(function (n) { hidden.push([n, n.style.display]); n.style.display = 'none'; });
-      var oldW = area.style.width, oldZ = area.style.zoom;
-      area.style.zoom = '';
-      area.style.width = ((210 - 2 * PG_SIDE) * MM) + 'px';
-      var h = area.offsetHeight;
-      var avail = (297 - PG_TOP - PG_BOTTOM - 4) * MM;   // ৪ মিমি নিরাপদ ফাঁক
-      area.style.width = oldW;
+      setStyle(area, { width: DESIGN_W + 'px', maxWidth: 'none', marginLeft: 'auto', marginRight: 'auto', zoom: '' });
+      var h0 = area.offsetHeight || 1;
       hidden.forEach(function (x) { x[0].style.display = x[1]; });
 
-      var applied = false;
-      if (h > avail) {
-        var z = Math.max(MIN_ZOOM, Math.floor((avail / h) * 97) / 100);
-        if (z < 1) { area.style.zoom = String(z); applied = true; }
-      }
-      printUndo = function () {
-        if (pg.parentNode) pg.parentNode.removeChild(pg);
-        if (applied) area.style.zoom = oldZ;
-      };
+      var pageW = (210 - 2 * PG_SIDE) * MM;
+      var availH = (297 - PG_TOP - PG_BOTTOM) * MM;
+      var zw = (pageW * 0.97) / DESIGN_W;
+      var zh = (availH * 0.97) / h0;
+      var z = Math.max(MIN_ZOOM, Math.min(zw, zh, MAX_ZOOM));
+      z = Math.floor(z * 100) / 100;
+      area.style.zoom = String(z);
+
+      printUndo = function () { undo.reverse().forEach(function (f) { f(); }); };
     } catch (e) { console.error('[marksheet-fit] print', e); }
   }
   function afterPrint() {
