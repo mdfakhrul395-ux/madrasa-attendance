@@ -8,6 +8,9 @@
  * পিতার নাম আসে student_contacts থেকে। কার্ডে শিক্ষার্থীর ছবি নেই (আপাতত), তাই student_photos পড়া হয় না।
  * কার্ডের সাজসজ্জার লেখা (পরীক্ষার নাম, তারিখ, সময় ইত্যাদি) Firestore-এর admit_settings/{মাদ্রাসার আইডি} ডকুমেন্টে জমা থাকে,
  * তাই ফোন ও কম্পিউটার সব ডিভাইসে একই সেটিংস আসে। (ইন্টারনেট না থাকলে এই ডিভাইসের localStorage ব্যবহার হয়।)
+ *
+ * প্রিন্ট ফিক্স: প্রিন্টের সময় কার্ডগুলোর কপি সরাসরি <body>-তে (#acPrintRoot) বসে, তাই কম্পিউটারের
+ * ডেস্কটপ লেআউট (সাইডবার/র‍্যাপার) থাকলেও প্রিন্ট প্রিভিউ ফাঁকা আসে না।
  */
 (function () {
   'use strict';
@@ -172,12 +175,13 @@
 .ac-bd{left:0;top:358px;width:552px;height:18px;background:${PAT_W},linear-gradient(90deg,#1e3a8a,#1d63d6 55%,#15803d);color:#fff;text-align:center;font-size:11px;font-weight:700;line-height:18px}
 .ac-bd .ac-fit{text-align:center}
 
+/* প্রিন্ট: কার্ডের কপি সরাসরি <body>-র #acPrintRoot-এ থাকে, তাই #app বা ডেস্কটপ লেআউটের উপর নির্ভর করে না */
+#acPrintRoot{display:none}
 @media print{
-  body.ac-pm > :not(#app){display:none !important}
+  body.ac-pm > :not(#acPrintRoot){display:none !important}
   body.ac-pm{background:#fff !important;background-image:none !important;padding:0 !important;margin:0 !important}
-  body.ac-pm #app{padding:0 !important;margin:0 !important;max-width:none !important;background:none !important}
-  body.ac-pm .ac-ui,body.ac-pm .ac-pglbl{display:none !important}
-  body.ac-pm .ac-sheet{--pg:#fff;margin:0;padding:0}
+  body.ac-pm #acPrintRoot{display:block !important;margin:0;padding:0;background:#fff}
+  body.ac-pm .ac-pglbl{display:none !important}
   body.ac-pm .ac-page{display:grid;grid-template-columns:repeat(2,140mm);gap:5mm;justify-content:center;align-content:start;break-after:page;page-break-after:always}
   body.ac-pm .ac-page:last-child{break-after:auto;page-break-after:auto}
   body.ac-pm .ac-card{zoom:.9449 !important;box-shadow:none;break-inside:avoid;page-break-inside:avoid}
@@ -351,14 +355,27 @@
   };
   window.acPrint = function () {
     const sh = el('acSheet');
-    if (!sh || !sh.querySelector('.ac-card') || !cfg.exam.trim()) return;
+    if (!sh || !sh.querySelector('.ac-card')) { alert('আগে শিক্ষার্থী বাছাই করুন।'); return; }
+    if (!cfg.exam.trim()) { alert('প্রথমে পরীক্ষার নাম লিখুন।'); return; }
+    let root = el('acPrintRoot');
+    if (root) root.remove();
+    root = document.createElement('div');
+    root.id = 'acPrintRoot';
+    root.className = 'ac-wrap ac-sheet';
+    root.style.setProperty('--wm', sh.style.getPropertyValue('--wm'));
+    root.innerHTML = sh.innerHTML;
+    document.body.appendChild(root);
     document.body.classList.add('ac-pm');
     const pg = document.createElement('style');
     pg.textContent = '@page{size:A4 landscape;margin:5mm}';
     document.head.appendChild(pg);
-    const done = () => { document.body.classList.remove('ac-pm'); if (pg.parentNode) pg.parentNode.removeChild(pg); };
+    const done = () => {
+      document.body.classList.remove('ac-pm');
+      if (pg.parentNode) pg.parentNode.removeChild(pg);
+      if (root.parentNode) root.parentNode.removeChild(root);
+    };
     window.addEventListener('afterprint', done, { once: true });
-    setTimeout(() => { try { window.print(); } catch (e) { done(); } }, 150);
+    setTimeout(() => { try { window.print(); } catch (e) { done(); } }, 300);
   };
   window.addEventListener('resize', fit);
 
