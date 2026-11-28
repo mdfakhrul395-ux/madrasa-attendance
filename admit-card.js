@@ -6,7 +6,8 @@
  * app.js ও অন্য কোনো ফাইল বদলাতে হয় না। প্রিন্ট: A4 আড়াআড়ি (Landscape) কাগজে এক পাতায় ৪টি কার্ড (২×২),
  * প্রতিটি ১৪০×৯৬ মিমি। হালকা জমিন ও পাতলা রঙিন হেডার, তাই কালি কম লাগে, সাধারণ প্রিন্টারেও স্পষ্ট আসে।
  * পিতার নাম আসে student_contacts থেকে। কার্ডে শিক্ষার্থীর ছবি নেই (আপাতত), তাই student_photos পড়া হয় না।
- * কার্ডের সাজসজ্জার লেখা এই ফোনের localStorage-এ মনে থাকে (Firestore-এ কিছু লেখা হয় না)।
+ * কার্ডের সাজসজ্জার লেখা (পরীক্ষার নাম, তারিখ, সময় ইত্যাদি) Firestore-এর admit_settings/{মাদ্রাসার আইডি} ডকুমেন্টে জমা থাকে,
+ * তাই ফোন ও কম্পিউটার সব ডিভাইসে একই সেটিংস আসে। (ইন্টারনেট না থাকলে এই ডিভাইসের localStorage ব্যবহার হয়।)
  */
 (function () {
   'use strict';
@@ -43,6 +44,7 @@
   let acClass = '', acOpen = false, acOpen2 = false;
   let acOff = new Set();
   let typeTimer = null;
+  let saveTimer = null;
   let cfg = null;
 
   function madrasaBrand() {
@@ -72,14 +74,42 @@
       note: DEFAULT_NOTE
     };
   }
-  function loadCfg() {
-    let saved = {};
-    try { saved = JSON.parse(ls.get('ac3_cfg', '{}')) || {}; } catch (e) { saved = {}; }
-    cfg = Object.assign(baseCfg(), saved);
-    if (OLD_SIGS.indexOf(cfg.sigs) > -1) cfg.sigs = NEW_SIGS;
-    if (cfg.addr === 'মুছাপুর, কোম্পানীগঞ্জ, নোয়াখালী-৩৮০০') cfg.addr = 'মুছাপুর, কোম্পানীগঞ্জ, নোয়াখালী';   // আগের ডিফল্টের পোস্টকোড বাদ   // আগের ডিফল্ট থাকলে নতুন পদে বদলে দেওয়া
+
+  // ---------- সেটিংস: Firestore (সব ডিভাইসে একই) + localStorage (ব্যাকআপ) ----------
+  const cfgRef = () => {
+    const mid = (typeof madrasaId !== 'undefined' && madrasaId) || ls.get('madrasaId', 'madrasa-001');
+    return db.collection('admit_settings').doc(String(mid));
+  };
+  function fixCfg() {
+    if (OLD_SIGS.indexOf(cfg.sigs) > -1) cfg.sigs = NEW_SIGS;   // আগের ডিফল্ট থাকলে নতুন পদে বদলে দেওয়া
+    if (cfg.addr === 'মুছাপুর, কোম্পানীগঞ্জ, নোয়াখালী-৩৮০০') cfg.addr = 'মুছাপুর, কোম্পানীগঞ্জ, নোয়াখালী';   // আগের ডিফল্টের পোস্টকোড বাদ
   }
-  function saveCfg() { ls.set('ac3_cfg', JSON.stringify(cfg)); }
+  function loadCfg() {
+    let saved = null;
+    try { saved = JSON.parse(ls.get('ac3_cfg', 'null')); } catch (e) { saved = null; }
+    cfg = Object.assign(baseCfg(), saved || {});
+    fixCfg();
+    // সার্ভার থেকে আনা: ফোনে যা লেখা হয়েছে কম্পিউটারেও আসবে
+    cfgRef().get().then(d => {
+      const remote = d.exists ? (d.data() || {}).cfg : null;
+      if (remote && typeof remote === 'object') {
+        cfg = Object.assign(baseCfg(), remote);
+        fixCfg();
+        ls.set('ac3_cfg', JSON.stringify(cfg));
+        if (el('acUi')) paint();
+      } else if (saved) {
+        saveCfg();   // এই ডিভাইসে সেটিংস থাকলে প্রথমবার সার্ভারে তুলে দেওয়া
+      }
+    }).catch(e => console.warn('[admit-card] সেটিংস আনা যায়নি', e));
+  }
+  function saveCfg() {
+    ls.set('ac3_cfg', JSON.stringify(cfg));
+    clearTimeout(saveTimer);
+    saveTimer = setTimeout(() => {
+      cfgRef().set({ cfg: cfg, updatedAt: Date.now() }, { merge: true })
+        .catch(e => console.warn('[admit-card] সেটিংস সেভ হয়নি', e));
+    }, 800);
+  }
 
   // ================= ডিজাইন =================
   const PAT_W = "url(\"data:image/svg+xml,%3Csvg xmlns='http://www.w3.org/2000/svg' width='40' height='40' viewBox='0 0 40 40'%3E%3Cg fill='none' stroke='%23ffffff' stroke-opacity='.13'%3E%3Crect x='8' y='8' width='24' height='24'/%3E%3Crect x='8' y='8' width='24' height='24' transform='rotate(45 20 20)'/%3E%3C/g%3E%3C/svg%3E\")";

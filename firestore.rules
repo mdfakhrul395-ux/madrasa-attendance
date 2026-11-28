@@ -15,6 +15,7 @@ service cloud.firestore {
     // তালিকা না থাকলে পুরোনো classTeacherOf ধরা হয়)
     // হালনাগাদ (Nov 13): কোড দিয়ে যোগদান (pending) সার্ভারে বন্ধ — শিক্ষক অ্যাকাউন্ট এখন শুধু মাদ্রাসার অ্যাডমিন যুক্ত করতে পারেন
     // (নতুন মাদ্রাসা নিবন্ধনের পথ আগের মতোই আছে)
+    // হালনাগাদ (Nov 28): এডমিট কার্ডের সেটিংস সব ডিভাইসে একই রাখতে নতুন admit_settings কালেকশন
     // ======================================================================
 
     // ================= SUPER ADMIN =================
@@ -494,6 +495,18 @@ service cloud.firestore {
       allow read: if isTeacherAuth() && id == myMadrasaId();
       allow create, update: if isTeacherAuth() && id == myMadrasaId() &&
         request.resource.data.madrasaId == myMadrasaId();
+      allow delete: if false;
+    }
+
+    // ================= এডমিট কার্ডের সেটিংস (admit-card.js) =================
+    // পরীক্ষার নাম, তারিখ, সময়, নির্দেশনা ইত্যাদি। ডকের আইডি = মাদ্রাসার আইডি,
+    // তাই ফোন ও কম্পিউটারে একই সেটিংস আসে। এক মাদ্রাসা অন্য মাদ্রাসারটি পড়তে/লিখতে পারে না।
+    match /admit_settings/{id} {
+      allow read: if isTeacherAuth() && id == myMadrasaId();
+      allow create, update: if isTeacherAuth() && id == myMadrasaId() &&
+        request.resource.data.keys().hasOnly(['cfg', 'updatedAt']) &&
+        request.resource.data.cfg is map &&
+        request.resource.data.updatedAt is number;
       allow delete: if false;
     }
 
